@@ -1,5 +1,10 @@
 class Api::V1::OauthController < ApplicationController
-  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback]
+  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :test_route]
+  
+  # Test route to verify OAuth controller is loading
+  def test_route
+    render json: { message: 'OAuth controller is working!', timestamp: Time.current }
+  end
   
   private
   
