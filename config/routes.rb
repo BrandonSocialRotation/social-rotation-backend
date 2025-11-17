@@ -23,8 +23,7 @@ Rails.application.routes.draw do
       post 'auth/logout', to: 'auth#logout'
       post 'auth/refresh', to: 'auth#refresh'
       
-      # OAuth routes - TEST
-      get 'oauth/test', to: 'oauth#test_route'
+      # OAuth routes
       get 'oauth/facebook/login', to: 'oauth#facebook_login'
       get 'oauth/facebook/callback', to: 'oauth#facebook_callback'
       get 'oauth/twitter/login', to: 'oauth#twitter_login'
