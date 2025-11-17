@@ -15,31 +15,39 @@ class Api::V1::OauthController < ApplicationController
   # GET /api/v1/oauth/facebook/login
   # Initiates Facebook OAuth flow
   def facebook_login
-    # Generate state token for CSRF protection
-    state = SecureRandom.hex(16)
-    session[:oauth_state] = state
-    session[:user_id] = current_user.id
-    
-    # Facebook OAuth URL
-    app_id = ENV['FACEBOOK_APP_ID']
-    redirect_uri = "#{request.base_url}/api/v1/oauth/facebook/callback"
-    
-    permissions = [
-      'email',
-      'pages_manage_posts',
-      'pages_read_engagement',
-      'instagram_basic',
-      'instagram_content_publish',
-      'publish_video'
-    ].join(',')
-    
-    oauth_url = "https://www.facebook.com/v18.0/dialog/oauth?" \
-                "client_id=#{app_id}" \
-                "&redirect_uri=#{CGI.escape(redirect_uri)}" \
-                "&state=#{state}" \
-                "&scope=#{permissions}"
-    
-    render json: { oauth_url: oauth_url }
+    begin
+      # Generate state token for CSRF protection
+      state = SecureRandom.hex(16)
+      session[:oauth_state] = state
+      session[:user_id] = current_user.id
+      
+      # Facebook OAuth URL
+      app_id = ENV['FACEBOOK_APP_ID']
+      unless app_id
+        return render json: { error: 'Facebook App ID not configured' }, status: :internal_server_error
+      end
+      redirect_uri = "#{request.base_url}/api/v1/oauth/facebook/callback"
+      
+      permissions = [
+        'email',
+        'pages_manage_posts',
+        'pages_read_engagement',
+        'instagram_basic',
+        'instagram_content_publish',
+        'publish_video'
+      ].join(',')
+      
+      oauth_url = "https://www.facebook.com/v18.0/dialog/oauth?" \
+                  "client_id=#{app_id}" \
+                  "&redirect_uri=#{CGI.escape(redirect_uri)}" \
+                  "&state=#{state}" \
+                  "&scope=#{permissions}"
+      
+      render json: { oauth_url: oauth_url }
+    rescue => e
+      Rails.logger.error "Facebook OAuth login error: #{e.message}"
+      render json: { error: 'Failed to initiate Facebook OAuth', details: e.message }, status: :internal_server_error
+    end
   end
   
   # GET /api/v1/oauth/facebook/callback
@@ -184,23 +192,30 @@ class Api::V1::OauthController < ApplicationController
   # GET /api/v1/oauth/linkedin/login
   # Initiates LinkedIn OAuth flow
   def linkedin_login
-    state = SecureRandom.hex(16)
-    session[:oauth_state] = state
-    session[:user_id] = current_user.id
-    
-    client_id = ENV['LINKEDIN_CLIENT_ID']
-    raise 'LinkedIn Client ID not configured' unless client_id
-    # Use production callback URL for LinkedIn OAuth
-    redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/linkedin/callback' : 'https://social-rotation-frontend.onrender.com/linkedin/callback')
-    
-    oauth_url = "https://www.linkedin.com/oauth/v2/authorization?" \
-                "response_type=code" \
-                "&client_id=#{client_id}" \
-                "&redirect_uri=#{CGI.escape(redirect_uri)}" \
-                "&state=#{state}" \
-                "&scope=w_member_social"
-    
-    render json: { oauth_url: oauth_url }
+    begin
+      state = SecureRandom.hex(16)
+      session[:oauth_state] = state
+      session[:user_id] = current_user.id
+      
+      client_id = ENV['LINKEDIN_CLIENT_ID']
+      unless client_id
+        return render json: { error: 'LinkedIn Client ID not configured' }, status: :internal_server_error
+      end
+      # Use production callback URL for LinkedIn OAuth
+      redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/linkedin/callback' : 'https://social-rotation-frontend.onrender.com/linkedin/callback')
+      
+      oauth_url = "https://www.linkedin.com/oauth/v2/authorization?" \
+                  "response_type=code" \
+                  "&client_id=#{client_id}" \
+                  "&redirect_uri=#{CGI.escape(redirect_uri)}" \
+                  "&state=#{state}" \
+                  "&scope=w_member_social"
+      
+      render json: { oauth_url: oauth_url }
+    rescue => e
+      Rails.logger.error "LinkedIn OAuth login error: #{e.message}"
+      render json: { error: 'Failed to initiate LinkedIn OAuth', details: e.message }, status: :internal_server_error
+    end
   end
   
   # GET /api/v1/oauth/linkedin/callback
@@ -260,24 +275,31 @@ class Api::V1::OauthController < ApplicationController
   # GET /api/v1/oauth/google/login
   # Initiates Google OAuth flow
   def google_login
-    state = SecureRandom.hex(16)
-    session[:oauth_state] = state
-    session[:user_id] = current_user.id
-    
-    client_id = ENV['GOOGLE_CLIENT_ID']
-    raise 'Google Client ID not configured' unless client_id
-    # Use production callback URL for Google OAuth
-    redirect_uri = ENV['GOOGLE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/google/callback' : 'https://social-rotation-frontend.onrender.com/google/callback')
-    
-    oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" \
-                "client_id=#{client_id}" \
-                "&redirect_uri=#{CGI.escape(redirect_uri)}" \
-                "&response_type=code" \
-                "&scope=#{CGI.escape('https://www.googleapis.com/auth/business.manage')}" \
-                "&access_type=offline" \
-                "&state=#{state}"
-    
-    render json: { oauth_url: oauth_url }
+    begin
+      state = SecureRandom.hex(16)
+      session[:oauth_state] = state
+      session[:user_id] = current_user.id
+      
+      client_id = ENV['GOOGLE_CLIENT_ID']
+      unless client_id
+        return render json: { error: 'Google Client ID not configured' }, status: :internal_server_error
+      end
+      # Use production callback URL for Google OAuth
+      redirect_uri = ENV['GOOGLE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/google/callback' : 'https://social-rotation-frontend.onrender.com/google/callback')
+      
+      oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" \
+                  "client_id=#{client_id}" \
+                  "&redirect_uri=#{CGI.escape(redirect_uri)}" \
+                  "&response_type=code" \
+                  "&scope=#{CGI.escape('https://www.googleapis.com/auth/business.manage')}" \
+                  "&access_type=offline" \
+                  "&state=#{state}"
+      
+      render json: { oauth_url: oauth_url }
+    rescue => e
+      Rails.logger.error "Google OAuth login error: #{e.message}"
+      render json: { error: 'Failed to initiate Google OAuth', details: e.message }, status: :internal_server_error
+    end
   end
   
   # GET /api/v1/oauth/google/callback
