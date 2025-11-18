@@ -3,6 +3,8 @@ class Account < ApplicationRecord
   has_many :users, dependent: :nullify
   has_one :account_feature, dependent: :destroy
   has_many :rss_feeds, dependent: :destroy
+  belongs_to :plan, optional: true
+  has_one :subscription, dependent: :destroy
   
   # Validations
   validates :name, presence: true
@@ -28,14 +30,35 @@ class Account < ApplicationRecord
   
   # Check if account can add more users
   def can_add_user?
-    return true unless account_feature
-    users.active.count < account_feature.max_users
+    return true if super_admin_account?
+    
+    # Use plan limits if available, otherwise fall back to account_feature
+    max_users = plan&.max_users || account_feature&.max_users || 1
+    users.active.count < max_users
   end
   
   # Check if account can add more buckets
   def can_add_bucket?(user)
-    return true unless account_feature
-    user.buckets.count < account_feature.max_buckets
+    return true if super_admin_account?
+    
+    # Use plan limits if available, otherwise fall back to account_feature
+    max_buckets = plan&.max_buckets || account_feature&.max_buckets || 10
+    user.buckets.count < max_buckets
+  end
+  
+  # Check if account has active subscription
+  def has_active_subscription?
+    subscription&.active? || false
+  end
+  
+  # Get current subscription
+  def current_subscription
+    subscription if has_active_subscription?
+  end
+  
+  # Check if account is super admin (account_id = 0)
+  def super_admin_account?
+    id == 0
   end
   
   private

@@ -71,3 +71,6 @@ gem "aws-sdk-s3", "~> 1.200", require: false
 
 # XML parsing for RSS feeds (required in Ruby 3.0+)
 gem "rexml", "~> 3.2"
+
+# Stripe for payment processing
+gem "stripe", "~> 10.0"

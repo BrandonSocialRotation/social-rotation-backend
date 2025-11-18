@@ -8,6 +8,12 @@ Rails.application.routes.draw do
   # API Routes
   namespace :api do
     namespace :v1 do
+      get 'subscriptions/create'
+      get 'subscriptions/checkout_session'
+      get 'subscriptions/cancel'
+      get 'subscriptions/webhook'
+      get 'plans/index'
+      get 'plans/show'
       # Analytics (Instagram / Meta)
       get 'analytics/instagram/summary', to: 'analytics#instagram_summary'
       get 'analytics/instagram/timeseries', to: 'analytics#instagram_timeseries'
@@ -103,6 +109,18 @@ Rails.application.routes.draw do
       # Account management routes
       get 'account/features', to: 'accounts#features'
       patch 'account/features', to: 'accounts#update_features'
+      
+      # Plan management routes
+      resources :plans, only: [:index, :show]
+      
+      # Subscription routes
+      resources :subscriptions, only: [:show, :create] do
+        collection do
+          post 'checkout_session', to: 'subscriptions#checkout_session'
+          post 'cancel', to: 'subscriptions#cancel'
+          post 'webhook', to: 'subscriptions#webhook'
+        end
+      end
 
       # Image management routes
       resources :images, only: [:create]
