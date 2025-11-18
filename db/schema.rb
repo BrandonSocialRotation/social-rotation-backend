@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_10_24_192819) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_17_214408) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -39,6 +39,8 @@ ActiveRecord::Schema[7.1].define(version: 2025_10_24_192819) do
     t.text "privacy_policy"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "plan_id"
+    t.index ["plan_id"], name: "index_accounts_on_plan_id"
     t.index ["subdomain"], name: "index_accounts_on_subdomain", unique: true
   end
 
@@ -121,6 +123,26 @@ ActiveRecord::Schema[7.1].define(version: 2025_10_24_192819) do
     t.index ["front_image_id"], name: "index_market_items_on_front_image_id"
   end
 
+  create_table "plans", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "plan_type", null: false
+    t.string "stripe_price_id"
+    t.string "stripe_product_id"
+    t.integer "price_cents", default: 0
+    t.integer "max_locations", default: 1
+    t.integer "max_users", default: 1
+    t.integer "max_buckets", default: 10
+    t.integer "max_images_per_bucket", default: 100
+    t.text "features"
+    t.boolean "status", default: true
+    t.integer "sort_order", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["plan_type"], name: "index_plans_on_plan_type"
+    t.index ["status"], name: "index_plans_on_status"
+    t.index ["stripe_price_id"], name: "index_plans_on_stripe_price_id", unique: true
+  end
+
   create_table "rss_feeds", force: :cascade do |t|
     t.string "url", null: false
     t.string "name", null: false
@@ -155,6 +177,26 @@ ActiveRecord::Schema[7.1].define(version: 2025_10_24_192819) do
     t.index ["published_at"], name: "index_rss_posts_on_published_at"
     t.index ["rss_feed_id", "published_at"], name: "index_rss_posts_on_rss_feed_id_and_published_at"
     t.index ["rss_feed_id"], name: "index_rss_posts_on_rss_feed_id"
+  end
+
+  create_table "subscriptions", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "stripe_subscription_id"
+    t.string "stripe_customer_id"
+    t.bigint "plan_id", null: false
+    t.string "status", default: "active"
+    t.datetime "current_period_start"
+    t.datetime "current_period_end"
+    t.boolean "cancel_at_period_end", default: false
+    t.datetime "canceled_at"
+    t.datetime "trial_end"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_subscriptions_on_account_id"
+    t.index ["plan_id"], name: "index_subscriptions_on_plan_id"
+    t.index ["status"], name: "index_subscriptions_on_status"
+    t.index ["stripe_customer_id"], name: "index_subscriptions_on_stripe_customer_id"
+    t.index ["stripe_subscription_id"], name: "index_subscriptions_on_stripe_subscription_id", unique: true
   end
 
   create_table "user_market_items", force: :cascade do |t|
@@ -218,6 +260,7 @@ ActiveRecord::Schema[7.1].define(version: 2025_10_24_192819) do
   end
 
   add_foreign_key "account_features", "accounts"
+  add_foreign_key "accounts", "plans"
   add_foreign_key "bucket_images", "buckets"
   add_foreign_key "bucket_images", "images"
   add_foreign_key "bucket_schedules", "bucket_images"
@@ -228,6 +271,8 @@ ActiveRecord::Schema[7.1].define(version: 2025_10_24_192819) do
   add_foreign_key "buckets", "users"
   add_foreign_key "market_items", "buckets"
   add_foreign_key "market_items", "images", column: "front_image_id"
+  add_foreign_key "subscriptions", "accounts"
+  add_foreign_key "subscriptions", "plans"
   add_foreign_key "user_market_items", "market_items"
   add_foreign_key "user_market_items", "users"
   add_foreign_key "videos", "users"
