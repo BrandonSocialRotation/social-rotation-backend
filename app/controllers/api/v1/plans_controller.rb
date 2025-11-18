@@ -4,6 +4,14 @@ class Api::V1::PlansController < ApplicationController
   # GET /api/v1/plans
   # List all available plans (public endpoint)
   def index
+    # Check if plans table exists (migrations may not have run yet)
+    unless ActiveRecord::Base.connection.table_exists?('plans')
+      return render json: { 
+        error: 'Plans table does not exist. Please run database migrations.',
+        plans: []
+      }, status: :service_unavailable
+    end
+    
     plan_type = params[:plan_type] # Optional filter: 'location_based' or 'user_seat_based'
     
     plans = Plan.active.ordered
@@ -12,6 +20,13 @@ class Api::V1::PlansController < ApplicationController
     render json: {
       plans: plans.map { |plan| plan_json(plan) }
     }
+  rescue => e
+    Rails.logger.error "Plans index error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { 
+      error: 'Failed to load plans',
+      message: e.message
+    }, status: :internal_server_error
   end
   
   # GET /api/v1/plans/:id
