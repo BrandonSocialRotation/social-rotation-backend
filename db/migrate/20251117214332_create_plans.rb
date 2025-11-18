@@ -19,6 +19,7 @@ class CreatePlans < ActiveRecord::Migration[7.1]
     
     add_index :plans, :plan_type
     add_index :plans, :status
+    # Add unique index on stripe_price_id (nullable is fine in PostgreSQL)
     add_index :plans, :stripe_price_id, unique: true
   end
 end
