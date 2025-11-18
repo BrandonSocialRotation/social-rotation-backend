@@ -33,7 +33,7 @@ class Account < ApplicationRecord
     return true if super_admin_account?
     
     # Use plan limits if available, otherwise fall back to account_feature
-    max_users = plan&.max_users || account_feature&.max_users || 1
+    max_users = (plan&.max_users rescue nil) || account_feature&.max_users || 1
     users.active.count < max_users
   end
   
@@ -42,17 +42,19 @@ class Account < ApplicationRecord
     return true if super_admin_account?
     
     # Use plan limits if available, otherwise fall back to account_feature
-    max_buckets = plan&.max_buckets || account_feature&.max_buckets || 10
+    max_buckets = (plan&.max_buckets rescue nil) || account_feature&.max_buckets || 10
     user.buckets.count < max_buckets
   end
   
   # Check if account has active subscription
   def has_active_subscription?
-    subscription&.active? || false
+    return false unless subscription
+    subscription.active? rescue false
   end
   
   # Get current subscription
   def current_subscription
+    return nil unless subscription
     subscription if has_active_subscription?
   end
   

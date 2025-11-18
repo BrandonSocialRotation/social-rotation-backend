@@ -2,6 +2,7 @@ class Api::V1::SubscriptionsController < ApplicationController
   skip_before_action :authenticate_user!, only: [:webhook]
   before_action :authenticate_user!, except: [:webhook]
   before_action :require_account_admin!, only: [:create, :checkout_session, :cancel]
+  before_action :check_stripe_configured!, only: [:checkout_session, :cancel, :webhook]
   
   # POST /api/v1/subscriptions/checkout_session
   # Create Stripe Checkout Session for a plan
@@ -15,7 +16,7 @@ class Api::V1::SubscriptionsController < ApplicationController
     account = current_user.account
     
     # Set Stripe API key
-    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || ''
     
     begin
       # Create or retrieve Stripe customer
@@ -150,6 +151,11 @@ class Api::V1::SubscriptionsController < ApplicationController
     sig_header = request.env['HTTP_STRIPE_SIGNATURE']
     endpoint_secret = ENV['STRIPE_WEBHOOK_SECRET']
     
+    unless endpoint_secret.present?
+      Rails.logger.error "STRIPE_WEBHOOK_SECRET not configured"
+      return head :bad_request
+    end
+    
     begin
       event = Stripe::Webhook.construct_event(payload, sig_header, endpoint_secret)
     rescue JSON::ParserError => e
@@ -185,6 +191,15 @@ class Api::V1::SubscriptionsController < ApplicationController
     unless current_user.account_admin? || current_user.super_admin?
       render json: { error: 'Only account admins can manage subscriptions' }, status: :forbidden
     end
+  end
+  
+  def check_stripe_configured!
+    unless ENV['STRIPE_SECRET_KEY'].present?
+      render json: { error: 'Stripe is not configured. Please set STRIPE_SECRET_KEY environment variable.' }, status: :service_unavailable
+    end
+  rescue => e
+    Rails.logger.error "Stripe configuration check failed: #{e.message}"
+    render json: { error: 'Stripe service unavailable' }, status: :service_unavailable
   end
   
   def frontend_url

@@ -53,7 +53,9 @@ class Subscription < ApplicationRecord
   # Get days remaining in current period
   def days_remaining
     return 0 unless current_period_end
-    [(current_period_end - Time.current).to_i / 1.day, 0].max
+    seconds_remaining = (current_period_end - Time.current).to_i
+    days = seconds_remaining / 86400 # 86400 seconds in a day
+    [days, 0].max
   end
   
   # Check if subscription is expired
