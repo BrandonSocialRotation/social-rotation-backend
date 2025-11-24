@@ -103,7 +103,7 @@ class Api::V1::OauthController < ApplicationController
   def twitter_login
     consumer_key = ENV['TWITTER_API_KEY'] || '5PIs17xez9qVUKft2qYOec6uR'
     consumer_secret = ENV['TWITTER_API_SECRET_KEY'] || 'wa4aaGQBK3AU75ji1eUBmNfCLO0IhotZD36faf3ZuX91WOnrqz'
-    callback_url = ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/twitter/callback' : 'https://social-rotation-frontend.onrender.com/twitter/callback')
+      callback_url = ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/twitter/callback' : "#{request.base_url}/api/v1/oauth/twitter/callback")
     
     # Create OAuth consumer
     consumer = ::OAuth::Consumer.new(
@@ -202,7 +202,7 @@ class Api::V1::OauthController < ApplicationController
         return render json: { error: 'LinkedIn Client ID not configured' }, status: :internal_server_error
       end
       # Use production callback URL for LinkedIn OAuth
-      redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/linkedin/callback' : 'https://social-rotation-frontend.onrender.com/linkedin/callback')
+      redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/linkedin/callback' : "#{request.base_url}/api/v1/oauth/linkedin/callback")
       
       oauth_url = "https://www.linkedin.com/oauth/v2/authorization?" \
                   "response_type=code" \
@@ -285,7 +285,7 @@ class Api::V1::OauthController < ApplicationController
         return render json: { error: 'Google Client ID not configured' }, status: :internal_server_error
       end
       # Use production callback URL for Google OAuth
-      redirect_uri = ENV['GOOGLE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/google/callback' : 'https://social-rotation-frontend.onrender.com/google/callback')
+      redirect_uri = ENV['GOOGLE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/google/callback' : "#{request.base_url}/api/v1/oauth/google/callback")
       
       oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" \
                   "client_id=#{client_id}" \
@@ -323,7 +323,7 @@ class Api::V1::OauthController < ApplicationController
     raise 'Google Client ID not configured' unless client_id
     client_secret = ENV['GOOGLE_CLIENT_SECRET']
     raise 'Google Client Secret not configured' unless client_secret
-    redirect_uri = ENV['GOOGLE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/google/callback' : 'https://social-rotation-frontend.onrender.com/google/callback')
+    redirect_uri = ENV['GOOGLE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/google/callback' : "#{request.base_url}/api/v1/oauth/google/callback")
     
     token_url = "https://oauth2.googleapis.com/token"
     

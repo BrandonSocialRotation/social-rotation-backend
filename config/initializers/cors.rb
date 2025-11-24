@@ -15,7 +15,8 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
           "http://127.0.0.1:3002",
           "https://social-rotation-frontend.onrender.com",  # Old Render frontend
           "https://social-rotation-frontend.ondigitalocean.app",  # DigitalOcean frontend (generic)
-          "https://social-rotation-frontend-f4mwb.ondigitalocean.app"  # Actual deployed frontend URL
+          "https://social-rotation-frontend-f4mwb.ondigitalocean.app",  # Actual deployed frontend URL
+          "https://my.socialrotation.app"  # Custom domain
         ]
     origins_list << ENV['FRONTEND_URL'] if ENV['FRONTEND_URL'].present?
     
