@@ -7,21 +7,25 @@ class Plan < ApplicationRecord
   
   # Validations
   validates :name, presence: true
-  validates :plan_type, presence: true, inclusion: { in: %w[location_based user_seat_based] }
+  validates :plan_type, presence: true, inclusion: { in: %w[personal agency location_based user_seat_based] }
   validates :price_cents, numericality: { greater_than_or_equal_to: 0 }
   validates :max_locations, numericality: { greater_than: 0 }, if: -> { plan_type == 'location_based' }
-  validates :max_users, numericality: { greater_than: 0 }, if: -> { plan_type == 'user_seat_based' }
+  validates :max_users, numericality: { greater_than: 0 }, if: -> { plan_type == 'user_seat_based' || plan_type == 'agency' }
   validates :max_buckets, numericality: { greater_than: 0 }
   validates :max_images_per_bucket, numericality: { greater_than: 0 }
   
   # Scopes
   scope :active, -> { where(status: true) }
+  scope :personal, -> { where(plan_type: 'personal') }
+  scope :agency, -> { where(plan_type: 'agency') }
   scope :location_based, -> { where(plan_type: 'location_based') }
   scope :user_seat_based, -> { where(plan_type: 'user_seat_based') }
   scope :ordered, -> { order(:sort_order, :price_cents) }
   
   # Plan types
   PLAN_TYPES = {
+    personal: 'personal',
+    agency: 'agency',
     location_based: 'location_based',
     user_seat_based: 'user_seat_based'
   }.freeze
@@ -57,6 +61,16 @@ class Plan < ApplicationRecord
   # Get display name with price
   def display_name
     "#{name} - #{formatted_price}/month"
+  end
+  
+  # Check if plan is personal
+  def personal?
+    plan_type == 'personal'
+  end
+  
+  # Check if plan is agency
+  def agency?
+    plan_type == 'agency'
   end
   
   # Check if plan is location-based

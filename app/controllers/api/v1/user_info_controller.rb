@@ -170,6 +170,15 @@ class Api::V1::UserInfoController < ApplicationController
   end
 
   def user_json(user)
+    account = user.account
+    account_type = if account&.is_reseller
+      'agency'
+    elsif user.account_id == 0
+      'personal'
+    else
+      'personal' # Default fallback
+    end
+    
     {
       id: user.id,
       name: user.name,
@@ -186,6 +195,9 @@ class Api::V1::UserInfoController < ApplicationController
       digital_ocean_watermark_path: user.get_digital_ocean_watermark_path,
       created_at: user.created_at,
       updated_at: user.updated_at,
+      account_type: account_type,
+      account_id: user.account_id,
+      is_account_admin: user.is_account_admin,
       # Social media connection status
       facebook_connected: user.fb_user_access_key.present?,
       twitter_connected: user.twitter_oauth_token.present?,
