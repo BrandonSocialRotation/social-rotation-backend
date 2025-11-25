@@ -60,7 +60,8 @@ class Plan < ApplicationRecord
   
   # Calculate price based on user count (for per-user pricing plans)
   def calculate_price_for_users(user_count, billing_period = 'monthly')
-    return price_cents unless supports_per_user_pricing
+    # Check if column exists (for backwards compatibility during migration)
+    return price_cents unless has_attribute?(:supports_per_user_pricing) && supports_per_user_pricing
     
     # Base price
     total = base_price_cents || 0
@@ -97,8 +98,10 @@ class Plan < ApplicationRecord
   
   # Get display name with price
   def display_name
-    if supports_per_user_pricing
-      "#{name} - Starting at #{formatted_price}/#{billing_period == 'annual' ? 'year' : 'month'}"
+    # Check if column exists (for backwards compatibility during migration)
+    if has_attribute?(:supports_per_user_pricing) && supports_per_user_pricing
+      billing = has_attribute?(:billing_period) ? billing_period : 'monthly'
+      "#{name} - Starting at #{formatted_price}/#{billing == 'annual' ? 'year' : 'month'}"
     else
       "#{name} - #{formatted_price}/month"
     end

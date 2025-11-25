@@ -78,11 +78,11 @@ class Api::V1::PlansController < ApplicationController
       stripe_price_id: plan.stripe_price_id,
       stripe_product_id: plan.stripe_product_id,
       display_name: plan.display_name,
-      supports_per_user_pricing: plan.supports_per_user_pricing || false,
-      base_price_cents: plan.base_price_cents || 0,
-      per_user_price_cents: plan.per_user_price_cents || 0,
-      per_user_price_after_10_cents: plan.per_user_price_after_10_cents || 0,
-      billing_period: plan.billing_period || 'monthly'
+      supports_per_user_pricing: plan.has_attribute?(:supports_per_user_pricing) ? (plan.supports_per_user_pricing || false) : false,
+      base_price_cents: plan.has_attribute?(:base_price_cents) ? (plan.base_price_cents || 0) : 0,
+      per_user_price_cents: plan.has_attribute?(:per_user_price_cents) ? (plan.per_user_price_cents || 0) : 0,
+      per_user_price_after_10_cents: plan.has_attribute?(:per_user_price_after_10_cents) ? (plan.per_user_price_after_10_cents || 0) : 0,
+      billing_period: plan.has_attribute?(:billing_period) ? (plan.billing_period || 'monthly') : 'monthly'
     }
   end
 end
