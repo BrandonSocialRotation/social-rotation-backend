@@ -115,7 +115,7 @@ Rails.application.routes.draw do
       resources :plans, only: [:index, :show]
       
       # Subscription routes
-      resources :subscriptions, only: [:show, :create] do
+      resources :subscriptions, only: [:index, :show, :create] do
         collection do
           post 'checkout_session', to: 'subscriptions#checkout_session'
           post 'cancel', to: 'subscriptions#cancel'

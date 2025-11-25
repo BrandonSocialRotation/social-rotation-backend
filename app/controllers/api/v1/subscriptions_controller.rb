@@ -90,6 +90,38 @@ class Api::V1::SubscriptionsController < ApplicationController
     end
   end
   
+  # GET /api/v1/subscriptions
+  # Get current subscription for the user's account
+  def index
+    account = current_user.account
+    
+    # Handle personal accounts (account_id = 0) - they don't have an Account record
+    if account.nil? || (current_user.account_id == 0)
+      return render json: {
+        subscription: nil
+      }
+    end
+    
+    subscription = account.subscription
+    
+    if subscription
+      render json: {
+        subscription: subscription_json(subscription)
+      }
+    else
+      render json: {
+        subscription: nil
+      }
+    end
+  rescue => e
+    Rails.logger.error "Subscriptions index error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { 
+      error: 'Failed to load subscription',
+      message: e.message
+    }, status: :internal_server_error
+  end
+
   # POST /api/v1/subscriptions
   # Create subscription (called after successful Stripe checkout)
   def create
