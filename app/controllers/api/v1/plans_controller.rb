@@ -30,6 +30,9 @@ class Api::V1::PlansController < ApplicationController
     if filter_type.present?
       # Show personal plans for personal accounts, agency plans for agency accounts
       plans = plans.where(plan_type: filter_type)
+      Rails.logger.info "Filtering plans by plan_type: #{filter_type}, found #{plans.count} plans"
+    else
+      Rails.logger.info "No filter applied, showing all #{plans.count} active plans"
     end
     # If no filter, show all plans (for admin or public viewing)
     
