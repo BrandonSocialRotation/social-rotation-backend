@@ -110,12 +110,20 @@ class Api::V1::SubscriptionsController < ApplicationController
         }
       end
       
-      subscription = account.subscription
+      # Safely get subscription - might be nil
+      subscription = account.subscription rescue nil
       
-      if subscription
-        render json: {
-          subscription: subscription_json(subscription)
-        }
+      if subscription && subscription.persisted?
+        begin
+          render json: {
+            subscription: subscription_json(subscription)
+          }
+        rescue => e
+          Rails.logger.error "Error serializing subscription: #{e.message}"
+          render json: {
+            subscription: nil
+          }
+        end
       else
         render json: {
           subscription: nil
