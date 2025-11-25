@@ -6,8 +6,10 @@ class Api::V1::SubscriptionsController < ApplicationController
   
   # POST /api/v1/subscriptions/checkout_session
   # Create Stripe Checkout Session for a plan
+  # Params: plan_id, billing_period (optional, default: 'monthly')
   def checkout_session
     plan = Plan.find(params[:plan_id])
+    billing_period = params[:billing_period] || 'monthly'
     
     unless plan.status?
       return render json: { error: 'Plan is not available' }, status: :bad_request
@@ -22,21 +24,56 @@ class Api::V1::SubscriptionsController < ApplicationController
       # Create or retrieve Stripe customer
       customer = get_or_create_stripe_customer(account)
       
+      # Calculate price based on plan type
+      if plan.supports_per_user_pricing
+        # For per-user pricing, calculate based on current user count
+        user_count = account.users.active.count
+        price_cents = plan.calculate_price_for_users(user_count, billing_period)
+        
+        # Create a one-time price for this specific subscription
+        # Or use a recurring price if you prefer
+        stripe_price = Stripe::Price.create({
+          unit_amount: price_cents,
+          currency: 'usd',
+          recurring: {
+            interval: billing_period == 'annual' ? 'year' : 'month',
+          },
+          product_data: {
+            name: "#{plan.name} (#{user_count} user#{user_count != 1 ? 's' : ''})",
+            description: "Subscription for #{user_count} user#{user_count != 1 ? 's' : ''}"
+          }
+        })
+        
+        line_items = [{
+          price: stripe_price.id,
+          quantity: 1,
+        }]
+      else
+        # For fixed-price plans, use the plan's stripe_price_id
+        unless plan.stripe_price_id.present?
+          return render json: { error: 'Plan does not have a Stripe price configured' }, status: :bad_request
+        end
+        
+        line_items = [{
+          price: plan.stripe_price_id,
+          quantity: 1,
+        }]
+      end
+      
       # Create Checkout Session
       session = Stripe::Checkout::Session.create({
         customer: customer.id,
         payment_method_types: ['card'],
-        line_items: [{
-          price: plan.stripe_price_id,
-          quantity: 1,
-        }],
+        line_items: line_items,
         mode: 'subscription',
-        success_url: "#{frontend_url}/subscription/success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url: "#{frontend_url}/subscription/cancel",
+        success_url: "#{frontend_url}/profile?success=subscription_active",
+        cancel_url: "#{frontend_url}/profile?error=subscription_canceled",
         metadata: {
           account_id: account.id,
           plan_id: plan.id,
-          user_id: current_user.id
+          user_id: current_user.id,
+          billing_period: billing_period,
+          user_count: plan.supports_per_user_pricing ? account.users.active.count : nil
         }
       })
       
@@ -233,6 +270,8 @@ class Api::V1::SubscriptionsController < ApplicationController
   def handle_checkout_completed(session)
     account_id = session.metadata['account_id'].to_i
     plan_id = session.metadata['plan_id'].to_i
+    billing_period = session.metadata['billing_period'] || 'monthly'
+    user_count = session.metadata['user_count']&.to_i
     
     account = Account.find_by(id: account_id)
     plan = Plan.find_by(id: plan_id)
@@ -252,6 +291,8 @@ class Api::V1::SubscriptionsController < ApplicationController
       stripe_customer_id: session.customer,
       stripe_subscription_id: stripe_subscription.id,
       status: stripe_subscription.status,
+      billing_period: billing_period,
+      user_count_at_subscription: user_count || account.users.active.count,
       current_period_start: Time.at(stripe_subscription.current_period_start),
       current_period_end: Time.at(stripe_subscription.current_period_end),
       cancel_at_period_end: stripe_subscription.cancel_at_period_end

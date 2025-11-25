@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_17_214408) do
+ActiveRecord::Schema[7.1].define(version: 2025_11_25_211032) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -138,6 +138,11 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_17_214408) do
     t.integer "sort_order", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "base_price_cents", default: 0
+    t.integer "per_user_price_cents", default: 0
+    t.integer "per_user_price_after_10_cents", default: 0
+    t.string "billing_period", default: "monthly"
+    t.boolean "supports_per_user_pricing", default: false
     t.index ["plan_type"], name: "index_plans_on_plan_type"
     t.index ["status"], name: "index_plans_on_status"
     t.index ["stripe_price_id"], name: "index_plans_on_stripe_price_id", unique: true
@@ -192,6 +197,8 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_17_214408) do
     t.datetime "trial_end"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "billing_period", default: "monthly"
+    t.integer "user_count_at_subscription"
     t.index ["account_id"], name: "index_subscriptions_on_account_id"
     t.index ["plan_id"], name: "index_subscriptions_on_plan_id"
     t.index ["status"], name: "index_subscriptions_on_status"

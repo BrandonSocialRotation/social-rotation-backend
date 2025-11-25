@@ -1,81 +1,39 @@
 class UpdatePlansForPersonalAndAgency < ActiveRecord::Migration[7.1]
   def up
     # Delete old location-based and user-seat-based plans
-    Plan.where(plan_type: ['location_based', 'user_seat_based']).destroy_all
+    execute "DELETE FROM plans WHERE plan_type IN ('location_based', 'user_seat_based')"
     
-    # Create Personal plan
-    Plan.find_or_create_by(name: 'Personal') do |plan|
-      plan.plan_type = 'personal'
-      plan.price_cents = 2900 # $29/month
-      plan.max_locations = 0 # Not applicable
-      plan.max_users = 1
-      plan.max_buckets = 10
-      plan.max_images_per_bucket = 100
-      plan.features = {
-        'rss' => true,
-        'marketplace' => false,
-        'watermark' => true,
-        'analytics' => true
-      }.to_json
-      plan.status = true
-      plan.sort_order = 1
-    end
+    # Create Personal plan (using raw SQL to avoid model validations)
+    personal_features = { 'rss' => true, 'marketplace' => false, 'watermark' => true, 'analytics' => true }.to_json
+    execute <<-SQL
+      INSERT INTO plans (name, plan_type, price_cents, max_locations, max_users, max_buckets, max_images_per_bucket, features, status, sort_order, created_at, updated_at)
+      SELECT 'Personal', 'personal', 2900, 0, 1, 10, 100, '#{personal_features.gsub("'", "''")}', true, 1, NOW(), NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Personal' AND plan_type = 'personal')
+    SQL
     
-    # Create Agency tier plans (based on max sub-accounts)
-    Plan.find_or_create_by(name: 'Agency Starter') do |plan|
-      plan.plan_type = 'agency'
-      plan.price_cents = 9900 # $99/month
-      plan.max_locations = 0 # Not applicable
-      plan.max_users = 5 # Max 5 sub-accounts
-      plan.max_buckets = 50
-      plan.max_images_per_bucket = 500
-      plan.features = {
-        'rss' => true,
-        'marketplace' => true,
-        'watermark' => true,
-        'analytics' => true
-      }.to_json
-      plan.status = true
-      plan.sort_order = 10
-    end
+    # Create Agency Starter
+    agency_starter_features = { 'rss' => true, 'marketplace' => true, 'watermark' => true, 'analytics' => true }.to_json
+    execute <<-SQL
+      INSERT INTO plans (name, plan_type, price_cents, max_locations, max_users, max_buckets, max_images_per_bucket, features, status, sort_order, created_at, updated_at)
+      SELECT 'Agency Starter', 'agency', 9900, 0, 5, 50, 500, '#{agency_starter_features.gsub("'", "''")}', true, 10, NOW(), NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Agency Starter' AND plan_type = 'agency')
+    SQL
     
-    Plan.find_or_create_by(name: 'Agency Professional') do |plan|
-      plan.plan_type = 'agency'
-      plan.price_cents = 24900 # $249/month
-      plan.max_locations = 0
-      plan.max_users = 15 # Max 15 sub-accounts
-      plan.max_buckets = 150
-      plan.max_images_per_bucket = 1500
-      plan.features = {
-        'rss' => true,
-        'marketplace' => true,
-        'watermark' => true,
-        'analytics' => true,
-        'white_label' => true
-      }.to_json
-      plan.status = true
-      plan.sort_order = 20
-    end
+    # Create Agency Professional
+    agency_pro_features = { 'rss' => true, 'marketplace' => true, 'watermark' => true, 'analytics' => true, 'white_label' => true }.to_json
+    execute <<-SQL
+      INSERT INTO plans (name, plan_type, price_cents, max_locations, max_users, max_buckets, max_images_per_bucket, features, status, sort_order, created_at, updated_at)
+      SELECT 'Agency Professional', 'agency', 24900, 0, 15, 150, 1500, '#{agency_pro_features.gsub("'", "''")}', true, 20, NOW(), NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Agency Professional' AND plan_type = 'agency')
+    SQL
     
-    Plan.find_or_create_by(name: 'Agency Enterprise') do |plan|
-      plan.plan_type = 'agency'
-      plan.price_cents = 49900 # $499/month
-      plan.max_locations = 0
-      plan.max_users = 50 # Max 50 sub-accounts
-      plan.max_buckets = 500
-      plan.max_images_per_bucket = 5000
-      plan.features = {
-        'rss' => true,
-        'marketplace' => true,
-        'watermark' => true,
-        'analytics' => true,
-        'white_label' => true,
-        'ai_copywriting' => true,
-        'ai_image_gen' => true
-      }.to_json
-      plan.status = true
-      plan.sort_order = 30
-    end
+    # Create Agency Enterprise
+    agency_ent_features = { 'rss' => true, 'marketplace' => true, 'watermark' => true, 'analytics' => true, 'white_label' => true, 'ai_copywriting' => true, 'ai_image_gen' => true }.to_json
+    execute <<-SQL
+      INSERT INTO plans (name, plan_type, price_cents, max_locations, max_users, max_buckets, max_images_per_bucket, features, status, sort_order, created_at, updated_at)
+      SELECT 'Agency Enterprise', 'agency', 49900, 0, 50, 500, 5000, '#{agency_ent_features.gsub("'", "''")}', true, 30, NOW(), NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM plans WHERE name = 'Agency Enterprise' AND plan_type = 'agency')
+    SQL
   end
   
   def down

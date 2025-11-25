@@ -3,12 +3,17 @@
 # Create default plans
 puts "Creating default plans..."
 
-# Personal plan (for individual users)
+# Personal plan (for individual users) - Per-user pricing
 Plan.find_or_create_by(name: "Personal") do |plan|
   plan.plan_type = 'personal'
-  plan.price_cents = 2900 # $29/month
+  plan.price_cents = 4900 # $49/month base (for display purposes)
+  plan.base_price_cents = 4900 # $49/month base
+  plan.per_user_price_cents = 1500 # $15/user for first 10 additional users
+  plan.per_user_price_after_10_cents = 1000 # $10/user for users 11+
+  plan.supports_per_user_pricing = true
+  plan.billing_period = 'monthly' # Can be 'monthly' or 'annual'
   plan.max_locations = 0 # Not applicable for personal
-  plan.max_users = 1
+  plan.max_users = 999 # Unlimited users (pricing is per-user)
   plan.max_buckets = 10
   plan.max_images_per_bucket = 100
   plan.features_hash = {
