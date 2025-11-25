@@ -130,6 +130,52 @@ class Api::V1::UserInfoController < ApplicationController
     }
   end
 
+  # POST /api/v1/user_info/convert_to_agency
+  # Convert a personal account to an agency account
+  def convert_to_agency
+    # Only allow conversion if user is account admin or has account_id = 0 (personal)
+    unless current_user.account_id == 0 || current_user.is_account_admin?
+      return render json: { error: 'Only account admins can convert accounts' }, status: :forbidden
+    end
+
+    # If user has account_id = 0, create a new agency account
+    if current_user.account_id == 0
+      account = Account.create!(
+        name: params[:company_name] || "#{current_user.name}'s Agency",
+        is_reseller: true,
+        status: true
+      )
+      
+      # Update user to be part of the new account and make them admin
+      current_user.update!(
+        account_id: account.id,
+        is_account_admin: true,
+        role: 'reseller'
+      )
+      
+      render json: {
+        user: user_json(current_user),
+        message: 'Account successfully converted to agency account'
+      }
+    else
+      # User already has an account, just convert it to agency
+      account = current_user.account
+      account.update!(is_reseller: true)
+      
+      # Update user role
+      current_user.update!(role: 'reseller') if current_user.is_account_admin?
+      
+      render json: {
+        user: user_json(current_user),
+        message: 'Account successfully converted to agency account'
+      }
+    end
+  rescue => e
+    Rails.logger.error "Convert to agency error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { error: 'Failed to convert account', details: e.message }, status: :internal_server_error
+  end
+
   # GET /api/v1/user_info/watermark_preview
   def watermark_preview
     # This would generate a watermark preview image

@@ -23,6 +23,7 @@ class Api::V1::PlansController < ApplicationController
     
     # If account_type is provided, filter by that (for showing relevant plans to user)
     # Otherwise use plan_type param if provided
+    # If neither is provided, show all plans
     filter_type = account_type.presence || plan_type.presence
     
     plans = Plan.active.ordered
@@ -30,6 +31,7 @@ class Api::V1::PlansController < ApplicationController
       # Show personal plans for personal accounts, agency plans for agency accounts
       plans = plans.where(plan_type: filter_type)
     end
+    # If no filter, show all plans (for admin or public viewing)
     
     render json: {
       plans: plans.map { |plan| plan_json(plan) }

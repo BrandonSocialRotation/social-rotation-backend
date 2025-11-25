@@ -55,6 +55,7 @@ Rails.application.routes.draw do
       post 'user_info/disconnect_tiktok', to: 'user_info#disconnect_tiktok'
       post 'user_info/disconnect_youtube', to: 'user_info#disconnect_youtube'
       post 'user_info/toggle_instagram', to: 'user_info#toggle_instagram'
+      post 'user_info/convert_to_agency', to: 'user_info#convert_to_agency'
       get 'user_info/watermark_preview', to: 'user_info#watermark_preview'
       get 'user_info/standard_preview', to: 'user_info#standard_preview'
 
