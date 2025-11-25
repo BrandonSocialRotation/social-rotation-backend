@@ -1,7 +1,8 @@
 class Api::V1::SubscriptionsController < ApplicationController
   skip_before_action :authenticate_user!, only: [:webhook]
   before_action :authenticate_user!, except: [:webhook]
-  before_action :require_account_admin!, only: [:create, :checkout_session, :cancel]
+  before_action :require_account_admin!, only: [:create, :cancel]
+  # Note: checkout_session doesn't require account_admin check - allows new users during registration
   before_action :check_stripe_configured!, only: [:checkout_session, :cancel, :webhook]
   
   # POST /api/v1/subscriptions/checkout_session
@@ -15,7 +16,17 @@ class Api::V1::SubscriptionsController < ApplicationController
       return render json: { error: 'Plan is not available' }, status: :bad_request
     end
     
+    # Handle personal accounts (account_id = 0) - create Account record if needed
     account = current_user.account
+    if account.nil? || current_user.account_id == 0
+      # Create an account for personal users when they subscribe
+      account = Account.create!(
+        name: "#{current_user.name}'s Account",
+        is_reseller: false,
+        status: true
+      )
+      current_user.update!(account_id: account.id, is_account_admin: true)
+    end
     
     # Set Stripe API key
     Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || ''
@@ -66,8 +77,8 @@ class Api::V1::SubscriptionsController < ApplicationController
         payment_method_types: ['card'],
         line_items: line_items,
         mode: 'subscription',
-        success_url: "#{frontend_url}/profile?success=subscription_active",
-        cancel_url: "#{frontend_url}/profile?error=subscription_canceled",
+        success_url: "#{frontend_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: "#{frontend_url}/register?error=subscription_canceled",
         metadata: {
           account_id: account.id,
           plan_id: plan.id,
@@ -279,6 +290,9 @@ class Api::V1::SubscriptionsController < ApplicationController
   private
   
   def require_account_admin!
+    # Allow during registration (user might not be account admin yet)
+    return if params[:skip_admin_check] == 'true'
+    
     unless current_user.account_admin? || current_user.super_admin?
       render json: { error: 'Only account admins can manage subscriptions' }, status: :forbidden
     end
@@ -312,9 +326,10 @@ class Api::V1::SubscriptionsController < ApplicationController
     # Create new Stripe customer
     customer = Stripe::Customer.create({
       email: current_user.email,
-      name: account.name,
+      name: account.name || current_user.name,
       metadata: {
-        account_id: account.id
+        account_id: account.id,
+        user_id: current_user.id
       }
     })
     
