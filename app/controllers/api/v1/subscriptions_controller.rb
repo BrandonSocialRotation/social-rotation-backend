@@ -410,13 +410,19 @@ class Api::V1::SubscriptionsController < ApplicationController
   end
   
   def subscription_json(subscription)
-    {
-      id: subscription.id,
-      plan: {
+    plan_data = if subscription.plan
+      {
         id: subscription.plan.id,
         name: subscription.plan.name,
         plan_type: subscription.plan.plan_type
-      },
+      }
+    else
+      nil
+    end
+    
+    {
+      id: subscription.id,
+      plan: plan_data,
       status: subscription.status,
       current_period_start: subscription.current_period_start,
       current_period_end: subscription.current_period_end,
@@ -424,6 +430,15 @@ class Api::V1::SubscriptionsController < ApplicationController
       days_remaining: subscription.days_remaining,
       active: subscription.active?,
       will_cancel: subscription.will_cancel?
+    }
+  rescue => e
+    Rails.logger.error "Error in subscription_json: #{e.message}"
+    # Return minimal subscription data if serialization fails
+    {
+      id: subscription.id,
+      plan: nil,
+      status: subscription.status || 'unknown',
+      error: 'Failed to load subscription details'
     }
   end
 end
