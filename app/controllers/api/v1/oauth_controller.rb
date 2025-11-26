@@ -3,11 +3,13 @@ class Api::V1::OauthController < ApplicationController
   
   # Helper method to get the correct frontend URL for redirects
   def frontend_url
-    if Rails.env.development?
+    url = if Rails.env.development?
       "http://localhost:3001"  # Use the port your frontend is running on
     else
       ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
     end
+    # Remove trailing slash to avoid double slashes
+    url.chomp('/')
   end
   
   # Helper method to build OAuth callback URL with platform info
