@@ -64,6 +64,10 @@ class Api::V1::AuthController < ApplicationController
         # Create user-friendly error messages
         friendly_message = error_messages.join('. ')
         
+        # Log errors for debugging
+        Rails.logger.error "Registration validation errors: #{error_messages.inspect}"
+        Rails.logger.error "User errors details: #{user.errors.as_json.inspect}"
+        
         render json: {
           error: 'Registration failed',
           message: friendly_message,
