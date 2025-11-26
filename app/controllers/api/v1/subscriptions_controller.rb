@@ -13,49 +13,79 @@ class Api::V1::SubscriptionsController < ApplicationController
     Stripe.api_key = ENV['STRIPE_SECRET_KEY']
     
     begin
-      # Test 1: Retrieve account info
-      account = Stripe::Account.retrieve
+      # Test 1: List products (works with restricted keys)
+      products = Stripe::Product.list(limit: 10)
       
-      # Test 2: List products (limit to 5)
-      products = Stripe::Product.list(limit: 5)
+      # Test 2: List prices (works with restricted keys)
+      prices = Stripe::Price.list(limit: 10)
       
-      # Test 3: List prices (limit to 5)
-      prices = Stripe::Price.list(limit: 5)
+      # Test 3: Try to retrieve account (may fail with restricted keys, that's OK)
+      account_info = nil
+      begin
+        account = Stripe::Account.retrieve
+        account_info = {
+          id: account.id,
+          email: account.email,
+          country: account.country,
+          default_currency: account.default_currency
+        }
+      rescue Stripe::PermissionError => e
+        account_info = {
+          error: 'Account endpoint requires additional permissions',
+          message: 'Using restricted API key (this is OK for most operations)',
+          note: 'Products and prices can still be accessed'
+        }
+      end
       
       render json: {
         status: 'success',
         message: 'Stripe is connected and working!',
-        account: {
-          id: account.id,
-          email: account.email,
-          country: account.country,
-          default_currency: account.default_currency,
-          type: account.type
-        },
+        api_key_type: ENV['STRIPE_SECRET_KEY']&.start_with?('rk_') ? 'restricted' : 'secret',
+        account: account_info,
         products_count: products.data.length,
         prices_count: prices.data.length,
-        products: products.data.map { |p| { id: p.id, name: p.name, active: p.active } },
-        prices: prices.data.map { |pr| { id: pr.id, amount: pr.unit_amount, currency: pr.currency, active: pr.active } }
+        products: products.data.map { |p| { 
+          id: p.id, 
+          name: p.name, 
+          active: p.active,
+          description: p.description
+        } },
+        prices: prices.data.map { |pr| { 
+          id: pr.id, 
+          amount: pr.unit_amount, 
+          currency: pr.currency, 
+          active: pr.active,
+          recurring: pr.recurring ? { interval: pr.recurring.interval } : nil
+        } }
       }
     rescue Stripe::AuthenticationError => e
       render json: {
         status: 'error',
         message: 'Stripe authentication failed',
         error: e.message,
-        details: 'Check your STRIPE_SECRET_KEY environment variable'
+        details: 'Check your STRIPE_SECRET_KEY environment variable - it may be invalid or expired'
       }, status: :unauthorized
+    rescue Stripe::PermissionError => e
+      render json: {
+        status: 'partial_success',
+        message: 'Stripe is connected but using restricted key',
+        error: e.message,
+        note: 'Your API key works but has limited permissions. This is normal for restricted keys.',
+        suggestion: 'You can still create checkout sessions and process payments'
+      }
     rescue Stripe::StripeError => e
       render json: {
         status: 'error',
         message: 'Stripe API error',
         error: e.message,
-        type: e.type
+        error_type: e.class.name
       }, status: :bad_request
     rescue => e
       render json: {
         status: 'error',
         message: 'Unexpected error',
-        error: e.message
+        error: e.message,
+        backtrace: Rails.env.development? ? e.backtrace.first(5) : nil
       }, status: :internal_server_error
     end
   end
