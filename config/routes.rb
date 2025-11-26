@@ -117,6 +117,7 @@ Rails.application.routes.draw do
       # Subscription routes
       resources :subscriptions, only: [:index, :show, :create] do
         collection do
+          get 'test_stripe', to: 'subscriptions#test_stripe'
           post 'checkout_session', to: 'subscriptions#checkout_session'
           post 'cancel', to: 'subscriptions#cancel'
           post 'webhook', to: 'subscriptions#webhook'

@@ -1,10 +1,65 @@
 class Api::V1::SubscriptionsController < ApplicationController
-  skip_before_action :authenticate_user!, only: [:webhook]
-  before_action :authenticate_user!, except: [:webhook]
+  skip_before_action :authenticate_user!, only: [:webhook, :test_stripe]
+  before_action :authenticate_user!, except: [:webhook, :test_stripe]
   before_action :require_account_admin!, only: [:create, :cancel]
   # Note: checkout_session doesn't require account_admin check - allows new users during registration
   before_action :check_stripe_configured!, only: [:checkout_session, :cancel, :webhook]
   
+  # GET /api/v1/subscriptions/test_stripe
+  # Test Stripe connection and configuration
+  def test_stripe
+    check_stripe_configured!
+    
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    
+    begin
+      # Test 1: Retrieve account info
+      account = Stripe::Account.retrieve
+      
+      # Test 2: List products (limit to 5)
+      products = Stripe::Product.list(limit: 5)
+      
+      # Test 3: List prices (limit to 5)
+      prices = Stripe::Price.list(limit: 5)
+      
+      render json: {
+        status: 'success',
+        message: 'Stripe is connected and working!',
+        account: {
+          id: account.id,
+          email: account.email,
+          country: account.country,
+          default_currency: account.default_currency,
+          type: account.type
+        },
+        products_count: products.data.length,
+        prices_count: prices.data.length,
+        products: products.data.map { |p| { id: p.id, name: p.name, active: p.active } },
+        prices: prices.data.map { |pr| { id: pr.id, amount: pr.unit_amount, currency: pr.currency, active: pr.active } }
+      }
+    rescue Stripe::AuthenticationError => e
+      render json: {
+        status: 'error',
+        message: 'Stripe authentication failed',
+        error: e.message,
+        details: 'Check your STRIPE_SECRET_KEY environment variable'
+      }, status: :unauthorized
+    rescue Stripe::StripeError => e
+      render json: {
+        status: 'error',
+        message: 'Stripe API error',
+        error: e.message,
+        type: e.type
+      }, status: :bad_request
+    rescue => e
+      render json: {
+        status: 'error',
+        message: 'Unexpected error',
+        error: e.message
+      }, status: :internal_server_error
+    end
+  end
+
   # POST /api/v1/subscriptions/checkout_session
   # Create Stripe Checkout Session for a plan
   # Params: plan_id, billing_period (optional, default: 'monthly')
