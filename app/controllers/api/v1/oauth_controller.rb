@@ -202,9 +202,15 @@ class Api::V1::OauthController < ApplicationController
   # Initiates LinkedIn OAuth flow
   def linkedin_login
     begin
-      state = SecureRandom.hex(16)
-      session[:oauth_state] = state
-      session[:user_id] = current_user.id
+      # Encode user_id in state parameter since sessions don't persist in popups
+      user_id = current_user.id
+      random_state = SecureRandom.hex(16)
+      # Format: user_id:random_state (we'll decode this in callback)
+      state = "#{user_id}:#{random_state}"
+      
+      # Still store in session as backup
+      session[:oauth_state] = random_state
+      session[:user_id] = user_id
       
       client_id = ENV['LINKEDIN_CLIENT_ID']
       unless client_id
@@ -217,7 +223,7 @@ class Api::V1::OauthController < ApplicationController
                   "response_type=code" \
                   "&client_id=#{client_id}" \
                   "&redirect_uri=#{CGI.escape(redirect_uri)}" \
-                  "&state=#{state}" \
+                  "&state=#{CGI.escape(state)}" \
                   "&scope=w_member_social"
       
       render json: { oauth_url: oauth_url }
@@ -234,39 +240,35 @@ class Api::V1::OauthController < ApplicationController
     
     Rails.logger.info "LinkedIn callback - received state: #{state}, session state: #{session[:oauth_state]}, session id: #{session.id}"
     
-    if state != session[:oauth_state]
-      Rails.logger.warn "LinkedIn OAuth state mismatch - received: #{state}, expected: #{session[:oauth_state]}"
-      # For now, allow the OAuth to proceed even if state doesn't match (session might not persist in popup)
-      # In production, you might want to store state in database or use a different approach
-      # return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'LinkedIn'), allow_other_host: true
-    end
-    
-    user_id = session[:user_id]
-    Rails.logger.info "LinkedIn callback - session user_id: #{user_id}"
-    
-    # If session user_id is missing, try to get user from JWT token in referer or use a fallback
-    user = nil
-    if user_id
-      user = User.find_by(id: user_id)
-    end
-    
-    unless user
-      Rails.logger.warn "LinkedIn callback - user not found from session, attempting to find from token"
-      # Try to get user from Authorization header if available
-      token = request.headers['Authorization']&.split(' ')&.last
-      if token
-        begin
-          decoded = JsonWebToken.decode(token)
-          user = User.find_by(id: decoded[:user_id]) if decoded
-        rescue => e
-          Rails.logger.error "Failed to decode token: #{e.message}"
-        end
-      end
+    # Decode user_id from state parameter (format: user_id:random_state)
+    user_id = nil
+    if state&.include?(':')
+      parts = state.split(':', 2)
+      user_id = parts[0].to_i if parts[0].present? && parts[0].match?(/^\d+$/)
+      random_state = parts[1]
       
-      unless user
-        return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'LinkedIn'), allow_other_host: true
+      # Verify state matches session if available (optional check)
+      if session[:oauth_state].present? && random_state != session[:oauth_state]
+        Rails.logger.warn "LinkedIn OAuth state random part mismatch - received: #{random_state}, expected: #{session[:oauth_state]}"
       end
+    else
+      # Fallback: try to get from session
+      user_id = session[:user_id]
+      Rails.logger.info "LinkedIn callback - using session user_id: #{user_id}"
     end
+    
+    unless user_id
+      Rails.logger.error "LinkedIn callback - no user_id found in state or session"
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'LinkedIn'), allow_other_host: true
+    end
+    
+    user = User.find_by(id: user_id)
+    unless user
+      Rails.logger.error "LinkedIn callback - user not found with id: #{user_id}"
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'LinkedIn'), allow_other_host: true
+    end
+    
+    Rails.logger.info "LinkedIn callback - found user: #{user.id} (#{user.email})"
     
     # Exchange code for access token
     client_id = ENV['LINKEDIN_CLIENT_ID']
