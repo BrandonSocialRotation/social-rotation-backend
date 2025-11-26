@@ -239,7 +239,7 @@ class Api::V1::OauthController < ApplicationController
     raise 'LinkedIn Client ID not configured' unless client_id
     client_secret = ENV['LINKEDIN_CLIENT_SECRET']
     raise 'LinkedIn Client Secret not configured' unless client_secret
-    redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/linkedin/callback' : 'https://social-rotation-frontend.onrender.com/linkedin/callback')
+    redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/linkedin/callback' : "#{request.base_url}/api/v1/oauth/linkedin/callback")
     
     token_url = "https://www.linkedin.com/oauth/v2/accessToken"
     
