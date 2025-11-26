@@ -16,7 +16,9 @@ class Api::V1::OauthController < ApplicationController
     params << "success=#{CGI.escape(success)}" if success
     params << "error=#{CGI.escape(error)}" if error
     params << "platform=#{CGI.escape(platform)}"
-    "#{frontend_url}/oauth/callback?#{params.join('&')}"
+    callback_url = "#{frontend_url}/oauth/callback?#{params.join('&')}"
+    Rails.logger.info "OAuth callback URL: #{callback_url}"
+    callback_url
   end
   
   # GET /api/v1/oauth/facebook/login
