@@ -4,10 +4,19 @@ class Api::V1::OauthController < ApplicationController
   # Helper method to get the correct frontend URL for redirects
   def frontend_url
     if Rails.env.development?
-      "http://localhost:3002"  # Use the port your frontend is running on
+      "http://localhost:3001"  # Use the port your frontend is running on
     else
-      ENV['FRONTEND_URL'] || 'https://social-rotation-frontend-f4mwb.ondigitalocean.app'
+      ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
     end
+  end
+  
+  # Helper method to build OAuth callback URL with platform info
+  def oauth_callback_url(success: nil, error: nil, platform:)
+    params = []
+    params << "success=#{CGI.escape(success)}" if success
+    params << "error=#{CGI.escape(error)}" if error
+    params << "platform=#{CGI.escape(platform)}"
+    "#{frontend_url}/oauth/callback?#{params.join('&')}"
   end
   
   # GET /api/v1/oauth/facebook/login
@@ -85,14 +94,14 @@ class Api::V1::OauthController < ApplicationController
         # Store the access token
         user.update!(fb_user_access_key: data['access_token'])
         
-        # Redirect back to frontend with success
-        redirect_to "#{frontend_url}/profile?success=facebook_connected", allow_other_host: true
+        # Redirect back to frontend OAuth callback
+        redirect_to oauth_callback_url(success: 'facebook_connected', platform: 'Facebook'), allow_other_host: true
       else
-        redirect_to "#{frontend_url}/profile?error=facebook_auth_failed", allow_other_host: true
+        redirect_to oauth_callback_url(error: 'facebook_auth_failed', platform: 'Facebook'), allow_other_host: true
       end
     rescue => e
       Rails.logger.error "Facebook OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=facebook_auth_failed", allow_other_host: true
+      redirect_to oauth_callback_url(error: 'facebook_auth_failed', platform: 'Facebook'), allow_other_host: true
     end
   end
   
@@ -144,7 +153,7 @@ class Api::V1::OauthController < ApplicationController
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'X'), allow_other_host: true
     end
     
     # Create OAuth consumer
@@ -180,10 +189,10 @@ class Api::V1::OauthController < ApplicationController
       session.delete(:twitter_request_token)
       session.delete(:twitter_request_secret)
       
-      redirect_to "#{frontend_url}/profile?success=twitter_connected", allow_other_host: true
-    rescue => e
+      redirect_to oauth_callback_url(success: 'twitter_connected', platform: 'X'), allow_other_host: true
+      rescue => e
       Rails.logger.error "Twitter OAuth callback error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=twitter_auth_failed", allow_other_host: true
+      redirect_to oauth_callback_url(error: 'twitter_auth_failed', platform: 'X'), allow_other_host: true
     end
   end
   
@@ -222,14 +231,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'LinkedIn'), allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'LinkedIn'), allow_other_host: true
     end
     
     # Exchange code for access token
@@ -260,13 +269,13 @@ class Api::V1::OauthController < ApplicationController
           linkedin_access_token_time: Time.current
         )
         
-        redirect_to "#{frontend_url}/profile?success=linkedin_connected", allow_other_host: true
+        redirect_to oauth_callback_url(success: 'linkedin_connected', platform: 'LinkedIn'), allow_other_host: true
       else
-        redirect_to "#{frontend_url}/profile?error=linkedin_auth_failed", allow_other_host: true
+        redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
       end
     rescue => e
       Rails.logger.error "LinkedIn OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=linkedin_auth_failed", allow_other_host: true
+      redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
     end
   end
   
@@ -306,14 +315,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'Google My Business'), allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'Google My Business'), allow_other_host: true
     end
     
     # Exchange code for access token
@@ -340,13 +349,13 @@ class Api::V1::OauthController < ApplicationController
       
       if data['refresh_token']
         user.update!(google_refresh_token: data['refresh_token'])
-        redirect_to "#{frontend_url}/profile?success=google_connected", allow_other_host: true
-      else
-        redirect_to "#{frontend_url}/profile?error=google_auth_failed", allow_other_host: true
+        redirect_to oauth_callback_url(success: 'google_connected', platform: 'Google My Business'), allow_other_host: true
+        else
+        redirect_to oauth_callback_url(error: 'google_auth_failed', platform: 'Google My Business'), allow_other_host: true
       end
     rescue => e
       Rails.logger.error "Google OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=google_auth_failed", allow_other_host: true
+      redirect_to oauth_callback_url(error: 'google_auth_failed', platform: 'Google My Business'), allow_other_host: true
     end
   end
   
@@ -377,14 +386,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'TikTok'), allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'TikTok'), allow_other_host: true
     end
     
     # Exchange code for access token
@@ -418,13 +427,13 @@ class Api::V1::OauthController < ApplicationController
           tiktok_refresh_token: data['refresh_token']
         )
         
-        redirect_to "#{frontend_url}/profile?success=tiktok_connected", allow_other_host: true
-      else
-        redirect_to "#{frontend_url}/profile?error=tiktok_auth_failed", allow_other_host: true
+        redirect_to oauth_callback_url(success: 'tiktok_connected', platform: 'TikTok'), allow_other_host: true
+        else
+        redirect_to oauth_callback_url(error: 'tiktok_auth_failed', platform: 'TikTok'), allow_other_host: true
       end
     rescue => e
       Rails.logger.error "TikTok OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=tiktok_auth_failed", allow_other_host: true
+      redirect_to oauth_callback_url(error: 'tiktok_auth_failed', platform: 'TikTok'), allow_other_host: true
     end
   end
   
@@ -456,14 +465,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'YouTube'), allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'YouTube'), allow_other_host: true
     end
     
     # Exchange code for access token
@@ -494,13 +503,13 @@ class Api::V1::OauthController < ApplicationController
           youtube_access_token: data['access_token']
         )
         
-        redirect_to "#{frontend_url}/profile?success=youtube_connected", allow_other_host: true
-      else
-        redirect_to "#{frontend_url}/profile?error=youtube_auth_failed", allow_other_host: true
+        redirect_to oauth_callback_url(success: 'youtube_connected', platform: 'YouTube'), allow_other_host: true
+        else
+        redirect_to oauth_callback_url(error: 'youtube_auth_failed', platform: 'YouTube'), allow_other_host: true
       end
     rescue => e
       Rails.logger.error "YouTube OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=youtube_auth_failed", allow_other_host: true
+      redirect_to oauth_callback_url(error: 'youtube_auth_failed', platform: 'YouTube'), allow_other_host: true
     end
   end
 end
