@@ -56,14 +56,14 @@ class Api::V1::OauthController < ApplicationController
     
     # Verify state to prevent CSRF
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state"
+      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found"
+      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
     end
     
     # Exchange code for access token
@@ -86,13 +86,13 @@ class Api::V1::OauthController < ApplicationController
         user.update!(fb_user_access_key: data['access_token'])
         
         # Redirect back to frontend with success
-        redirect_to "#{frontend_url}/profile?success=facebook_connected"
+        redirect_to "#{frontend_url}/profile?success=facebook_connected", allow_other_host: true
       else
-        redirect_to "#{frontend_url}/profile?error=facebook_auth_failed"
+        redirect_to "#{frontend_url}/profile?error=facebook_auth_failed", allow_other_host: true
       end
     rescue => e
       Rails.logger.error "Facebook OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=facebook_auth_failed"
+      redirect_to "#{frontend_url}/profile?error=facebook_auth_failed", allow_other_host: true
     end
   end
   
@@ -144,7 +144,7 @@ class Api::V1::OauthController < ApplicationController
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found"
+      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
     end
     
     # Create OAuth consumer
@@ -180,10 +180,10 @@ class Api::V1::OauthController < ApplicationController
       session.delete(:twitter_request_token)
       session.delete(:twitter_request_secret)
       
-      redirect_to "#{frontend_url}/profile?success=twitter_connected"
+      redirect_to "#{frontend_url}/profile?success=twitter_connected", allow_other_host: true
     rescue => e
       Rails.logger.error "Twitter OAuth callback error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=twitter_auth_failed"
+      redirect_to "#{frontend_url}/profile?error=twitter_auth_failed", allow_other_host: true
     end
   end
   
@@ -222,14 +222,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state"
+      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found"
+      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
     end
     
     # Exchange code for access token
@@ -260,13 +260,13 @@ class Api::V1::OauthController < ApplicationController
           linkedin_access_token_time: Time.current
         )
         
-        redirect_to "#{frontend_url}/profile?success=linkedin_connected"
+        redirect_to "#{frontend_url}/profile?success=linkedin_connected", allow_other_host: true
       else
-        redirect_to "#{frontend_url}/profile?error=linkedin_auth_failed"
+        redirect_to "#{frontend_url}/profile?error=linkedin_auth_failed", allow_other_host: true
       end
     rescue => e
       Rails.logger.error "LinkedIn OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=linkedin_auth_failed"
+      redirect_to "#{frontend_url}/profile?error=linkedin_auth_failed", allow_other_host: true
     end
   end
   
@@ -306,14 +306,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state"
+      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found"
+      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
     end
     
     # Exchange code for access token
@@ -340,13 +340,13 @@ class Api::V1::OauthController < ApplicationController
       
       if data['refresh_token']
         user.update!(google_refresh_token: data['refresh_token'])
-        redirect_to "#{frontend_url}/profile?success=google_connected"
+        redirect_to "#{frontend_url}/profile?success=google_connected", allow_other_host: true
       else
-        redirect_to "#{frontend_url}/profile?error=google_auth_failed"
+        redirect_to "#{frontend_url}/profile?error=google_auth_failed", allow_other_host: true
       end
     rescue => e
       Rails.logger.error "Google OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=google_auth_failed"
+      redirect_to "#{frontend_url}/profile?error=google_auth_failed", allow_other_host: true
     end
   end
   
@@ -377,14 +377,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state"
+      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found"
+      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
     end
     
     # Exchange code for access token
@@ -418,13 +418,13 @@ class Api::V1::OauthController < ApplicationController
           tiktok_refresh_token: data['refresh_token']
         )
         
-        redirect_to "#{frontend_url}/profile?success=tiktok_connected"
+        redirect_to "#{frontend_url}/profile?success=tiktok_connected", allow_other_host: true
       else
-        redirect_to "#{frontend_url}/profile?error=tiktok_auth_failed"
+        redirect_to "#{frontend_url}/profile?error=tiktok_auth_failed", allow_other_host: true
       end
     rescue => e
       Rails.logger.error "TikTok OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=tiktok_auth_failed"
+      redirect_to "#{frontend_url}/profile?error=tiktok_auth_failed", allow_other_host: true
     end
   end
   
@@ -456,14 +456,14 @@ class Api::V1::OauthController < ApplicationController
     state = params[:state]
     
     if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state"
+      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
     end
     
     user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found"
+      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
     end
     
     # Exchange code for access token
@@ -494,13 +494,13 @@ class Api::V1::OauthController < ApplicationController
           youtube_access_token: data['access_token']
         )
         
-        redirect_to "#{frontend_url}/profile?success=youtube_connected"
+        redirect_to "#{frontend_url}/profile?success=youtube_connected", allow_other_host: true
       else
-        redirect_to "#{frontend_url}/profile?error=youtube_auth_failed"
+        redirect_to "#{frontend_url}/profile?error=youtube_auth_failed", allow_other_host: true
       end
     rescue => e
       Rails.logger.error "YouTube OAuth error: #{e.message}"
-      redirect_to "#{frontend_url}/profile?error=youtube_auth_failed"
+      redirect_to "#{frontend_url}/profile?error=youtube_auth_failed", allow_other_host: true
     end
   end
 end
