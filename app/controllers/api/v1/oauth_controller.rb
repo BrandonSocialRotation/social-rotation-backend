@@ -1,8 +1,6 @@
 class Api::V1::OauthController < ApplicationController
   skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback]
   
-  private
-  
   # Helper method to get the correct frontend URL for redirects
   def frontend_url
     if Rails.env.development?
