@@ -223,12 +223,15 @@ class Api::V1::OauthController < ApplicationController
       # Use production callback URL for LinkedIn OAuth
       redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/linkedin/callback' : "#{request.base_url}/api/v1/oauth/linkedin/callback")
       
+      # Request scopes: w_member_social (for posting) + openid profile email (for profile info)
+      # Note: LinkedIn requires users to re-authorize if scopes change
+      scopes = "w_member_social openid profile email"
       oauth_url = "https://www.linkedin.com/oauth/v2/authorization?" \
                   "response_type=code" \
                   "&client_id=#{client_id}" \
                   "&redirect_uri=#{CGI.escape(redirect_uri)}" \
                   "&state=#{CGI.escape(state)}" \
-                  "&scope=w_member_social"
+                  "&scope=#{CGI.escape(scopes)}"
       
       render json: { oauth_url: oauth_url }
     rescue => e
@@ -558,7 +561,7 @@ class Api::V1::OauthController < ApplicationController
   
   # Fetch LinkedIn profile ID after OAuth connection
   def fetch_linkedin_profile_id(user, access_token)
-    # Try userInfo endpoint first (newer, more reliable)
+    # Try userInfo endpoint first (OpenID Connect - requires openid scope)
     url = "https://api.linkedin.com/v2/userinfo"
     headers = {
       'Authorization' => "Bearer #{access_token}"
@@ -568,17 +571,20 @@ class Api::V1::OauthController < ApplicationController
     
     if response.success?
       data = JSON.parse(response.body)
+      Rails.logger.info "LinkedIn userInfo response: #{data.inspect}"
       # userInfo endpoint returns 'sub' as the user ID (format: urn:li:person:xxxxx or just xxxxx)
       if data['sub']
         # Extract just the ID part if it's a URN
         profile_id = data['sub'].to_s.split(':').last
         user.update!(linkedin_profile_id: profile_id)
-        Rails.logger.info "LinkedIn profile ID fetched and saved: #{profile_id}"
+        Rails.logger.info "LinkedIn profile ID fetched and saved from userInfo: #{profile_id}"
         return profile_id
       end
+    else
+      Rails.logger.warn "LinkedIn userInfo endpoint failed: #{response.code} - #{response.body}"
     end
     
-    # Fallback: try /me endpoint
+    # Fallback: try /me endpoint (requires r_liteprofile or r_basicprofile scope - deprecated but might work)
     url = "https://api.linkedin.com/v2/me"
     headers = {
       'Authorization' => "Bearer #{access_token}",
@@ -589,14 +595,17 @@ class Api::V1::OauthController < ApplicationController
     
     if response.success?
       data = JSON.parse(response.body)
+      Rails.logger.info "LinkedIn /me response: #{data.inspect}"
       if data['id']
         user.update!(linkedin_profile_id: data['id'])
         Rails.logger.info "LinkedIn profile ID fetched from /me and saved: #{data['id']}"
         return data['id']
       end
+    else
+      Rails.logger.warn "LinkedIn /me endpoint failed: #{response.code} - #{response.body}"
     end
     
-    Rails.logger.warn "Could not fetch LinkedIn profile ID - will be fetched on first post. Response: #{response.body}"
+    Rails.logger.warn "Could not fetch LinkedIn profile ID - user needs to reconnect with updated scopes. Response: #{response.body}"
     nil
   end
 end

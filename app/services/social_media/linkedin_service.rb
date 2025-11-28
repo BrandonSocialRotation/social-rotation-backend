@@ -34,6 +34,54 @@ module SocialMedia
     
     # Fetch user's LinkedIn profile ID
     def fetch_profile_id
+      # Try userInfo endpoint first (OpenID Connect - works with openid scope)
+      profile_id = fetch_profile_id_from_userinfo
+      
+      # Fallback to /me endpoint if userInfo doesn't work
+      if profile_id.nil?
+        Rails.logger.warn "userInfo endpoint didn't return ID, trying /me endpoint"
+        profile_id = fetch_profile_id_from_me
+      end
+      
+      if profile_id
+        @user.update!(linkedin_profile_id: profile_id)
+        Rails.logger.info "LinkedIn profile ID saved: #{profile_id}"
+      else
+        Rails.logger.error "Failed to fetch LinkedIn profile ID from both endpoints"
+        raise "Failed to fetch LinkedIn profile ID: No ID found. Please reconnect LinkedIn with updated permissions."
+      end
+    end
+    
+    # Fetch profile ID using userInfo endpoint (OpenID Connect)
+    def fetch_profile_id_from_userinfo
+      url = "https://api.linkedin.com/v2/userinfo"
+      headers = {
+        'Authorization' => "Bearer #{@user.linkedin_access_token}"
+      }
+      
+      response = HTTParty.get(url, headers: headers)
+      
+      unless response.success?
+        Rails.logger.warn "LinkedIn userInfo endpoint failed: #{response.code} - #{response.body}"
+        return nil
+      end
+      
+      data = JSON.parse(response.body)
+      Rails.logger.info "LinkedIn userInfo response: #{data.inspect}"
+      
+      # userInfo endpoint returns 'sub' as the user ID (format: urn:li:person:xxxxx or just xxxxx)
+      if data['sub']
+        # Extract just the ID part if it's a URN
+        profile_id = data['sub'].to_s.split(':').last
+        Rails.logger.info "Extracted profile ID from userInfo: #{profile_id}"
+        return profile_id
+      end
+      
+      nil
+    end
+    
+    # Fetch profile ID using /me endpoint (legacy)
+    def fetch_profile_id_from_me
       url = "#{API_BASE_URL}/me"
       headers = {
         'Authorization' => "Bearer #{@user.linkedin_access_token}",
@@ -43,48 +91,16 @@ module SocialMedia
       response = HTTParty.get(url, headers: headers)
       
       unless response.success?
-        Rails.logger.error "LinkedIn API error fetching profile ID: #{response.code} - #{response.body}"
-        raise "Failed to fetch LinkedIn profile ID: HTTP #{response.code} - #{response.body}"
+        Rails.logger.warn "LinkedIn /me endpoint failed: #{response.code} - #{response.body}"
+        return nil
       end
       
       data = JSON.parse(response.body)
       Rails.logger.info "LinkedIn /me response: #{data.inspect}"
       
-      # LinkedIn API v2 returns the ID in different formats depending on the endpoint
-      # Try multiple possible fields
-      profile_id = data['id'] || 
-                   data.dig('vanityName') || 
-                   data.dig('firstName', 'localized', 'en_US') && data.dig('id') ||
-                   nil
-      
-      # If we still don't have an ID, try the userInfo endpoint
-      if profile_id.nil?
-        Rails.logger.warn "No ID found in /me response, trying userInfo endpoint"
-        profile_id = fetch_profile_id_from_userinfo
-      end
-      
-      if profile_id
-        @user.update!(linkedin_profile_id: profile_id)
-        Rails.logger.info "LinkedIn profile ID saved: #{profile_id}"
-      else
-        Rails.logger.error "Failed to extract LinkedIn profile ID from response: #{data.inspect}"
-        raise "Failed to fetch LinkedIn profile ID: No ID found in response"
-      end
-    end
-    
-    # Alternative method to fetch profile ID using userInfo endpoint
-    def fetch_profile_id_from_userinfo
-      url = "#{API_BASE_URL}/userinfo"
-      headers = {
-        'Authorization' => "Bearer #{@user.linkedin_access_token}"
-      }
-      
-      response = HTTParty.get(url, headers: headers)
-      
-      if response.success?
-        data = JSON.parse(response.body)
-        # userInfo endpoint returns 'sub' as the user ID
-        return data['sub'] if data['sub']
+      # Try to extract ID from various possible fields
+      if data['id']
+        return data['id']
       end
       
       nil
