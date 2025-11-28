@@ -290,15 +290,25 @@ module SocialMedia
       begin
         # Read image file
         image_data = File.read(actual_path)
+        Rails.logger.info "LinkedIn upload - file size: #{image_data.length} bytes, upload_url: #{@upload_url}"
         
         response = HTTParty.post(@upload_url, 
           headers: headers,
-          body: image_data
+          body: image_data,
+          timeout: 30
         )
         
+        Rails.logger.info "LinkedIn upload response - status: #{response.code}, body: #{response.body[0..500]}"
+        
         unless response.success?
-          raise "Failed to upload image to LinkedIn"
+          error_msg = response.body || "Unknown error"
+          Rails.logger.error "LinkedIn upload failed - status: #{response.code}, error: #{error_msg}"
+          raise "Failed to upload image to LinkedIn: #{response.code} - #{error_msg}"
         end
+      rescue => e
+        Rails.logger.error "LinkedIn upload exception: #{e.class} - #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        raise
       ensure
         # Clean up temp file if we created one
         if temp_file
