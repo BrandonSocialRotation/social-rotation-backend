@@ -243,6 +243,11 @@ module SocialMedia
     # @param asset_urn [String] Asset URN of uploaded image
     # @return [Hash] Response from LinkedIn API
     def create_post(message, asset_urn)
+      # Profile ID is required for posting - if we still don't have it, we can't proceed
+      unless @user.linkedin_profile_id.present?
+        raise "LinkedIn profile ID is required for posting. Please reconnect LinkedIn with OpenID Connect enabled in your LinkedIn app settings, or contact support."
+      end
+      
       url = "#{API_BASE_URL}/ugcPosts"
       headers = {
         'Authorization' => "Bearer #{@user.linkedin_access_token}",
@@ -279,7 +284,28 @@ module SocialMedia
       }
       
       response = HTTParty.post(url, headers: headers, body: body.to_json)
-      JSON.parse(response.body)
+      data = JSON.parse(response.body)
+      
+      unless response.success?
+        error_msg = data['message'] || response.body
+        Rails.logger.error "LinkedIn post creation failed: #{error_msg}"
+        
+        # Try to extract profile ID from error if it's mentioned
+        if error_msg.include?('person:') && !@user.linkedin_profile_id.present?
+          match = error_msg.match(/urn:li:person:(\w+)/)
+          if match
+            profile_id = match[1]
+            @user.update!(linkedin_profile_id: profile_id)
+            Rails.logger.info "Extracted LinkedIn profile ID from post error: #{profile_id}"
+            # Retry the post
+            return create_post(message, asset_urn)
+          end
+        end
+        
+        raise "Failed to create LinkedIn post: #{error_msg}"
+      end
+      
+      data
     end
   end
 end
