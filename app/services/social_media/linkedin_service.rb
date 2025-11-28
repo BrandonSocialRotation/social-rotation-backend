@@ -271,23 +271,67 @@ module SocialMedia
     
     # Upload image to LinkedIn
     # @param asset_urn [String] Asset URN from registration
-    # @param image_path [String] Local path to image
+    # @param image_path [String] Local path to image or URL
     def upload_image(asset_urn, image_path)
       headers = {
         'Authorization' => "Bearer #{@user.linkedin_access_token}",
         'X-Restli-Protocol-Version' => '2.0.0'
       }
       
-      # Read image file
-      image_data = File.read(image_path)
+      # Handle URLs by downloading to temp file
+      temp_file = nil
+      actual_path = image_path
       
-      response = HTTParty.post(@upload_url, 
-        headers: headers,
-        body: image_data
-      )
+      if image_path.start_with?('http://') || image_path.start_with?('https://')
+        temp_file = download_image_to_temp(image_path)
+        actual_path = temp_file.path
+      end
       
-      unless response.success?
-        raise "Failed to upload image to LinkedIn"
+      begin
+        # Read image file
+        image_data = File.read(actual_path)
+        
+        response = HTTParty.post(@upload_url, 
+          headers: headers,
+          body: image_data
+        )
+        
+        unless response.success?
+          raise "Failed to upload image to LinkedIn"
+        end
+      ensure
+        # Clean up temp file if we created one
+        if temp_file
+          temp_file.close
+          temp_file.unlink
+        end
+      end
+    end
+    
+    # Download image from URL to a temporary file
+    # @param image_url [String] URL of the image
+    # @return [Tempfile] Temporary file object
+    def download_image_to_temp(image_url)
+      require 'open-uri'
+      require 'tempfile'
+      
+      # Create a temporary file
+      temp_file = Tempfile.new(['linkedin_image', '.jpg'])
+      temp_file.binmode
+      
+      begin
+        # Download the image
+        URI.open(image_url, 'rb') do |remote_file|
+          temp_file.write(remote_file.read)
+        end
+        
+        temp_file.rewind
+        temp_file
+      rescue => e
+        temp_file.close
+        temp_file.unlink
+        Rails.logger.error "Failed to download image from #{image_url}: #{e.message}"
+        raise "Failed to download image: #{e.message}"
       end
     end
     

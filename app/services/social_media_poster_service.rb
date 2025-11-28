@@ -13,6 +13,7 @@ class SocialMediaPosterService
     @post_to = post_to_flags
     @description = description
     @twitter_description = twitter_description || description
+    @temp_files = [] # Track temp files for cleanup
   end
   
   # Post to all selected social media platforms
@@ -20,9 +21,10 @@ class SocialMediaPosterService
   def post_to_all
     results = {}
     
-    # Get image URL (needs to be publicly accessible)
-    image_url = get_public_image_url
-    image_path = get_local_image_path
+    begin
+      # Get image URL (needs to be publicly accessible)
+      image_url = get_public_image_url
+      image_path = get_local_image_path
     
     # Post to Facebook
     if should_post_to?(BIT_FACEBOOK)
@@ -50,6 +52,17 @@ class SocialMediaPosterService
     end
     
     results
+    ensure
+      # Clean up any temporary files
+      @temp_files.each do |temp_file|
+        begin
+          temp_file.close
+          temp_file.unlink
+        rescue => e
+          Rails.logger.warn "Failed to clean up temp file: #{e.message}"
+        end
+      end
+    end
   end
   
   private
@@ -74,9 +87,47 @@ class SocialMediaPosterService
   end
   
   # Get local file path for the image
+  # Downloads the image if it's a URL, otherwise returns local path
   # @return [String] Local file path
   def get_local_image_path
-    Rails.root.join('public', @bucket_image.image.file_path).to_s
+    file_path = @bucket_image.image.file_path
+    
+    # If it's a URL (http:// or https://), download it to a temp file
+    if file_path.start_with?('http://') || file_path.start_with?('https://')
+      download_image_to_temp(file_path)
+    else
+      # Local file path
+      Rails.root.join('public', file_path).to_s
+    end
+  end
+  
+  # Download image from URL to a temporary file
+  # @param image_url [String] URL of the image
+  # @return [String] Path to temporary file
+  def download_image_to_temp(image_url)
+    require 'open-uri'
+    require 'tempfile'
+    
+    # Create a temporary file
+    temp_file = Tempfile.new(['rss_image', '.jpg'])
+    temp_file.binmode
+    
+    begin
+      # Download the image
+      URI.open(image_url, 'rb') do |remote_file|
+        temp_file.write(remote_file.read)
+      end
+      
+      temp_file.rewind
+      # Track temp file for cleanup
+      @temp_files << temp_file
+      temp_file.path
+    rescue => e
+      temp_file.close
+      temp_file.unlink
+      Rails.logger.error "Failed to download image from #{image_url}: #{e.message}"
+      raise "Failed to download image: #{e.message}"
+    end
   end
   
   # Post to Facebook
