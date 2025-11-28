@@ -288,9 +288,14 @@ module SocialMedia
       end
       
       begin
-        # Read image file
-        image_data = File.read(actual_path)
+        # Read image file in binary mode
+        image_data = File.binread(actual_path)
         Rails.logger.info "LinkedIn upload - file size: #{image_data.length} bytes, upload_url: #{@upload_url}"
+        
+        # Detect image content type from file
+        content_type = detect_image_content_type(actual_path, image_data)
+        headers['Content-Type'] = content_type if content_type
+        Rails.logger.info "LinkedIn upload - Content-Type: #{content_type}"
         
         response = HTTParty.post(@upload_url, 
           headers: headers,
@@ -325,8 +330,12 @@ module SocialMedia
       require 'open-uri'
       require 'tempfile'
       
-      # Create a temporary file
-      temp_file = Tempfile.new(['linkedin_image', '.jpg'])
+      # Try to detect file extension from URL
+      extension = File.extname(URI.parse(image_url).path)
+      extension = '.jpg' if extension.empty? || !['.jpg', '.jpeg', '.png', '.gif'].include?(extension.downcase)
+      
+      # Create a temporary file with appropriate extension
+      temp_file = Tempfile.new(['linkedin_image', extension])
       temp_file.binmode
       
       begin
@@ -343,6 +352,43 @@ module SocialMedia
         Rails.logger.error "Failed to download image from #{image_url}: #{e.message}"
         raise "Failed to download image: #{e.message}"
       end
+    end
+    
+    # Detect image content type from file path or data
+    # @param file_path [String] Path to image file
+    # @param image_data [String] Image file data (first few bytes for magic number detection)
+    # @return [String] Content-Type header value
+    def detect_image_content_type(file_path, image_data = nil)
+      # Try to detect from file extension first
+      extension = File.extname(file_path).downcase
+      case extension
+      when '.jpg', '.jpeg'
+        return 'image/jpeg'
+      when '.png'
+        return 'image/png'
+      when '.gif'
+        return 'image/gif'
+      when '.webp'
+        return 'image/webp'
+      end
+      
+      # If extension doesn't help, try magic number detection
+      if image_data && image_data.length >= 4
+        magic = image_data[0..3]
+        case magic
+        when "\xFF\xD8\xFF".b
+          return 'image/jpeg'
+        when "\x89PNG".b
+          return 'image/png'
+        when "GIF8".b
+          return 'image/gif'
+        when "RIFF".b
+          return 'image/webp' if image_data[8..11] == "WEBP".b
+        end
+      end
+      
+      # Default to JPEG if we can't determine
+      'image/jpeg'
     end
     
     # Create LinkedIn post
