@@ -334,7 +334,7 @@ class Api::V1::OauthController < ApplicationController
         }
       })
       
-      Rails.logger.info "LinkedIn token exchange response status: #{response.code}, body: #{response.body[0..200]}"
+      Rails.logger.info "LinkedIn token exchange response status: #{response.code}, body: #{response.body[0..500]}"
       
       unless response.success?
         Rails.logger.error "LinkedIn token exchange failed: #{response.code} - #{response.body}"
@@ -342,6 +342,7 @@ class Api::V1::OauthController < ApplicationController
       end
       
       data = JSON.parse(response.body)
+      Rails.logger.info "LinkedIn token exchange data keys: #{data.keys.inspect}, has id_token: #{data['id_token'].present?}"
       
       if data['access_token']
         user.update!(
