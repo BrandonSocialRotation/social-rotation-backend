@@ -553,5 +553,51 @@ class Api::V1::OauthController < ApplicationController
       redirect_to oauth_callback_url(error: 'youtube_auth_failed', platform: 'YouTube'), allow_other_host: true
     end
   end
+  
+  private
+  
+  # Fetch LinkedIn profile ID after OAuth connection
+  def fetch_linkedin_profile_id(user, access_token)
+    # Try userInfo endpoint first (newer, more reliable)
+    url = "https://api.linkedin.com/v2/userinfo"
+    headers = {
+      'Authorization' => "Bearer #{access_token}"
+    }
+    
+    response = HTTParty.get(url, headers: headers)
+    
+    if response.success?
+      data = JSON.parse(response.body)
+      # userInfo endpoint returns 'sub' as the user ID (format: urn:li:person:xxxxx or just xxxxx)
+      if data['sub']
+        # Extract just the ID part if it's a URN
+        profile_id = data['sub'].to_s.split(':').last
+        user.update!(linkedin_profile_id: profile_id)
+        Rails.logger.info "LinkedIn profile ID fetched and saved: #{profile_id}"
+        return profile_id
+      end
+    end
+    
+    # Fallback: try /me endpoint
+    url = "https://api.linkedin.com/v2/me"
+    headers = {
+      'Authorization' => "Bearer #{access_token}",
+      'X-Restli-Protocol-Version' => '2.0.0'
+    }
+    
+    response = HTTParty.get(url, headers: headers)
+    
+    if response.success?
+      data = JSON.parse(response.body)
+      if data['id']
+        user.update!(linkedin_profile_id: data['id'])
+        Rails.logger.info "LinkedIn profile ID fetched from /me and saved: #{data['id']}"
+        return data['id']
+      end
+    end
+    
+    Rails.logger.warn "Could not fetch LinkedIn profile ID - will be fetched on first post. Response: #{response.body}"
+    nil
+  end
 end
 
