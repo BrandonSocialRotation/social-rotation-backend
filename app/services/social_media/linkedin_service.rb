@@ -70,10 +70,31 @@ module SocialMedia
     
     # Try to extract profile ID from the access token or by making a test API call
     def extract_profile_id_from_token
-      # Try to get profile ID from a simple API call that might work with w_member_social scope
-      # LinkedIn's posting API might return the profile ID in error messages or responses
+      # Try multiple methods to get profile ID
+      
+      # Method 1: Try to decode access token if it's a JWT (OpenID Connect tokens are JWTs)
       begin
-        # Try to make a minimal API call to see if we can get any user info
+        # LinkedIn access tokens might be JWTs that contain user info
+        token_parts = @user.linkedin_access_token.split('.')
+        if token_parts.length == 3 # JWT has 3 parts
+          # Decode the payload (second part)
+          require 'base64'
+          payload = Base64.urlsafe_decode64(token_parts[1])
+          token_data = JSON.parse(payload)
+          
+          # Check for common JWT claims that might contain user ID
+          if token_data['sub']
+            profile_id = token_data['sub'].to_s.split(':').last
+            Rails.logger.info "Extracted LinkedIn profile ID from JWT token: #{profile_id}"
+            return profile_id
+          end
+        end
+      rescue => e
+        Rails.logger.debug "Access token is not a JWT or doesn't contain profile ID: #{e.message}"
+      end
+      
+      # Method 2: Try /me endpoint with minimal projection
+      begin
         url = "#{API_BASE_URL}/me?projection=(id)"
         headers = {
           'Authorization' => "Bearer #{@user.linkedin_access_token}",
@@ -86,7 +107,7 @@ module SocialMedia
           return data['id'] if data['id']
         end
       rescue => e
-        Rails.logger.warn "Could not extract profile ID from token: #{e.message}"
+        Rails.logger.debug "Could not get profile ID from /me endpoint: #{e.message}"
       end
       
       nil
@@ -149,9 +170,17 @@ module SocialMedia
     # Register an upload with LinkedIn
     # @return [String] Asset URN
     def register_upload
-      # If we don't have profile ID, try to extract it from the error response
+      # Profile ID is required for registerUpload - if we don't have it, we need to get it first
       unless @user.linkedin_profile_id.present?
-        Rails.logger.warn "No LinkedIn profile ID available - will try to extract from API response"
+        # Try one more time to get it from token
+        profile_id = extract_profile_id_from_token
+        if profile_id
+          @user.update!(linkedin_profile_id: profile_id)
+          Rails.logger.info "LinkedIn profile ID extracted from token before upload: #{profile_id}"
+        else
+          # Try to get it by attempting upload without owner - LinkedIn error might tell us
+          Rails.logger.warn "No LinkedIn profile ID available - will try upload without owner to extract from error"
+        end
       end
       
       url = "#{API_BASE_URL}/assets?action=registerUpload"
@@ -161,7 +190,7 @@ module SocialMedia
         'X-Restli-Protocol-Version' => '2.0.0'
       }
       
-      # Try with profile ID if available, otherwise try without (LinkedIn might accept it)
+      # Profile ID is required - if we still don't have it, try without owner to get error with profile ID
       owner_urn = @user.linkedin_profile_id.present? ? "urn:li:person:#{@user.linkedin_profile_id}" : nil
       
       body = {
@@ -176,31 +205,55 @@ module SocialMedia
         }
       }
       
-      # Only include owner if we have profile ID
-      body[:registerUploadRequest][:owner] = owner_urn if owner_urn
+      # Owner is required - if we don't have profile ID, try without it to see error
+      if owner_urn
+        body[:registerUploadRequest][:owner] = owner_urn
+      end
       
       response = HTTParty.post(url, headers: headers, body: body.to_json)
       data = JSON.parse(response.body)
       
-      # If registration failed due to missing profile ID, try to extract it from error
+      # If registration failed, try to extract profile ID from error
       unless response.success?
-        error_msg = data['message'] || response.body
+        error_msg = data['message'] || data.to_s || response.body
         Rails.logger.warn "LinkedIn upload registration failed: #{error_msg}"
+        Rails.logger.warn "Full error response: #{data.inspect}"
         
-        # Try to extract profile ID from error message if it mentions it
-        if error_msg.include?('person:') && !@user.linkedin_profile_id.present?
-          # Error might contain the expected format
-          match = error_msg.match(/urn:li:person:(\w+)/)
-          if match
-            profile_id = match[1]
-            @user.update!(linkedin_profile_id: profile_id)
-            Rails.logger.info "Extracted LinkedIn profile ID from error message: #{profile_id}"
-            # Retry with the extracted profile ID
-            return register_upload
-          end
+        # Try multiple patterns to extract profile ID from error
+        profile_id = nil
+        
+        # Pattern 1: urn:li:person:XXXXX
+        if error_msg.include?('person:')
+          match = error_msg.match(/urn:li:person:([A-Za-z0-9_-]+)/)
+          profile_id = match[1] if match
         end
         
-        raise "Failed to register LinkedIn upload: #{error_msg}"
+        # Pattern 2: Look for numeric ID in error
+        unless profile_id
+          match = error_msg.match(/person[:\s]+([A-Za-z0-9_-]+)/i)
+          profile_id = match[1] if match
+        end
+        
+        # Pattern 3: Check if error contains a LinkedIn URN format
+        unless profile_id
+          match = error_msg.match(/([A-Za-z0-9_-]{10,})/)
+          # LinkedIn profile IDs are typically alphanumeric and at least 10 characters
+          profile_id = match[1] if match && match[1].length >= 10
+        end
+        
+        if profile_id && !@user.linkedin_profile_id.present?
+          @user.update!(linkedin_profile_id: profile_id)
+          Rails.logger.info "Extracted LinkedIn profile ID from error message: #{profile_id}"
+          # Retry with the extracted profile ID
+          return register_upload
+        end
+        
+        # If we still don't have profile ID, provide helpful error
+        if !@user.linkedin_profile_id.present?
+          raise "LinkedIn profile ID is required for posting. Please enable OpenID Connect in your LinkedIn app settings (Products > Sign In with LinkedIn using OpenID Connect) and reconnect your LinkedIn account. Error: #{error_msg}"
+        else
+          raise "Failed to register LinkedIn upload: #{error_msg}"
+        end
       end
       
       if data['value']
@@ -212,7 +265,7 @@ module SocialMedia
         
         asset_urn
       else
-        raise "Failed to register LinkedIn upload: #{data['message']}"
+        raise "Failed to register LinkedIn upload: #{data['message'] || 'Unknown error'}"
       end
     end
     
