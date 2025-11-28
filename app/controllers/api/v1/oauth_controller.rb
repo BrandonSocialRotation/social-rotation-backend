@@ -244,8 +244,30 @@ class Api::V1::OauthController < ApplicationController
   def linkedin_callback
     code = params[:code]
     state = params[:state]
+    error_param = params[:error]
+    error_description = params[:error_description]
     
-    Rails.logger.info "LinkedIn callback - received state: #{state}, session state: #{session[:oauth_state]}, session id: #{session.id}"
+    Rails.logger.info "LinkedIn callback - received code: #{code.present? ? 'present' : 'missing'}, state: #{state}, error: #{error_param}, error_description: #{error_description}"
+    
+    # Check if LinkedIn returned an error (user denied, etc.)
+    if error_param.present?
+      Rails.logger.error "LinkedIn OAuth error from provider: #{error_param} - #{error_description}"
+      error_message = case error_param
+      when 'access_denied'
+        'linkedin_access_denied'
+      when 'invalid_request'
+        'linkedin_invalid_request'
+      else
+        'linkedin_auth_failed'
+      end
+      return redirect_to oauth_callback_url(error: error_message, platform: 'LinkedIn'), allow_other_host: true
+    end
+    
+    # Check if code is missing
+    unless code.present?
+      Rails.logger.error "LinkedIn callback - missing authorization code"
+      return redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
+    end
     
     # Decode user_id from state parameter (format: user_id:random_state)
     user_id = nil
@@ -279,9 +301,17 @@ class Api::V1::OauthController < ApplicationController
     
     # Exchange code for access token
     client_id = ENV['LINKEDIN_CLIENT_ID']
-    raise 'LinkedIn Client ID not configured' unless client_id
+    unless client_id
+      Rails.logger.error "LinkedIn Client ID not configured"
+      return redirect_to oauth_callback_url(error: 'linkedin_config_error', platform: 'LinkedIn'), allow_other_host: true
+    end
+    
     client_secret = ENV['LINKEDIN_CLIENT_SECRET']
-    raise 'LinkedIn Client Secret not configured' unless client_secret
+    unless client_secret
+      Rails.logger.error "LinkedIn Client Secret not configured"
+      return redirect_to oauth_callback_url(error: 'linkedin_config_error', platform: 'LinkedIn'), allow_other_host: true
+    end
+    
     redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/linkedin/callback' : "#{request.base_url}/api/v1/oauth/linkedin/callback")
     
     token_url = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -296,6 +326,13 @@ class Api::V1::OauthController < ApplicationController
           client_secret: client_secret
         }
       })
+      
+      Rails.logger.info "LinkedIn token exchange response status: #{response.code}, body: #{response.body[0..200]}"
+      
+      unless response.success?
+        Rails.logger.error "LinkedIn token exchange failed: #{response.code} - #{response.body}"
+        return redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
+      end
       
       data = JSON.parse(response.body)
       
@@ -315,10 +352,16 @@ class Api::V1::OauthController < ApplicationController
         
         redirect_to oauth_callback_url(success: 'linkedin_connected', platform: 'LinkedIn'), allow_other_host: true
       else
+        error_msg = data['error_description'] || data['error'] || 'Unknown error'
+        Rails.logger.error "LinkedIn token exchange failed - no access_token in response: #{error_msg}"
         redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
       end
+    rescue JSON::ParserError => e
+      Rails.logger.error "LinkedIn OAuth JSON parse error: #{e.message}, response body: #{response.body[0..200]}"
+      redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
     rescue => e
       Rails.logger.error "LinkedIn OAuth error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
       redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
     end
   end
