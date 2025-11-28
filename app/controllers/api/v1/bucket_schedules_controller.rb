@@ -22,9 +22,28 @@ class Api::V1::BucketSchedulesController < ApplicationController
 
   # POST /api/v1/bucket_schedules
   def create
-    @bucket = current_user.buckets.find(params[:bucket_id])
+    bucket_id = params[:bucket_id] || params.dig(:bucket_schedule, :bucket_id)
+    @bucket = current_user.buckets.find(bucket_id)
     
-    @bucket_schedule = @bucket.bucket_schedules.build(bucket_schedule_params)
+    schedule_params = bucket_schedule_params
+    # Handle nested params
+    if params[:bucket_schedule].present?
+      schedule_params = params.require(:bucket_schedule).permit(
+        :schedule, :schedule_type, :post_to, :description, :twitter_description,
+        :times_sent, :skip_image, :bucket_image_id
+      )
+    end
+    
+    @bucket_schedule = @bucket.bucket_schedules.build(schedule_params)
+    
+    # Validate that bucket_image_id belongs to the bucket if provided
+    if @bucket_schedule.bucket_image_id.present?
+      unless @bucket.bucket_images.exists?(@bucket_schedule.bucket_image_id)
+        return render json: {
+          errors: ['Selected image does not belong to this bucket']
+        }, status: :unprocessable_entity
+      end
+    end
     
     if @bucket_schedule.save
       render json: {

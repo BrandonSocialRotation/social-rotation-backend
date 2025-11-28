@@ -47,7 +47,15 @@ class Api::V1::SchedulerController < ApplicationController
     bucket_image = @bucket_schedule.get_next_bucket_image_due
     
     unless bucket_image
-      return render json: { error: 'No images available in bucket' }, status: :unprocessable_entity
+      # Provide more detailed error message
+      bucket = @bucket_schedule.bucket
+      image_count = bucket.bucket_images.count
+      
+      if image_count == 0
+        return render json: { error: 'No images available in bucket. Please add images to the bucket first.' }, status: :unprocessable_entity
+      else
+        return render json: { error: "Unable to determine next image to post. Bucket has #{image_count} image(s) but rotation logic failed." }, status: :unprocessable_entity
+      end
     end
     
     # Get description (use bucket_image description if available, otherwise schedule description)

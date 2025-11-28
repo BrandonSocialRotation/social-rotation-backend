@@ -79,9 +79,19 @@ class BucketSchedule < ApplicationRecord
   def get_next_bucket_image_due(offset = 0, skip_offset = 0)
     if schedule_type == SCHEDULE_TYPE_ONCE || schedule_type == SCHEDULE_TYPE_ANNUALLY
       return bucket_image if bucket_image
+      # If schedule_type is ONCE/ANNUALLY but no bucket_image_id, fall through to rotation logic
     end
     
-    bucket.get_next_rotation_image(offset, skip_offset)
+    # For rotation schedules, get next image from bucket
+    result = bucket.get_next_rotation_image(offset, skip_offset)
+    
+    # If rotation returns nil but bucket has images, return first image as fallback
+    if result.nil? && bucket.bucket_images.any?
+      Rails.logger.warn "get_next_rotation_image returned nil for bucket #{bucket.id}, falling back to first image"
+      return bucket.bucket_images.order(:friendly_name).first
+    end
+    
+    result
   end
   
   def should_display_twitter_warning?
