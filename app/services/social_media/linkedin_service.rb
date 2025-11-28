@@ -52,7 +52,33 @@ module SocialMedia
       end
     end
     
-    # Fetch profile ID using userInfo endpoint (OpenID Connect)
+    # Fetch profile ID using /me endpoint (requires r_liteprofile scope)
+    def fetch_profile_id_from_me
+      url = "#{API_BASE_URL}/me"
+      headers = {
+        'Authorization' => "Bearer #{@user.linkedin_access_token}",
+        'X-Restli-Protocol-Version' => '2.0.0'
+      }
+      
+      response = HTTParty.get(url, headers: headers)
+      
+      unless response.success?
+        Rails.logger.warn "LinkedIn /me endpoint failed: #{response.code} - #{response.body}"
+        return nil
+      end
+      
+      data = JSON.parse(response.body)
+      Rails.logger.info "LinkedIn /me response: #{data.inspect}"
+      
+      # Try to extract ID from various possible fields
+      if data['id']
+        return data['id']
+      end
+      
+      nil
+    end
+    
+    # Fetch profile ID using userInfo endpoint (OpenID Connect - requires openid scope, may not be available)
     def fetch_profile_id_from_userinfo
       url = "https://api.linkedin.com/v2/userinfo"
       headers = {
@@ -75,32 +101,6 @@ module SocialMedia
         profile_id = data['sub'].to_s.split(':').last
         Rails.logger.info "Extracted profile ID from userInfo: #{profile_id}"
         return profile_id
-      end
-      
-      nil
-    end
-    
-    # Fetch profile ID using /me endpoint (legacy)
-    def fetch_profile_id_from_me
-      url = "#{API_BASE_URL}/me"
-      headers = {
-        'Authorization' => "Bearer #{@user.linkedin_access_token}",
-        'X-Restli-Protocol-Version' => '2.0.0'
-      }
-      
-      response = HTTParty.get(url, headers: headers)
-      
-      unless response.success?
-        Rails.logger.warn "LinkedIn /me endpoint failed: #{response.code} - #{response.body}"
-        return nil
-      end
-      
-      data = JSON.parse(response.body)
-      Rails.logger.info "LinkedIn /me response: #{data.inspect}"
-      
-      # Try to extract ID from various possible fields
-      if data['id']
-        return data['id']
       end
       
       nil
