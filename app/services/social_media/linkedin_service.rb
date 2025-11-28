@@ -41,13 +41,53 @@ module SocialMedia
       }
       
       response = HTTParty.get(url, headers: headers)
-      data = JSON.parse(response.body)
       
-      if data['id']
-        @user.update!(linkedin_profile_id: data['id'])
-      else
-        raise "Failed to fetch LinkedIn profile ID"
+      unless response.success?
+        Rails.logger.error "LinkedIn API error fetching profile ID: #{response.code} - #{response.body}"
+        raise "Failed to fetch LinkedIn profile ID: HTTP #{response.code} - #{response.body}"
       end
+      
+      data = JSON.parse(response.body)
+      Rails.logger.info "LinkedIn /me response: #{data.inspect}"
+      
+      # LinkedIn API v2 returns the ID in different formats depending on the endpoint
+      # Try multiple possible fields
+      profile_id = data['id'] || 
+                   data.dig('vanityName') || 
+                   data.dig('firstName', 'localized', 'en_US') && data.dig('id') ||
+                   nil
+      
+      # If we still don't have an ID, try the userInfo endpoint
+      if profile_id.nil?
+        Rails.logger.warn "No ID found in /me response, trying userInfo endpoint"
+        profile_id = fetch_profile_id_from_userinfo
+      end
+      
+      if profile_id
+        @user.update!(linkedin_profile_id: profile_id)
+        Rails.logger.info "LinkedIn profile ID saved: #{profile_id}"
+      else
+        Rails.logger.error "Failed to extract LinkedIn profile ID from response: #{data.inspect}"
+        raise "Failed to fetch LinkedIn profile ID: No ID found in response"
+      end
+    end
+    
+    # Alternative method to fetch profile ID using userInfo endpoint
+    def fetch_profile_id_from_userinfo
+      url = "#{API_BASE_URL}/userinfo"
+      headers = {
+        'Authorization' => "Bearer #{@user.linkedin_access_token}"
+      }
+      
+      response = HTTParty.get(url, headers: headers)
+      
+      if response.success?
+        data = JSON.parse(response.body)
+        # userInfo endpoint returns 'sub' as the user ID
+        return data['sub'] if data['sub']
+      end
+      
+      nil
     end
     
     # Register an upload with LinkedIn

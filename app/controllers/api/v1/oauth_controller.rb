@@ -302,6 +302,14 @@ class Api::V1::OauthController < ApplicationController
           linkedin_access_token_time: Time.current
         )
         
+        # Try to fetch and save profile ID immediately after connection
+        begin
+          fetch_linkedin_profile_id(user, data['access_token'])
+        rescue => e
+          Rails.logger.warn "Failed to fetch LinkedIn profile ID during OAuth callback: #{e.message}"
+          # Don't fail the OAuth flow if profile ID fetch fails - it can be fetched later when posting
+        end
+        
         redirect_to oauth_callback_url(success: 'linkedin_connected', platform: 'LinkedIn'), allow_other_host: true
       else
         redirect_to oauth_callback_url(error: 'linkedin_auth_failed', platform: 'LinkedIn'), allow_other_host: true
