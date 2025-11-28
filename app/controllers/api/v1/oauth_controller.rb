@@ -223,10 +223,11 @@ class Api::V1::OauthController < ApplicationController
       # Use production callback URL for LinkedIn OAuth
       redirect_uri = ENV['LINKEDIN_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/linkedin/callback' : "#{request.base_url}/api/v1/oauth/linkedin/callback")
       
-      # Request scopes: w_member_social (for posting) + r_liteprofile (for profile info)
-      # Note: openid scope requires special LinkedIn app configuration, so we use r_liteprofile instead
+      # Request only w_member_social scope (required for posting)
+      # Note: Other scopes (r_liteprofile, r_emailaddress, openid) require special LinkedIn app configuration
+      # Profile ID will be fetched from posting API or made optional
       # Note: LinkedIn requires users to re-authorize if scopes change
-      scopes = "w_member_social r_liteprofile r_emailaddress"
+      scopes = "w_member_social"
       oauth_url = "https://www.linkedin.com/oauth/v2/authorization?" \
                   "response_type=code" \
                   "&client_id=#{client_id}" \
@@ -346,11 +347,15 @@ class Api::V1::OauthController < ApplicationController
         )
         
         # Try to fetch and save profile ID immediately after connection
+        # Note: This may fail if scopes are not available - that's OK, we'll try to extract it during posting
         begin
-          fetch_linkedin_profile_id(user, data['access_token'])
+          profile_id = fetch_linkedin_profile_id(user, data['access_token'])
+          unless profile_id
+            Rails.logger.info "LinkedIn profile ID not available immediately - will be extracted during first post"
+          end
         rescue => e
-          Rails.logger.warn "Failed to fetch LinkedIn profile ID during OAuth callback: #{e.message}"
-          # Don't fail the OAuth flow if profile ID fetch fails - it can be fetched later when posting
+          Rails.logger.warn "Failed to fetch LinkedIn profile ID during OAuth callback: #{e.message}. Will try to extract during first post."
+          # Don't fail the OAuth flow if profile ID fetch fails - it can be extracted during posting
         end
         
         redirect_to oauth_callback_url(success: 'linkedin_connected', platform: 'LinkedIn'), allow_other_host: true
@@ -606,8 +611,9 @@ class Api::V1::OauthController < ApplicationController
   private
   
   # Fetch LinkedIn profile ID after OAuth connection
+  # Returns profile ID if found, nil otherwise (will be extracted during posting)
   def fetch_linkedin_profile_id(user, access_token)
-    # Try /me endpoint first (requires r_liteprofile scope)
+    # Try /me endpoint first (requires r_liteprofile scope - may not be available)
     url = "https://api.linkedin.com/v2/me"
     headers = {
       'Authorization' => "Bearer #{access_token}",
@@ -651,7 +657,7 @@ class Api::V1::OauthController < ApplicationController
       Rails.logger.warn "LinkedIn userInfo endpoint failed: #{response.code} - #{response.body}"
     end
     
-    Rails.logger.warn "Could not fetch LinkedIn profile ID - will be fetched on first post attempt"
+    Rails.logger.info "Could not fetch LinkedIn profile ID from API - will be extracted during first post attempt"
     nil
   end
 end

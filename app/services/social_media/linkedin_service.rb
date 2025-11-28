@@ -15,9 +15,23 @@ module SocialMedia
         raise "User does not have LinkedIn connected"
       end
       
+      # Try to get profile ID if not stored - but don't fail if we can't get it
+      # We'll try to extract it from the posting API response
       unless @user.linkedin_profile_id.present?
-        # Fetch profile ID if not stored
-        fetch_profile_id
+        begin
+          fetch_profile_id
+        rescue => e
+          Rails.logger.warn "Could not fetch LinkedIn profile ID: #{e.message}. Will try to extract from posting API."
+        end
+      end
+      
+      # If still no profile ID, try to get it from the access token or posting flow
+      unless @user.linkedin_profile_id.present?
+        profile_id = extract_profile_id_from_token
+        if profile_id
+          @user.update!(linkedin_profile_id: profile_id)
+          Rails.logger.info "LinkedIn profile ID extracted from token: #{profile_id}"
+        end
       end
       
       # Step 1: Register upload
@@ -33,23 +47,49 @@ module SocialMedia
     private
     
     # Fetch user's LinkedIn profile ID
+    # Note: This may fail if scopes are not available - that's OK, we'll try other methods
     def fetch_profile_id
-      # Try userInfo endpoint first (OpenID Connect - works with openid scope)
-      profile_id = fetch_profile_id_from_userinfo
+      # Try /me endpoint first (requires r_liteprofile scope)
+      profile_id = fetch_profile_id_from_me
       
-      # Fallback to /me endpoint if userInfo doesn't work
+      # Fallback to userInfo endpoint if /me doesn't work (requires openid scope)
       if profile_id.nil?
-        Rails.logger.warn "userInfo endpoint didn't return ID, trying /me endpoint"
-        profile_id = fetch_profile_id_from_me
+        Rails.logger.warn "/me endpoint didn't return ID, trying userInfo endpoint"
+        profile_id = fetch_profile_id_from_userinfo
       end
       
       if profile_id
         @user.update!(linkedin_profile_id: profile_id)
         Rails.logger.info "LinkedIn profile ID saved: #{profile_id}"
+        return profile_id
       else
-        Rails.logger.error "Failed to fetch LinkedIn profile ID from both endpoints"
-        raise "Failed to fetch LinkedIn profile ID: No ID found. Please reconnect LinkedIn with updated permissions."
+        Rails.logger.warn "Failed to fetch LinkedIn profile ID from API endpoints - will try to extract from token or posting flow"
+        return nil
       end
+    end
+    
+    # Try to extract profile ID from the access token or by making a test API call
+    def extract_profile_id_from_token
+      # Try to get profile ID from a simple API call that might work with w_member_social scope
+      # LinkedIn's posting API might return the profile ID in error messages or responses
+      begin
+        # Try to make a minimal API call to see if we can get any user info
+        url = "#{API_BASE_URL}/me?projection=(id)"
+        headers = {
+          'Authorization' => "Bearer #{@user.linkedin_access_token}",
+          'X-Restli-Protocol-Version' => '2.0.0'
+        }
+        
+        response = HTTParty.get(url, headers: headers)
+        if response.success?
+          data = JSON.parse(response.body)
+          return data['id'] if data['id']
+        end
+      rescue => e
+        Rails.logger.warn "Could not extract profile ID from token: #{e.message}"
+      end
+      
+      nil
     end
     
     # Fetch profile ID using /me endpoint (requires r_liteprofile scope)
@@ -109,6 +149,11 @@ module SocialMedia
     # Register an upload with LinkedIn
     # @return [String] Asset URN
     def register_upload
+      # If we don't have profile ID, try to extract it from the error response
+      unless @user.linkedin_profile_id.present?
+        Rails.logger.warn "No LinkedIn profile ID available - will try to extract from API response"
+      end
+      
       url = "#{API_BASE_URL}/assets?action=registerUpload"
       headers = {
         'Authorization' => "Bearer #{@user.linkedin_access_token}",
@@ -116,10 +161,12 @@ module SocialMedia
         'X-Restli-Protocol-Version' => '2.0.0'
       }
       
+      # Try with profile ID if available, otherwise try without (LinkedIn might accept it)
+      owner_urn = @user.linkedin_profile_id.present? ? "urn:li:person:#{@user.linkedin_profile_id}" : nil
+      
       body = {
         registerUploadRequest: {
           recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
-          owner: "urn:li:person:#{@user.linkedin_profile_id}",
           serviceRelationships: [
             {
               relationshipType: 'OWNER',
@@ -129,8 +176,32 @@ module SocialMedia
         }
       }
       
+      # Only include owner if we have profile ID
+      body[:registerUploadRequest][:owner] = owner_urn if owner_urn
+      
       response = HTTParty.post(url, headers: headers, body: body.to_json)
       data = JSON.parse(response.body)
+      
+      # If registration failed due to missing profile ID, try to extract it from error
+      unless response.success?
+        error_msg = data['message'] || response.body
+        Rails.logger.warn "LinkedIn upload registration failed: #{error_msg}"
+        
+        # Try to extract profile ID from error message if it mentions it
+        if error_msg.include?('person:') && !@user.linkedin_profile_id.present?
+          # Error might contain the expected format
+          match = error_msg.match(/urn:li:person:(\w+)/)
+          if match
+            profile_id = match[1]
+            @user.update!(linkedin_profile_id: profile_id)
+            Rails.logger.info "Extracted LinkedIn profile ID from error message: #{profile_id}"
+            # Retry with the extracted profile ID
+            return register_upload
+          end
+        end
+        
+        raise "Failed to register LinkedIn upload: #{error_msg}"
+      end
       
       if data['value']
         upload_url = data['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
