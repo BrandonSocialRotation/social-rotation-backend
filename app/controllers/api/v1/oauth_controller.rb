@@ -277,15 +277,28 @@ class Api::V1::OauthController < ApplicationController
     )
     
     begin
+      # Check if we have the request token in session
+      request_token_value = session[:twitter_request_token]
+      request_secret_value = session[:twitter_request_secret]
+      
+      unless request_token_value.present? && request_secret_value.present?
+        Rails.logger.error "Twitter callback - missing request token in session. Token: #{request_token_value.present? ? 'present' : 'missing'}, Secret: #{request_secret_value.present? ? 'present' : 'missing'}"
+        return redirect_to oauth_callback_url(error: 'twitter_session_expired', platform: 'X'), allow_other_host: true
+      end
+      
       # Recreate request token from session
       request_token = ::OAuth::RequestToken.new(
         consumer,
-        session[:twitter_request_token],
-        session[:twitter_request_secret]
+        request_token_value,
+        request_secret_value
       )
+      
+      Rails.logger.info "Twitter callback - exchanging token for access token"
       
       # Exchange for access token
       access_token = request_token.get_access_token(oauth_verifier: oauth_verifier)
+      
+      Rails.logger.info "Twitter callback - access token obtained, user_id: #{access_token.params['user_id']}, screen_name: #{access_token.params['screen_name']}"
       
       # Save to user
       user.update!(
@@ -295,13 +308,21 @@ class Api::V1::OauthController < ApplicationController
         twitter_screen_name: access_token.params['screen_name']
       )
       
+      Rails.logger.info "Twitter callback - user updated successfully"
+      
       # Clear session
       session.delete(:twitter_request_token)
       session.delete(:twitter_request_secret)
       
       redirect_to oauth_callback_url(success: 'twitter_connected', platform: 'X'), allow_other_host: true
-      rescue => e
-      Rails.logger.error "Twitter OAuth callback error: #{e.message}"
+    rescue OAuth::Unauthorized => e
+      Rails.logger.error "Twitter OAuth callback unauthorized error: #{e.message}"
+      Rails.logger.error "Twitter OAuth callback response: #{e.response.body if e.respond_to?(:response) && e.response.respond_to?(:body)}"
+      Rails.logger.error e.backtrace.join("\n")
+      redirect_to oauth_callback_url(error: 'twitter_auth_failed', platform: 'X'), allow_other_host: true
+    rescue => e
+      Rails.logger.error "Twitter OAuth callback error: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
       redirect_to oauth_callback_url(error: 'twitter_auth_failed', platform: 'X'), allow_other_host: true
     end
   end
