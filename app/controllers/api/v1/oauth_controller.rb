@@ -148,7 +148,25 @@ class Api::V1::OauthController < ApplicationController
       
       # Get request token
       Rails.logger.info "Requesting Twitter request token with callback: #{callback_url}"
-      request_token = consumer.get_request_token(oauth_callback: callback_url)
+      begin
+        request_token = consumer.get_request_token(oauth_callback: callback_url)
+      rescue OAuth::Unauthorized => e
+        # Try to get more details from the exception
+        error_details = {
+          message: e.message,
+          class: e.class.to_s
+        }
+        
+        # Try to access the response if available
+        if e.respond_to?(:response)
+          error_details[:response_code] = e.response.code if e.response.respond_to?(:code)
+          error_details[:response_body] = e.response.body if e.response.respond_to?(:body)
+          error_details[:response_headers] = e.response.to_hash if e.response.respond_to?(:to_hash)
+        end
+        
+        Rails.logger.error "Twitter OAuth detailed error: #{error_details.inspect}"
+        raise e
+      end
       
       # Store request token in session
       session[:twitter_request_token] = request_token.token
