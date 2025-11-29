@@ -131,9 +131,13 @@ class Api::V1::OauthController < ApplicationController
       return render json: { error: 'Twitter API credentials not configured. Please set TWITTER_API_KEY and TWITTER_API_SECRET_KEY environment variables.' }, status: :internal_server_error
     end
     
-    callback_url = ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/twitter/callback' : "#{request.base_url}/api/v1/oauth/twitter/callback")
+    base_callback_url = ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/twitter/callback' : "#{request.base_url}/api/v1/oauth/twitter/callback")
     
-    Rails.logger.info "Twitter OAuth login - consumer_key: #{consumer_key[0..10]}..., callback_url: #{callback_url}"
+    # Encode user_id in callback URL to persist across popup (sessions don't work in popups)
+    user_id = current_user.id
+    callback_url = "#{base_callback_url}?user_id=#{user_id}"
+    
+    Rails.logger.info "Twitter OAuth login - consumer_key: #{consumer_key[0..10]}..., callback_url: #{callback_url}, user_id: #{user_id}"
     
     begin
       # Create OAuth consumer
@@ -168,10 +172,10 @@ class Api::V1::OauthController < ApplicationController
         raise e
       end
       
-      # Store request token in session
+      # Store request token in session (as fallback, but user_id is in callback URL)
       session[:twitter_request_token] = request_token.token
       session[:twitter_request_secret] = request_token.secret
-      session[:user_id] = current_user.id
+      session[:user_id] = user_id
       
       # Return authorize URL
       oauth_url = request_token.authorize_url
@@ -232,19 +236,35 @@ class Api::V1::OauthController < ApplicationController
   
   # GET /api/v1/oauth/twitter/callback
   def twitter_callback
-    consumer_key = ENV['TWITTER_API_KEY'] || '5PIs17xez9qVUKft2qYOec6uR'
-    consumer_secret = ENV['TWITTER_API_SECRET_KEY'] || 'wa4aaGQBK3AU75ji1eUBmNfCLO0IhotZD36faf3ZuX91WOnrqz'
+    consumer_key = ENV['TWITTER_API_KEY']
+    consumer_secret = ENV['TWITTER_API_SECRET_KEY']
+    
+    unless consumer_key.present? && consumer_secret.present?
+      Rails.logger.error "Twitter credentials missing in callback"
+      return redirect_to oauth_callback_url(error: 'twitter_config_error', platform: 'X'), allow_other_host: true
+    end
     
     oauth_token = params[:oauth_token]
     oauth_verifier = params[:oauth_verifier]
     
-    # Get user from session
-    user_id = session[:user_id]
+    # Get user_id from callback URL parameter (encoded in login) or session (fallback)
+    user_id = params[:user_id] || session[:user_id]
+    
+    Rails.logger.info "Twitter callback - oauth_token: #{oauth_token.present? ? 'present' : 'missing'}, oauth_verifier: #{oauth_verifier.present? ? 'present' : 'missing'}, user_id from params: #{params[:user_id]}, user_id from session: #{session[:user_id]}"
+    
+    unless user_id
+      Rails.logger.error "Twitter callback - no user_id found in params or session"
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'X'), allow_other_host: true
+    end
+    
     user = User.find_by(id: user_id)
     
     unless user
+      Rails.logger.error "Twitter callback - user not found with id: #{user_id}"
       return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'X'), allow_other_host: true
     end
+    
+    Rails.logger.info "Twitter callback - found user: #{user.id} (#{user.email})"
     
     # Create OAuth consumer
     consumer = ::OAuth::Consumer.new(
