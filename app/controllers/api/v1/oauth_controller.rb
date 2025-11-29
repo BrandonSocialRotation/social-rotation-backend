@@ -161,12 +161,34 @@ class Api::V1::OauthController < ApplicationController
       render json: { oauth_url: oauth_url }
     rescue OAuth::Unauthorized => e
       Rails.logger.error "Twitter OAuth unauthorized error: #{e.message}"
+      Rails.logger.error "Twitter OAuth response body: #{e.response.body if e.respond_to?(:response)}"
       Rails.logger.error e.backtrace.join("\n")
-      render json: { error: 'Twitter authentication failed - invalid API credentials. Please check your TWITTER_API_KEY and TWITTER_API_SECRET_KEY.', details: e.message }, status: :unauthorized
+      # Return 400 Bad Request instead of 401 to avoid frontend treating it as auth failure
+      render json: { 
+        error: 'Twitter authentication failed', 
+        message: 'Invalid API credentials or callback URL mismatch. Please check your Twitter app settings.',
+        details: e.message,
+        troubleshooting: [
+          'Verify TWITTER_API_KEY and TWITTER_API_SECRET_KEY are correct',
+          'Ensure callback URL matches exactly in Twitter app settings',
+          'Check that app permissions are set to "Read and write"'
+        ]
+      }, status: :bad_request
     rescue => e
       Rails.logger.error "Twitter OAuth error: #{e.class} - #{e.message}"
+      Rails.logger.error "Twitter OAuth response: #{e.response.body if e.respond_to?(:response)}"
       Rails.logger.error e.backtrace.join("\n")
-      render json: { error: 'Twitter authentication failed', details: e.message, class: e.class.to_s }, status: :internal_server_error
+      # Return 400 instead of 500 to avoid frontend treating it as server error
+      render json: { 
+        error: 'Twitter authentication failed', 
+        message: e.message,
+        details: e.class.to_s,
+        troubleshooting: [
+          'Check Twitter API credentials in environment variables',
+          'Verify callback URL is configured in Twitter app',
+          'Ensure OAuth app settings are saved in Twitter Developer Portal'
+        ]
+      }, status: :bad_request
     end
   end
   
