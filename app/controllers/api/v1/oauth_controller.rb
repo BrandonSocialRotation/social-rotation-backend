@@ -160,18 +160,38 @@ class Api::V1::OauthController < ApplicationController
       Rails.logger.info "Twitter OAuth URL generated successfully: #{oauth_url[0..50]}..."
       render json: { oauth_url: oauth_url }
     rescue OAuth::Unauthorized => e
+      error_body = ''
+      if e.respond_to?(:response) && e.response.respond_to?(:body)
+        error_body = e.response.body
+      end
+      
       Rails.logger.error "Twitter OAuth unauthorized error: #{e.message}"
-      Rails.logger.error "Twitter OAuth response body: #{e.response.body if e.respond_to?(:response)}"
+      Rails.logger.error "Twitter OAuth response body: #{error_body}"
+      Rails.logger.error "Twitter OAuth response code: #{e.response.code if e.respond_to?(:response) && e.response.respond_to?(:code)}"
       Rails.logger.error e.backtrace.join("\n")
+      
+      # Parse Twitter error message if available
+      twitter_error = error_body
+      begin
+        if error_body.present?
+          parsed = JSON.parse(error_body) rescue nil
+          twitter_error = parsed['errors'].first['message'] if parsed && parsed['errors'] && parsed['errors'].first
+        end
+      rescue => parse_error
+        Rails.logger.warn "Could not parse Twitter error: #{parse_error.message}"
+      end
+      
       # Return 400 Bad Request instead of 401 to avoid frontend treating it as auth failure
       render json: { 
         error: 'Twitter authentication failed', 
-        message: 'Invalid API credentials or callback URL mismatch. Please check your Twitter app settings.',
+        message: twitter_error.presence || 'Invalid API credentials or callback URL mismatch. Please check your Twitter app settings.',
         details: e.message,
+        twitter_response: error_body,
         troubleshooting: [
-          'Verify TWITTER_API_KEY and TWITTER_API_SECRET_KEY are correct',
-          'Ensure callback URL matches exactly in Twitter app settings',
-          'Check that app permissions are set to "Read and write"'
+          'Verify TWITTER_API_KEY and TWITTER_API_SECRET_KEY are correct in DigitalOcean',
+          'Ensure callback URL matches exactly in Twitter app settings: https://new-social-rotation-backend-qzyk8.ondigitalocean.app/api/v1/oauth/twitter/callback',
+          'Check that app permissions are set to "Read and write"',
+          'Make sure you saved the OAuth settings in Twitter Developer Portal'
         ]
       }, status: :bad_request
     rescue => e
