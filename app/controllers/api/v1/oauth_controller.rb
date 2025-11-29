@@ -114,22 +114,40 @@ class Api::V1::OauthController < ApplicationController
   # GET /api/v1/oauth/twitter/login
   # Initiates Twitter OAuth 1.0a flow
   def twitter_login
-    consumer_key = ENV['TWITTER_API_KEY'] || '5PIs17xez9qVUKft2qYOec6uR'
-    consumer_secret = ENV['TWITTER_API_SECRET_KEY'] || 'wa4aaGQBK3AU75ji1eUBmNfCLO0IhotZD36faf3ZuX91WOnrqz'
-      callback_url = ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/twitter/callback' : "#{request.base_url}/api/v1/oauth/twitter/callback")
+    begin
+      # Check if OAuth gem is available
+      require 'oauth'
+      require 'oauth/consumer'
+    rescue LoadError => e
+      Rails.logger.error "OAuth gem not available: #{e.message}"
+      return render json: { error: 'OAuth gem not installed. Please add gem "oauth" to Gemfile and run bundle install.' }, status: :internal_server_error
+    end
     
-    # Create OAuth consumer
-    consumer = ::OAuth::Consumer.new(
-      consumer_key,
-      consumer_secret,
-      site: 'https://api.twitter.com',
-      request_token_path: '/oauth/request_token',
-      authorize_path: '/oauth/authorize',
-      access_token_path: '/oauth/access_token'
-    )
+    consumer_key = ENV['TWITTER_API_KEY']
+    consumer_secret = ENV['TWITTER_API_SECRET_KEY']
+    
+    unless consumer_key.present? && consumer_secret.present?
+      Rails.logger.error "Twitter credentials missing - API_KEY: #{consumer_key.present? ? 'present' : 'missing'}, SECRET: #{consumer_secret.present? ? 'present' : 'missing'}"
+      return render json: { error: 'Twitter API credentials not configured. Please set TWITTER_API_KEY and TWITTER_API_SECRET_KEY environment variables.' }, status: :internal_server_error
+    end
+    
+    callback_url = ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/twitter/callback' : "#{request.base_url}/api/v1/oauth/twitter/callback")
+    
+    Rails.logger.info "Twitter OAuth login - consumer_key: #{consumer_key[0..10]}..., callback_url: #{callback_url}"
     
     begin
+      # Create OAuth consumer
+      consumer = ::OAuth::Consumer.new(
+        consumer_key,
+        consumer_secret,
+        site: 'https://api.twitter.com',
+        request_token_path: '/oauth/request_token',
+        authorize_path: '/oauth/authorize',
+        access_token_path: '/oauth/access_token'
+      )
+      
       # Get request token
+      Rails.logger.info "Requesting Twitter request token with callback: #{callback_url}"
       request_token = consumer.get_request_token(oauth_callback: callback_url)
       
       # Store request token in session
@@ -139,10 +157,16 @@ class Api::V1::OauthController < ApplicationController
       
       # Return authorize URL
       oauth_url = request_token.authorize_url
+      Rails.logger.info "Twitter OAuth URL generated successfully: #{oauth_url[0..50]}..."
       render json: { oauth_url: oauth_url }
+    rescue OAuth::Unauthorized => e
+      Rails.logger.error "Twitter OAuth unauthorized error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: 'Twitter authentication failed - invalid API credentials. Please check your TWITTER_API_KEY and TWITTER_API_SECRET_KEY.', details: e.message }, status: :unauthorized
     rescue => e
-      Rails.logger.error "Twitter OAuth error: #{e.message}"
-      render json: { error: 'Twitter authentication failed', details: e.message }, status: :internal_server_error
+      Rails.logger.error "Twitter OAuth error: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: 'Twitter authentication failed', details: e.message, class: e.class.to_s }, status: :internal_server_error
     end
   end
   
