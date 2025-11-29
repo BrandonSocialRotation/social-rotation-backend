@@ -172,21 +172,21 @@ class Api::V1::OauthController < ApplicationController
         raise e
       end
       
-      # Store request token in cache (sessions don't work in popups)
+      # Store request token in database (cache doesn't persist across processes in production)
       # Key by oauth_token so we can retrieve it in callback
-      cache_key = "twitter_oauth_#{request_token.token}"
-      Rails.cache.write(cache_key, {
-        token: request_token.token,
-        secret: request_token.secret,
-        user_id: user_id
-      }, expires_in: 10.minutes)
+      OauthRequestToken.create!(
+        oauth_token: request_token.token,
+        request_secret: request_token.secret,
+        user_id: user_id,
+        expires_at: 10.minutes.from_now
+      )
       
       # Also store in session as fallback
       session[:twitter_request_token] = request_token.token
       session[:twitter_request_secret] = request_token.secret
       session[:user_id] = user_id
       
-      Rails.logger.info "Twitter OAuth - stored request token in cache with key: #{cache_key}"
+      Rails.logger.info "Twitter OAuth - stored request token in database with oauth_token: #{request_token.token[0..10]}..."
       
       # Return authorize URL
       oauth_url = request_token.authorize_url
@@ -288,25 +288,24 @@ class Api::V1::OauthController < ApplicationController
     )
     
     begin
-      # Try to get request token/secret from cache first (using oauth_token from Twitter)
-      # If not in cache, fall back to session
+      # Try to get request token/secret from database first (using oauth_token from Twitter)
+      # If not in database, fall back to session
       request_token_value = nil
       request_secret_value = nil
       
       if oauth_token.present?
-        cache_key = "twitter_oauth_#{oauth_token}"
-        cached_data = Rails.cache.read(cache_key)
+        token_data = OauthRequestToken.find_and_delete(oauth_token)
         
-        if cached_data
-          request_token_value = cached_data[:token]
-          request_secret_value = cached_data[:secret]
-          # Also update user_id from cache if not in params
-          user_id = params[:user_id] || cached_data[:user_id] || session[:user_id]
-          Rails.logger.info "Twitter callback - retrieved request token from cache"
+        if token_data
+          request_token_value = token_data[:token]
+          request_secret_value = token_data[:secret]
+          # Also update user_id from database if not in params
+          user_id = params[:user_id] || token_data[:user_id] || session[:user_id]
+          Rails.logger.info "Twitter callback - retrieved request token from database"
         end
       end
       
-      # Fallback to session if not in cache
+      # Fallback to session if not in database
       unless request_token_value.present? && request_secret_value.present?
         request_token_value = session[:twitter_request_token]
         request_secret_value = session[:twitter_request_secret]
@@ -314,7 +313,7 @@ class Api::V1::OauthController < ApplicationController
       end
       
       unless request_token_value.present? && request_secret_value.present?
-        Rails.logger.error "Twitter callback - missing request token in cache and session. oauth_token: #{oauth_token.present? ? 'present' : 'missing'}"
+        Rails.logger.error "Twitter callback - missing request token in database and session. oauth_token: #{oauth_token.present? ? 'present' : 'missing'}"
         return redirect_to oauth_callback_url(error: 'twitter_session_expired', platform: 'X'), allow_other_host: true
       end
       
@@ -342,11 +341,7 @@ class Api::V1::OauthController < ApplicationController
       
       Rails.logger.info "Twitter callback - user updated successfully"
       
-      # Clear cache and session
-      if oauth_token.present?
-        cache_key = "twitter_oauth_#{oauth_token}"
-        Rails.cache.delete(cache_key)
-      end
+      # Token already deleted from database in find_and_delete, just clear session
       session.delete(:twitter_request_token)
       session.delete(:twitter_request_secret)
       
