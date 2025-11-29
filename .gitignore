@@ -38,3 +38,6 @@
 
 # Ignore test coverage
 /coverage/*
+
+# Ignore credentials status files (may contain secrets)
+SOCIAL_MEDIA_CREDENTIALS_STATUS.md
