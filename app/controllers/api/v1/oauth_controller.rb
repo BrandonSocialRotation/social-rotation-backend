@@ -115,12 +115,22 @@ class Api::V1::OauthController < ApplicationController
   # Initiates Twitter OAuth 1.0a flow
   def twitter_login
     begin
+      # Check if user is authenticated
+      unless current_user
+        Rails.logger.error "Twitter OAuth - user not authenticated"
+        return render json: { error: 'Authentication required' }, status: :unauthorized
+      end
+      
       # Check if OAuth gem is available
       require 'oauth'
       require 'oauth/consumer'
     rescue LoadError => e
       Rails.logger.error "OAuth gem not available: #{e.message}"
       return render json: { error: 'OAuth gem not installed. Please add gem "oauth" to Gemfile and run bundle install.' }, status: :internal_server_error
+    rescue => e
+      Rails.logger.error "Twitter OAuth - unexpected error in setup: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      return render json: { error: 'Failed to initialize Twitter OAuth', message: e.message }, status: :internal_server_error
     end
     
     consumer_key = ENV['TWITTER_API_KEY']
@@ -174,19 +184,40 @@ class Api::V1::OauthController < ApplicationController
       
       # Store request token in database (cache doesn't persist across processes in production)
       # Key by oauth_token so we can retrieve it in callback
-      OauthRequestToken.create!(
-        oauth_token: request_token.token,
-        request_secret: request_token.secret,
-        user_id: user_id,
-        expires_at: 10.minutes.from_now
-      )
+      # Fall back to session if database table doesn't exist yet (migration not run)
+      begin
+        table_exists = false
+        begin
+          table_exists = ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+        rescue => table_check_error
+          Rails.logger.warn "Twitter OAuth - could not check if table exists: #{table_check_error.message}"
+        end
+        
+        if table_exists
+          begin
+            OauthRequestToken.create!(
+              oauth_token: request_token.token,
+              request_secret: request_token.secret,
+              user_id: user_id,
+              expires_at: 10.minutes.from_now
+            )
+            Rails.logger.info "Twitter OAuth - stored request token in database with oauth_token: #{request_token.token[0..10]}..."
+          rescue ActiveRecord::StatementInvalid => db_error
+            Rails.logger.error "Twitter OAuth - database error (table may not exist or migration not run): #{db_error.message}"
+            Rails.logger.warn "Twitter OAuth - falling back to session storage"
+          end
+        else
+          Rails.logger.warn "Twitter OAuth - oauth_request_tokens table not found, using session storage only"
+        end
+      rescue => e
+        Rails.logger.error "Twitter OAuth - unexpected error storing in database: #{e.class} - #{e.message}, falling back to session"
+        Rails.logger.error e.backtrace.join("\n")
+      end
       
-      # Also store in session as fallback
+      # Always store in session as fallback
       session[:twitter_request_token] = request_token.token
       session[:twitter_request_secret] = request_token.secret
       session[:user_id] = user_id
-      
-      Rails.logger.info "Twitter OAuth - stored request token in database with oauth_token: #{request_token.token[0..10]}..."
       
       # Return authorize URL
       oauth_url = request_token.authorize_url
@@ -293,15 +324,19 @@ class Api::V1::OauthController < ApplicationController
       request_token_value = nil
       request_secret_value = nil
       
-      if oauth_token.present?
-        token_data = OauthRequestToken.find_and_delete(oauth_token)
-        
-        if token_data
-          request_token_value = token_data[:token]
-          request_secret_value = token_data[:secret]
-          # Also update user_id from database if not in params
-          user_id = params[:user_id] || token_data[:user_id] || session[:user_id]
-          Rails.logger.info "Twitter callback - retrieved request token from database"
+      if oauth_token.present? && ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+        begin
+          token_data = OauthRequestToken.find_and_delete(oauth_token)
+          
+          if token_data
+            request_token_value = token_data[:token]
+            request_secret_value = token_data[:secret]
+            # Also update user_id from database if not in params
+            user_id = params[:user_id] || token_data[:user_id] || session[:user_id]
+            Rails.logger.info "Twitter callback - retrieved request token from database"
+          end
+        rescue => e
+          Rails.logger.error "Twitter callback - error retrieving from database: #{e.message}, falling back to session"
         end
       end
       
