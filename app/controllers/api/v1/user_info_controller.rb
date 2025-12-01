@@ -87,6 +87,15 @@ class Api::V1::UserInfoController < ApplicationController
     render json: { message: 'LinkedIn disconnected successfully' }
   end
 
+  # POST /api/v1/user_info/disconnect_instagram
+  def disconnect_instagram
+    current_user.update!(
+      instagram_business_id: nil
+    )
+    
+    render json: { message: 'Instagram disconnected successfully' }
+  end
+
   # POST /api/v1/user_info/disconnect_google
   def disconnect_google
     current_user.update!(

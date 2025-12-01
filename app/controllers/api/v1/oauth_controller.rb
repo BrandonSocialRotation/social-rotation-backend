@@ -176,6 +176,9 @@ class Api::V1::OauthController < ApplicationController
         # Store the access token
         user.update!(fb_user_access_key: data['access_token'])
         
+        # Try to fetch Instagram Business account ID
+        fetch_instagram_account(user)
+        
         # Redirect back to frontend OAuth callback
         redirect_to oauth_callback_url(success: 'facebook_connected', platform: 'Facebook'), allow_other_host: true
       else
@@ -906,6 +909,41 @@ class Api::V1::OauthController < ApplicationController
     end
   end
   
+  # GET /api/v1/oauth/instagram/connect
+  # Connects Instagram account (requires Facebook to be connected first)
+  def instagram_connect
+    unless current_user.fb_user_access_key.present?
+      return render json: { 
+        error: 'Facebook not connected', 
+        message: 'Please connect Facebook first. Instagram uses Facebook\'s API and requires a connected Facebook account.' 
+      }, status: :bad_request
+    end
+    
+    begin
+      fetch_instagram_account(current_user)
+      
+      if current_user.instagram_business_id.present?
+        render json: { 
+          success: true, 
+          message: 'Instagram connected successfully',
+          instagram_business_id: current_user.instagram_business_id
+        }
+      else
+        render json: { 
+          error: 'Instagram account not found', 
+          message: 'No Instagram Business account found connected to your Facebook Page. Please make sure your Facebook Page is connected to an Instagram Business account.' 
+        }, status: :not_found
+      end
+    rescue => e
+      Rails.logger.error "Instagram connect error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { 
+        error: 'Failed to connect Instagram', 
+        message: e.message 
+      }, status: :internal_server_error
+    end
+  end
+  
   private
   
   # Fetch LinkedIn profile ID after OAuth connection
@@ -956,6 +994,42 @@ class Api::V1::OauthController < ApplicationController
     end
     
     Rails.logger.info "Could not fetch LinkedIn profile ID from API - will be extracted during first post attempt"
+    nil
+  end
+  
+  # Fetch Instagram Business account ID from connected Facebook Page
+  def fetch_instagram_account(user)
+    return unless user.fb_user_access_key.present?
+    
+    Rails.logger.info "Fetching Instagram account for user: #{user.id}"
+    
+    # Get user's Facebook pages
+    url = "https://graph.facebook.com/v18.0/me/accounts"
+    params = {
+      access_token: user.fb_user_access_key,
+      fields: 'id,name,access_token,instagram_business_account',
+      limit: 1000
+    }
+    
+    response = HTTParty.get(url, query: params)
+    data = JSON.parse(response.body)
+    
+    if data['data'] && data['data'].any?
+      # Look for a page with an Instagram Business account
+      data['data'].each do |page|
+        if page['instagram_business_account']
+          instagram_id = page['instagram_business_account']['id']
+          user.update!(instagram_business_id: instagram_id)
+          Rails.logger.info "Instagram Business account found and saved: #{instagram_id}"
+          return instagram_id
+        end
+      end
+      
+      Rails.logger.warn "No Instagram Business account found in any connected Facebook Page"
+    else
+      Rails.logger.warn "No Facebook Pages found for user"
+    end
+    
     nil
   end
 end

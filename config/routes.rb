@@ -32,6 +32,7 @@ Rails.application.routes.draw do
       # OAuth routes
       get 'oauth/facebook/login', to: 'oauth#facebook_login'
       get 'oauth/facebook/callback', to: 'oauth#facebook_callback'
+      get 'oauth/instagram/connect', to: 'oauth#instagram_connect'
       get 'oauth/twitter/login', to: 'oauth#twitter_login'
       get 'oauth/twitter/callback', to: 'oauth#twitter_callback'
       get 'oauth/linkedin/login', to: 'oauth#linkedin_login'
@@ -51,6 +52,7 @@ Rails.application.routes.draw do
       post 'user_info/disconnect_facebook', to: 'user_info#disconnect_facebook'
       post 'user_info/disconnect_twitter', to: 'user_info#disconnect_twitter'
       post 'user_info/disconnect_linkedin', to: 'user_info#disconnect_linkedin'
+      post 'user_info/disconnect_instagram', to: 'user_info#disconnect_instagram'
       post 'user_info/disconnect_google', to: 'user_info#disconnect_google'
       post 'user_info/disconnect_tiktok', to: 'user_info#disconnect_tiktok'
       post 'user_info/disconnect_youtube', to: 'user_info#disconnect_youtube'
