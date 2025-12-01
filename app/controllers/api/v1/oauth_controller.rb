@@ -758,22 +758,53 @@ class Api::V1::OauthController < ApplicationController
   # GET /api/v1/oauth/tiktok/login
   # Initiates TikTok OAuth flow
   def tiktok_login
-    state = SecureRandom.hex(16)
-    session[:oauth_state] = state
-    session[:user_id] = current_user.id
-    
-    client_key = ENV['TIKTOK_CLIENT_KEY']
-    raise 'TikTok Client Key not configured' unless client_key
-    redirect_uri = ENV['TIKTOK_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/tiktok/callback' : 'https://social-rotation-frontend.onrender.com/tiktok/callback')
-    
-    oauth_url = "https://www.tiktok.com/v2/auth/authorize?" \
-                "client_key=#{client_key}" \
-                "&scope=user.info.basic,video.publish" \
-                "&response_type=code" \
-                "&redirect_uri=#{CGI.escape(redirect_uri)}" \
-                "&state=#{state}"
-    
-    render json: { oauth_url: oauth_url }
+    begin
+      # Encode user_id in state parameter since sessions don't persist in popups
+      user_id = current_user.id
+      random_state = SecureRandom.hex(16)
+      # Format: user_id:random_state (we'll decode this in callback)
+      state = "#{user_id}:#{random_state}"
+      
+      # Store state in database (sessions don't persist in popups)
+      begin
+        if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+          OauthRequestToken.create!(
+            oauth_token: random_state, # Use random_state as the token key
+            request_secret: state, # Store full state as secret
+            user_id: user_id,
+            expires_at: 10.minutes.from_now
+          )
+          Rails.logger.info "TikTok OAuth - stored state in database"
+        end
+      rescue => e
+        Rails.logger.error "TikTok OAuth - failed to store state in database: #{e.message}, falling back to session"
+      end
+      
+      # Still store in session as backup
+      session[:oauth_state] = random_state
+      session[:user_id] = user_id
+      
+      client_key = ENV['TIKTOK_CLIENT_KEY']
+      unless client_key
+        return render json: { error: 'TikTok Client Key not configured' }, status: :internal_server_error
+      end
+      
+      # Use production callback URL for TikTok OAuth (backend callback)
+      redirect_uri = ENV['TIKTOK_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/tiktok/callback' : "#{request.base_url}/api/v1/oauth/tiktok/callback")
+      
+      oauth_url = "https://www.tiktok.com/v2/auth/authorize?" \
+                  "client_key=#{client_key}" \
+                  "&scope=user.info.basic,video.publish" \
+                  "&response_type=code" \
+                  "&redirect_uri=#{CGI.escape(redirect_uri)}" \
+                  "&state=#{state}"
+      
+      Rails.logger.info "TikTok OAuth - generated URL with state: #{state[0..20]}..., user_id: #{user_id}"
+      render json: { oauth_url: oauth_url }
+    rescue => e
+      Rails.logger.error "TikTok OAuth login error: #{e.message}"
+      render json: { error: 'Failed to initiate TikTok OAuth', details: e.message }, status: :internal_server_error
+    end
   end
   
   # GET /api/v1/oauth/tiktok/callback
@@ -781,23 +812,66 @@ class Api::V1::OauthController < ApplicationController
     code = params[:code]
     state = params[:state]
     
-    if state != session[:oauth_state]
-      return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'TikTok'), allow_other_host: true
+    # Decode user_id from state parameter (format: user_id:random_state)
+    user_id = nil
+    random_state = nil
+    if state.present? && state.include?(':')
+      parts = state.split(':', 2)
+      user_id = parts[0].to_i if parts[0].present?
+      random_state = parts[1] if parts[1].present?
     end
     
-    user_id = session[:user_id]
-    user = User.find_by(id: user_id)
+    # Try to retrieve state from database first
+    if random_state.present? && ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+      begin
+        token_data = OauthRequestToken.find_and_delete(random_state)
+        if token_data && token_data[:request_secret] == state
+          user_id = token_data[:user_id] if user_id.nil?
+          Rails.logger.info "TikTok callback - retrieved state from database"
+        end
+      rescue => e
+        Rails.logger.error "TikTok callback - error retrieving from database: #{e.message}, falling back to session"
+      end
+    end
     
-    unless user
+    # Fallback to session if not in database
+    unless user_id
+      user_id = session[:user_id]
+      if state != session[:oauth_state] && random_state != session[:oauth_state]
+        Rails.logger.error "TikTok callback - state mismatch. Expected: #{session[:oauth_state]}, Got: #{state}"
+        return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'TikTok'), allow_other_host: true
+      end
+    end
+    
+    unless user_id
+      Rails.logger.error "TikTok callback - no user_id found"
       return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'TikTok'), allow_other_host: true
     end
     
+    user = User.find_by(id: user_id)
+    
+    unless user
+      Rails.logger.error "TikTok callback - user not found with id: #{user_id}"
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'TikTok'), allow_other_host: true
+    end
+    
+    Rails.logger.info "TikTok callback - found user: #{user.id} (#{user.email})"
+    
     # Exchange code for access token
     client_key = ENV['TIKTOK_CLIENT_KEY']
-    raise 'TikTok Client Key not configured' unless client_key
+    unless client_key
+      Rails.logger.error "TikTok Client Key not configured"
+      return redirect_to oauth_callback_url(error: 'tiktok_config_error', platform: 'TikTok'), allow_other_host: true
+    end
+    
     client_secret = ENV['TIKTOK_CLIENT_SECRET']
-    raise 'TikTok Client Secret not configured' unless client_secret
-    redirect_uri = ENV['TIKTOK_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/tiktok/callback' : 'https://social-rotation-frontend.onrender.com/tiktok/callback')
+    unless client_secret
+      Rails.logger.error "TikTok Client Secret not configured"
+      return redirect_to oauth_callback_url(error: 'tiktok_config_error', platform: 'TikTok'), allow_other_host: true
+    end
+    
+    # Use backend callback URL (must match what's in TikTok app settings)
+    redirect_uri = ENV['TIKTOK_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/tiktok/callback' : "#{request.base_url}/api/v1/oauth/tiktok/callback")
     
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
     
@@ -815,6 +889,13 @@ class Api::V1::OauthController < ApplicationController
         }
       })
       
+      Rails.logger.info "TikTok token exchange response status: #{response.code}, body: #{response.body[0..500]}"
+      
+      unless response.success?
+        Rails.logger.error "TikTok token exchange failed: #{response.code} - #{response.body}"
+        return redirect_to oauth_callback_url(error: 'tiktok_auth_failed', platform: 'TikTok'), allow_other_host: true
+      end
+      
       data = JSON.parse(response.body)
       
       if data['access_token']
@@ -823,12 +904,24 @@ class Api::V1::OauthController < ApplicationController
           tiktok_refresh_token: data['refresh_token']
         )
         
+        Rails.logger.info "TikTok callback - user updated successfully"
+        
+        # Clear session
+        session.delete(:oauth_state)
+        session.delete(:user_id)
+        
         redirect_to oauth_callback_url(success: 'tiktok_connected', platform: 'TikTok'), allow_other_host: true
-        else
+      else
+        error_msg = data['error_description'] || data['error'] || 'Unknown error'
+        Rails.logger.error "TikTok token exchange failed - no access_token in response: #{error_msg}"
         redirect_to oauth_callback_url(error: 'tiktok_auth_failed', platform: 'TikTok'), allow_other_host: true
       end
+    rescue JSON::ParserError => e
+      Rails.logger.error "TikTok OAuth JSON parse error: #{e.message}, response body: #{response.body[0..200]}"
+      redirect_to oauth_callback_url(error: 'tiktok_auth_failed', platform: 'TikTok'), allow_other_host: true
     rescue => e
-      Rails.logger.error "TikTok OAuth error: #{e.message}"
+      Rails.logger.error "TikTok OAuth error: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
       redirect_to oauth_callback_url(error: 'tiktok_auth_failed', platform: 'TikTok'), allow_other_host: true
     end
   end
