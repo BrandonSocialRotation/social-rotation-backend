@@ -6,6 +6,9 @@ class ApplicationController < ActionController::API
 
   # Handle authentication
   before_action :authenticate_user!, unless: :auth_or_oauth_controller?
+  
+  # Require active subscription for all authenticated routes (except subscription management)
+  before_action :require_active_subscription!, unless: :skip_subscription_check?
 
   # Handle exceptions
   rescue_from ActiveRecord::RecordNotFound, with: :record_not_found
@@ -75,5 +78,49 @@ class ApplicationController < ActionController::API
     # Skip authentication for auth controller and OAuth callback actions only
     controller_path.start_with?('api/v1/auth') || 
     (controller_path.start_with?('api/v1/oauth') && action_name.end_with?('_callback'))
+  end
+  
+  # Check if subscription check should be skipped
+  # Allow subscription management routes and user info to check subscription status
+  def skip_subscription_check?
+    controller_path = params[:controller]
+    action_name = params[:action]
+    
+    # Skip subscription check for:
+    # - Auth and OAuth controllers (already handled by auth_or_oauth_controller?)
+    # - Subscriptions controller (to allow viewing/managing subscriptions)
+    # - User info controller (to allow viewing profile/subscription status)
+    # - Plans controller (to allow viewing available plans)
+    auth_or_oauth_controller? ||
+    controller_path.start_with?('api/v1/subscriptions') ||
+    controller_path.start_with?('api/v1/user_info') ||
+    controller_path.start_with?('api/v1/plans')
+  end
+  
+  # Require active subscription for accessing the app
+  # Returns 403 if account doesn't have an active subscription
+  def require_active_subscription!
+    return if @current_user.nil? # Already handled by authenticate_user!
+    
+    account = @current_user.account
+    
+    # Super admin accounts (account_id = 0) bypass subscription check
+    return if account&.super_admin_account?
+    
+    # Check if account has active subscription
+    unless account&.has_active_subscription?
+      render json: {
+        error: 'Subscription required',
+        message: 'You need an active subscription to access this feature. Please subscribe to continue.',
+        subscription_required: true,
+        redirect_to: '/register' # Frontend should redirect to subscription page
+      }, status: :forbidden
+      return
+    end
+  rescue => e
+    Rails.logger.error "Subscription check error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    # If there's an error checking subscription, allow access (fail open for now)
+    # You might want to change this to fail closed depending on your security requirements
   end
 end
