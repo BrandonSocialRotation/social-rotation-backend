@@ -92,42 +92,43 @@ class Api::V1::SubscriptionsController < ApplicationController
 
   # POST /api/v1/subscriptions/checkout_session
   # Create Stripe Checkout Session for a plan
-  # Params: plan_id, billing_period (optional, default: 'monthly')
+  # Params: plan_id, billing_period (optional, default: 'monthly'), account_type, company_name, user_count
+  # Note: Account is NOT created here - it will be created in webhook after successful payment
   def checkout_session
     plan = Plan.find(params[:plan_id])
     billing_period = params[:billing_period] || 'monthly'
+    account_type = params[:account_type] || 'personal'
+    company_name = params[:company_name]
+    user_count = params[:user_count]&.to_i || 1
     
     unless plan.status?
       return render json: { error: 'Plan is not available' }, status: :bad_request
     end
     
-    # Handle personal accounts (account_id = 0) - create Account record if needed
-    account = current_user.account
-    if account.nil? || current_user.account_id == 0
-      # Create an account for personal users when they subscribe
-      account = Account.create!(
-        name: "#{current_user.name}'s Account",
-        is_reseller: false,
-        status: true
-      )
-      current_user.update!(account_id: account.id, is_account_admin: true)
+    # Validate company name for agency accounts
+    if account_type == 'agency' && company_name.blank?
+      return render json: { error: 'Company name is required for agency accounts' }, status: :bad_request
     end
     
     # Set Stripe API key
     Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || ''
     
     begin
-      # Create or retrieve Stripe customer
-      customer = get_or_create_stripe_customer(account)
+      # Create Stripe customer (no account needed yet - account created in webhook)
+      customer = Stripe::Customer.create({
+        email: current_user.email,
+        name: current_user.name,
+        metadata: {
+          user_id: current_user.id.to_s
+        }
+      })
       
       # Calculate price based on plan type
       if plan.supports_per_user_pricing
-        # For per-user pricing, calculate based on current user count
-        user_count = account.users.active.count
+        # For per-user pricing, calculate based on provided user count
         price_cents = plan.calculate_price_for_users(user_count, billing_period)
         
-        # Create a one-time price for this specific subscription
-        # Or use a recurring price if you prefer
+        # Create a recurring price for this specific subscription
         stripe_price = Stripe::Price.create({
           unit_amount: price_cents,
           currency: 'usd',
@@ -157,6 +158,7 @@ class Api::V1::SubscriptionsController < ApplicationController
       end
       
       # Create Checkout Session
+      # Store registration info in metadata - account will be created in webhook
       session = Stripe::Checkout::Session.create({
         customer: customer.id,
         payment_method_types: ['card'],
@@ -165,11 +167,12 @@ class Api::V1::SubscriptionsController < ApplicationController
         success_url: "#{frontend_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}",
         cancel_url: "#{frontend_url}/register?error=subscription_canceled",
         metadata: {
-          account_id: account.id,
-          plan_id: plan.id,
-          user_id: current_user.id,
+          user_id: current_user.id.to_s,
+          plan_id: plan.id.to_s,
           billing_period: billing_period,
-          user_count: plan.supports_per_user_pricing ? account.users.active.count : nil
+          account_type: account_type,
+          company_name: company_name || '',
+          user_count: user_count.to_s
         }
       })
       
@@ -422,15 +425,42 @@ class Api::V1::SubscriptionsController < ApplicationController
   end
   
   def handle_checkout_completed(session)
-    account_id = session.metadata['account_id'].to_i
+    user_id = session.metadata['user_id'].to_i
     plan_id = session.metadata['plan_id'].to_i
     billing_period = session.metadata['billing_period'] || 'monthly'
-    user_count = session.metadata['user_count']&.to_i
+    account_type = session.metadata['account_type'] || 'personal'
+    company_name = session.metadata['company_name']
+    user_count = session.metadata['user_count']&.to_i || 1
     
-    account = Account.find_by(id: account_id)
+    user = User.find_by(id: user_id)
     plan = Plan.find_by(id: plan_id)
     
-    return unless account && plan
+    return unless user && plan
+    
+    # Create account NOW (after successful payment)
+    if account_type == 'agency' && company_name.present?
+      account = Account.create!(
+        name: company_name,
+        is_reseller: true,
+        status: true
+      )
+      user.update!(
+        account_id: account.id,
+        is_account_admin: true,
+        role: 'reseller'
+      )
+    else
+      # Personal account
+      account = Account.create!(
+        name: "#{user.name}'s Account",
+        is_reseller: false,
+        status: true
+      )
+      user.update!(
+        account_id: account.id,
+        is_account_admin: true
+      )
+    end
     
     # Get subscription from Stripe
     Stripe.api_key = ENV['STRIPE_SECRET_KEY']
@@ -438,23 +468,23 @@ class Api::V1::SubscriptionsController < ApplicationController
     
     return unless stripe_subscription
     
-    # Create or update subscription
-    subscription = account.subscription || account.build_subscription
-    subscription.assign_attributes(
+    # Create subscription
+    subscription = account.create_subscription!(
       plan: plan,
       stripe_customer_id: session.customer,
       stripe_subscription_id: stripe_subscription.id,
       status: stripe_subscription.status,
       billing_period: billing_period,
-      user_count_at_subscription: user_count || account.users.active.count,
+      user_count_at_subscription: user_count,
       current_period_start: Time.at(stripe_subscription.current_period_start),
       current_period_end: Time.at(stripe_subscription.current_period_end),
       cancel_at_period_end: stripe_subscription.cancel_at_period_end
     )
-    subscription.save!
     
     # Update account with plan
     account.update!(plan: plan)
+    
+    Rails.logger.info "Account #{account.id} created for user #{user.id} after successful payment"
   end
   
   def handle_subscription_updated(stripe_subscription)

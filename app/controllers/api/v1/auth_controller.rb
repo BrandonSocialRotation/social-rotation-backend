@@ -8,53 +8,36 @@ class Api::V1::AuthController < ApplicationController
   skip_before_action :authenticate_user!, only: [:register, :login]
 
   # POST /api/v1/auth/register
-  # Create new user account
+  # Create new user (but NOT account - account created after payment)
   # Params: name, email, password, password_confirmation, account_type, company_name
   # Returns: user object and JWT token
+  # Note: Account will be created in Stripe webhook after successful payment
   def register
     begin
-      # Handle agency/reseller account creation
-      if params[:account_type] == 'agency'
-        # Validate company name for agency accounts
-        if params[:company_name].blank?
-          return render json: {
-            error: 'Company name is required for agency accounts',
-            message: 'Please provide a company or agency name',
-            field: 'company_name'
-          }, status: :unprocessable_entity
-        end
-        
-        account = Account.new(
-          name: params[:company_name],
-          is_reseller: true,
-          status: true
-        )
-        
-        unless account.save
-          return render json: {
-            error: 'Failed to create agency account',
-            message: account.errors.full_messages.join(', '),
-            details: account.errors.full_messages,
-            errors: account.errors.as_json
-          }, status: :unprocessable_entity
-        end
-        
-        user = User.new(user_params.merge(
-          account_id: account.id,
-          is_account_admin: true,
-          role: 'reseller'
-        ))
-      else
-        # Personal account (account_id defaults to 0)
-        user = User.new(user_params)
+      # Validate company name for agency accounts
+      if params[:account_type] == 'agency' && params[:company_name].blank?
+        return render json: {
+          error: 'Company name is required for agency accounts',
+          message: 'Please provide a company or agency name',
+          field: 'company_name'
+        }, status: :unprocessable_entity
       end
+      
+      # Create user WITHOUT account (account_id = nil)
+      # Account will be created in Stripe webhook after payment succeeds
+      # Registration metadata (account_type, company_name) will be stored in Stripe checkout session metadata
+      user = User.new(user_params.merge(
+        account_id: nil, # No account until payment
+        is_account_admin: false, # Will be set to true when account is created in webhook
+        role: params[:account_type] == 'agency' ? 'reseller' : nil
+      ))
       
       if user.save
         token = JsonWebToken.encode(user_id: user.id)
         render json: {
           user: user_json(user),
           token: token,
-          message: 'Account created successfully'
+          message: 'User created. Please complete payment to activate your account.'
         }, status: :created
       else
         # Provide detailed error messages

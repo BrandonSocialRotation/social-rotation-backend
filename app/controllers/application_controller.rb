@@ -99,8 +99,20 @@ class ApplicationController < ActionController::API
   
   # Require active subscription for accessing the app
   # Returns 403 if account doesn't have an active subscription
+  # Allows suspended accounts (past_due/canceled) to access subscription management
   def require_active_subscription!
     return if @current_user.nil? # Already handled by authenticate_user!
+    
+    # If user has no account yet, they need to complete payment
+    if @current_user.account_id.nil?
+      render json: {
+        error: 'Account not activated',
+        message: 'Please complete payment to activate your account.',
+        subscription_required: true,
+        redirect_to: '/register'
+      }, status: :forbidden
+      return
+    end
     
     account = @current_user.account
     
@@ -108,19 +120,39 @@ class ApplicationController < ActionController::API
     return if account&.super_admin_account?
     
     # Check if account has active subscription
-    unless account&.has_active_subscription?
+    if account&.subscription
+      # If subscription exists but is not active (suspended), allow access to subscription management
+      # but block other features
+      unless account.has_active_subscription?
+        # Check if this is a subscription management route (already handled by skip_subscription_check?)
+        # If we get here, it's not a subscription route, so block access
+        render json: {
+          error: 'Subscription suspended',
+          message: 'Your subscription is not active. Please update your payment method to continue using the app.',
+          subscription_required: true,
+          subscription_suspended: true,
+          redirect_to: '/profile' # Frontend should show subscription management
+        }, status: :forbidden
+        return
+      end
+    else
+      # No subscription at all - need to subscribe
       render json: {
         error: 'Subscription required',
         message: 'You need an active subscription to access this feature. Please subscribe to continue.',
         subscription_required: true,
-        redirect_to: '/register' # Frontend should redirect to subscription page
+        redirect_to: '/register'
       }, status: :forbidden
       return
     end
   rescue => e
     Rails.logger.error "Subscription check error: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
-    # If there's an error checking subscription, allow access (fail open for now)
-    # You might want to change this to fail closed depending on your security requirements
+    # If there's an error checking subscription, block access (fail closed for security)
+    render json: {
+      error: 'Subscription verification failed',
+      message: 'Unable to verify subscription status. Please contact support.',
+      subscription_required: true
+    }, status: :forbidden
   end
 end
