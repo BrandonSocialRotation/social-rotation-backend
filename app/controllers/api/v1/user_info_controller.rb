@@ -204,6 +204,57 @@ class Api::V1::UserInfoController < ApplicationController
   end
 
   private
+  
+  # Get Instagram account information (username, name, etc.)
+  def get_instagram_account_info(user)
+    return nil unless user.fb_user_access_key.present? && user.instagram_business_id.present?
+    
+    begin
+      # Get page access token
+      url = "https://graph.facebook.com/v18.0/me/accounts"
+      params = {
+        access_token: user.fb_user_access_key,
+        fields: 'id,name,access_token,instagram_business_account',
+        limit: 1000
+      }
+      
+      response = HTTParty.get(url, query: params)
+      data = JSON.parse(response.body)
+      
+      page_token = nil
+      if data['data'] && data['data'].any?
+        # Find the page that has the Instagram account
+        data['data'].each do |page|
+          if page['instagram_business_account'] && page['instagram_business_account']['id'] == user.instagram_business_id
+            page_token = page['access_token']
+            break
+          end
+        end
+        # Fallback to first page if no match
+        page_token ||= data['data'].first['access_token']
+      end
+      
+      return nil unless page_token
+      
+      # Get Instagram account details
+      instagram_url = "https://graph.facebook.com/v18.0/#{user.instagram_business_id}"
+      instagram_params = {
+        access_token: page_token,
+        fields: 'id,username,name'
+      }
+      
+      instagram_response = HTTParty.get(instagram_url, query: instagram_params)
+      
+      if instagram_response.success?
+        JSON.parse(instagram_response.body)
+      else
+        nil
+      end
+    rescue => e
+      Rails.logger.error "Error fetching Instagram account info: #{e.message}"
+      nil
+    end
+  end
 
   def user_params
     params.require(:user).permit(
@@ -259,6 +310,8 @@ class Api::V1::UserInfoController < ApplicationController
       linkedin_connected: user.linkedin_access_token.present?,
       google_connected: user.google_refresh_token.present?,
       instagram_connected: user.instagram_business_id.present?,
+      instagram_business_id: user.instagram_business_id,
+      instagram_account: user.instagram_business_id.present? ? get_instagram_account_info(user) : nil,
       tiktok_connected: user.tiktok_access_token.present?,
       youtube_connected: user.youtube_access_token.present?
     }

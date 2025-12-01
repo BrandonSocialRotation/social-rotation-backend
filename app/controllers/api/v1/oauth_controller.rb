@@ -920,13 +920,14 @@ class Api::V1::OauthController < ApplicationController
     end
     
     begin
-      fetch_instagram_account(current_user)
+      instagram_info = fetch_instagram_account(current_user)
       
       if current_user.instagram_business_id.present?
         render json: { 
           success: true, 
           message: 'Instagram connected successfully',
-          instagram_business_id: current_user.instagram_business_id
+          instagram_business_id: current_user.instagram_business_id,
+          instagram_account: instagram_info
         }
       else
         render json: { 
@@ -943,6 +944,7 @@ class Api::V1::OauthController < ApplicationController
       }, status: :internal_server_error
     end
   end
+  
   
   private
   
@@ -999,7 +1001,7 @@ class Api::V1::OauthController < ApplicationController
   
   # Fetch Instagram Business account ID from connected Facebook Page
   def fetch_instagram_account(user)
-    return unless user.fb_user_access_key.present?
+    return nil unless user.fb_user_access_key.present?
     
     Rails.logger.info "Fetching Instagram account for user: #{user.id}"
     
@@ -1021,13 +1023,80 @@ class Api::V1::OauthController < ApplicationController
           instagram_id = page['instagram_business_account']['id']
           user.update!(instagram_business_id: instagram_id)
           Rails.logger.info "Instagram Business account found and saved: #{instagram_id}"
-          return instagram_id
+          
+          # Return Instagram account info
+          return {
+            id: instagram_id,
+            page_id: page['id'],
+            page_name: page['name']
+          }
         end
       end
       
       Rails.logger.warn "No Instagram Business account found in any connected Facebook Page"
     else
       Rails.logger.warn "No Facebook Pages found for user"
+    end
+    
+    nil
+  end
+  
+  # Get Instagram account information
+  def get_instagram_account_info(user)
+    return nil unless user.fb_user_access_key.present? && user.instagram_business_id.present?
+    
+    # Get page access token
+    page_token = get_page_access_token_for_instagram(user)
+    return nil unless page_token
+    
+    # Get Instagram account details
+    url = "https://graph.facebook.com/v18.0/#{user.instagram_business_id}"
+    params = {
+      access_token: page_token,
+      fields: 'id,username,name,profile_picture_url,website'
+    }
+    
+    response = HTTParty.get(url, query: params)
+    
+    if response.success?
+      data = JSON.parse(response.body)
+      Rails.logger.info "Instagram account info: #{data.inspect}"
+      return data
+    else
+      Rails.logger.error "Failed to get Instagram account info: #{response.code} - #{response.body}"
+      raise "Failed to get Instagram account info: #{response.body}"
+    end
+  end
+  
+  # Get page access token for Instagram (helper method)
+  def get_page_access_token_for_instagram(user)
+    return nil unless user.fb_user_access_key.present?
+    
+    url = "https://graph.facebook.com/v18.0/me/accounts"
+    params = {
+      access_token: user.fb_user_access_key,
+      fields: 'id,name,access_token,instagram_business_account',
+      limit: 1000
+    }
+    
+    response = HTTParty.get(url, query: params)
+    data = JSON.parse(response.body)
+    
+    if data['data'] && data['data'].any?
+      # Find the page that has the Instagram account
+      data['data'].each do |page|
+        if page['instagram_business_account']
+          instagram_id = page['instagram_business_account']['id']
+          if instagram_id == user.instagram_business_id
+            Rails.logger.info "Found matching page for Instagram account: #{page['id']} (#{page['name']})"
+            return page['access_token']
+          end
+        end
+      end
+      
+      # Fallback: return first page's token
+      Rails.logger.warn "No matching page found for Instagram account, using first page"
+      return data['data'].first['access_token']
     end
     
     nil
