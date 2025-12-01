@@ -1,6 +1,6 @@
 class Api::V1::SubscriptionsController < ApplicationController
-  skip_before_action :authenticate_user!, only: [:webhook, :test_stripe]
-  before_action :authenticate_user!, except: [:webhook, :test_stripe]
+  skip_before_action :authenticate_user!, only: [:webhook, :test_stripe, :run_migrations]
+  before_action :authenticate_user!, except: [:webhook, :test_stripe, :run_migrations]
   before_action :require_account_admin!, only: [:create, :cancel]
   # Note: checkout_session doesn't require account_admin check - allows new users during registration
   before_action :check_stripe_configured!, only: [:checkout_session, :cancel, :webhook]

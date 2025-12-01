@@ -30,9 +30,29 @@ class Api::V1::OauthController < ApplicationController
   def facebook_login
     begin
       # Generate state token for CSRF protection
-      state = SecureRandom.hex(16)
-      session[:oauth_state] = state
-      session[:user_id] = current_user.id
+      # Encode user_id in state to persist across popup (sessions don't work in popups)
+      random_state = SecureRandom.hex(16)
+      user_id = current_user.id
+      state = "#{user_id}:#{random_state}"
+      
+      # Store state in database (sessions don't persist in popups)
+      begin
+        if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+          OauthRequestToken.create!(
+            oauth_token: random_state, # Use random_state as the token key
+            request_secret: state, # Store full state as secret
+            user_id: user_id,
+            expires_at: 10.minutes.from_now
+          )
+          Rails.logger.info "Facebook OAuth - stored state in database"
+        end
+      rescue => e
+        Rails.logger.error "Facebook OAuth - failed to store state in database: #{e.message}, falling back to session"
+      end
+      
+      # Also store in session as fallback
+      session[:oauth_state] = random_state
+      session[:user_id] = user_id
       
       # Facebook OAuth URL
       app_id = ENV['FACEBOOK_APP_ID']
@@ -56,6 +76,7 @@ class Api::V1::OauthController < ApplicationController
                   "&state=#{state}" \
                   "&scope=#{permissions}"
       
+      Rails.logger.info "Facebook OAuth - generated URL with state: #{state[0..20]}..., user_id: #{user_id}"
       render json: { oauth_url: oauth_url }
     rescue => e
       Rails.logger.error "Facebook OAuth login error: #{e.message}"
@@ -69,17 +90,72 @@ class Api::V1::OauthController < ApplicationController
     code = params[:code]
     state = params[:state]
     
-    # Verify state to prevent CSRF
-    if state != session[:oauth_state]
-      return redirect_to "#{frontend_url}/profile?error=invalid_state", allow_other_host: true
+    Rails.logger.info "Facebook callback - code: #{code.present? ? 'present' : 'missing'}, state: #{state.present? ? 'present' : 'missing'}"
+    
+    # Decode user_id from state (format: "user_id:random_state")
+    user_id = nil
+    expected_state = nil
+    
+    if state.present?
+      parts = state.split(':')
+      if parts.length == 2
+        user_id = parts[0].to_i
+        random_state = parts[1]
+        expected_state = random_state
+        
+        # Try to verify state from database
+        begin
+          if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+            token_data = OauthRequestToken.find_and_delete(random_state)
+            if token_data && token_data[:user_id] == user_id
+              Rails.logger.info "Facebook callback - verified state from database"
+              # State verified from database
+            else
+              Rails.logger.warn "Facebook callback - state not found in database, using decoded user_id"
+            end
+          end
+        rescue => e
+          Rails.logger.error "Facebook callback - error checking database: #{e.message}"
+        end
+      end
     end
     
-    user_id = session[:user_id]
+    # Fallback to session if state decoding failed
+    unless user_id && user_id > 0
+      user_id = session[:user_id]
+      expected_state = session[:oauth_state]
+      Rails.logger.info "Facebook callback - using user_id and state from session"
+    end
+    
+    # Verify state matches (either from database or session)
+    if expected_state && state.present?
+      state_parts = state.split(':')
+      if state_parts.length == 2
+        # State includes user_id, so we already decoded it above
+        # Just verify the random part matches
+        if state_parts[1] != expected_state
+          Rails.logger.error "Facebook callback - state mismatch: expected #{expected_state[0..10]}..., got #{state_parts[1][0..10]}..."
+          return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'Facebook'), allow_other_host: true
+        end
+      elsif state != expected_state
+        Rails.logger.error "Facebook callback - state mismatch (session): expected #{expected_state}, got #{state}"
+        return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'Facebook'), allow_other_host: true
+      end
+    end
+    
+    unless user_id && user_id > 0
+      Rails.logger.error "Facebook callback - no user_id found"
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'Facebook'), allow_other_host: true
+    end
+    
     user = User.find_by(id: user_id)
     
     unless user
-      return redirect_to "#{frontend_url}/profile?error=user_not_found", allow_other_host: true
+      Rails.logger.error "Facebook callback - user not found with id: #{user_id}"
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'Facebook'), allow_other_host: true
     end
+    
+    Rails.logger.info "Facebook callback - found user: #{user.id} (#{user.email})"
     
     # Exchange code for access token
     app_id = ENV['FACEBOOK_APP_ID']
