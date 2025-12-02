@@ -103,7 +103,13 @@ class ApplicationController < ActionController::API
   def require_active_subscription!
     return if @current_user.nil? # Already handled by authenticate_user!
     
-    # If user has no account yet, they need to complete payment
+    # Super admin accounts (account_id = 0) bypass subscription check
+    # Note: account_id = 0 is the old format for personal accounts, should bypass check
+    if @current_user.account_id == 0
+      return
+    end
+    
+    # If user has no account yet (account_id = nil), they need to complete payment
     if @current_user.account_id.nil?
       render json: {
         error: 'Account not activated',
@@ -116,11 +122,19 @@ class ApplicationController < ActionController::API
     
     account = @current_user.account
     
-    # Super admin accounts (account_id = 0) bypass subscription check
-    return if account&.super_admin_account?
+    # If account doesn't exist (shouldn't happen, but handle gracefully)
+    unless account
+      render json: {
+        error: 'Account not found',
+        message: 'Your account could not be found. Please contact support.',
+        subscription_required: true,
+        redirect_to: '/register'
+      }, status: :forbidden
+      return
+    end
     
     # Check if account has active subscription
-    if account&.subscription
+    if account.subscription
       # If subscription exists but is not active (suspended), allow access to subscription management
       # but block other features
       unless account.has_active_subscription?
