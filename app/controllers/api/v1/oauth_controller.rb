@@ -680,8 +680,23 @@ class Api::V1::OauthController < ApplicationController
   def google_login
     begin
       state = SecureRandom.hex(16)
-      session[:oauth_state] = state
-      session[:user_id] = current_user.id
+      user_id = current_user.id
+      
+      # Encode user_id in state parameter for cross-origin popup support
+      encoded_state = "#{user_id}:#{state}"
+      
+      # Store state in database for popup support (with fallback to session)
+      if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+        OauthRequestToken.create!(
+          oauth_token: encoded_state,
+          request_secret: state,
+          user_id: user_id,
+          expires_at: 10.minutes.from_now
+        )
+      else
+        session[:oauth_state] = state
+        session[:user_id] = user_id
+      end
       
       client_id = ENV['GOOGLE_CLIENT_ID']
       unless client_id
@@ -696,7 +711,7 @@ class Api::V1::OauthController < ApplicationController
                   "&response_type=code" \
                   "&scope=#{CGI.escape('https://www.googleapis.com/auth/business.manage')}" \
                   "&access_type=offline" \
-                  "&state=#{state}"
+                  "&state=#{CGI.escape(encoded_state)}"
       
       render json: { oauth_url: oauth_url }
     rescue => e
@@ -708,13 +723,41 @@ class Api::V1::OauthController < ApplicationController
   # GET /api/v1/oauth/google/callback
   def google_callback
     code = params[:code]
-    state = params[:state]
+    state_param = params[:state]
     
-    if state != session[:oauth_state]
+    # Decode user_id from state parameter
+    user_id = nil
+    state = nil
+    
+    if state_param&.include?(':')
+      parts = state_param.split(':', 2)
+      user_id = parts[0].to_i
+      state = parts[1]
+    else
+      state = state_param
+    end
+    
+    # Retrieve state from database (with fallback to session)
+    stored_state = nil
+    if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens') && state
+      token_record = OauthRequestToken.find_and_delete(state_param)
+      if token_record
+        stored_state = token_record.request_secret
+        user_id ||= token_record.user_id
+      end
+    end
+    
+    # Fallback to session if database lookup failed
+    unless stored_state
+      stored_state = session[:oauth_state]
+      user_id ||= session[:user_id]
+    end
+    
+    if state != stored_state
+      Rails.logger.error "Google OAuth state mismatch: expected #{stored_state}, got #{state}"
       return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'Google My Business'), allow_other_host: true
     end
     
-    user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
