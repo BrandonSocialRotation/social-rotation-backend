@@ -972,35 +972,86 @@ class Api::V1::OauthController < ApplicationController
   # GET /api/v1/oauth/youtube/login
   # Initiates YouTube OAuth flow
   def youtube_login
-    state = SecureRandom.hex(16)
-    session[:oauth_state] = state
-    session[:user_id] = current_user.id
-    
-    client_id = ENV['YOUTUBE_CLIENT_ID']
-    raise 'YouTube Client ID not configured' unless client_id
-    redirect_uri = ENV['YOUTUBE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/youtube/callback' : 'https://social-rotation-frontend.onrender.com/youtube/callback')
-    
-    oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" \
-                "client_id=#{client_id}" \
-                "&redirect_uri=#{CGI.escape(redirect_uri)}" \
-                "&response_type=code" \
-                "&scope=#{CGI.escape('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube')}" \
-                "&access_type=offline" \
-                "&state=#{state}"
-    
-    render json: { oauth_url: oauth_url }
+    begin
+      state = SecureRandom.hex(16)
+      user_id = current_user.id
+      
+      # Encode user_id in state parameter for cross-origin popup support
+      encoded_state = "#{user_id}:#{state}"
+      
+      # Store state in database for popup support (with fallback to session)
+      if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+        OauthRequestToken.create!(
+          oauth_token: encoded_state,
+          request_secret: state,
+          user_id: user_id,
+          expires_at: 10.minutes.from_now
+        )
+      else
+        session[:oauth_state] = state
+        session[:user_id] = user_id
+      end
+      
+      client_id = ENV['YOUTUBE_CLIENT_ID']
+      unless client_id
+        return render json: { error: 'YouTube Client ID not configured' }, status: :internal_server_error
+      end
+      # Use backend callback URL for YouTube OAuth
+      redirect_uri = ENV['YOUTUBE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/youtube/callback' : "#{request.base_url}/api/v1/oauth/youtube/callback")
+      
+      oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" \
+                  "client_id=#{client_id}" \
+                  "&redirect_uri=#{CGI.escape(redirect_uri)}" \
+                  "&response_type=code" \
+                  "&scope=#{CGI.escape('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube')}" \
+                  "&access_type=offline" \
+                  "&state=#{CGI.escape(encoded_state)}"
+      
+      render json: { oauth_url: oauth_url }
+    rescue => e
+      Rails.logger.error "YouTube OAuth login error: #{e.message}"
+      render json: { error: 'Failed to initiate YouTube OAuth', details: e.message }, status: :internal_server_error
+    end
   end
   
   # GET /api/v1/oauth/youtube/callback
   def youtube_callback
     code = params[:code]
-    state = params[:state]
+    state_param = params[:state]
     
-    if state != session[:oauth_state]
+    # Decode user_id from state parameter
+    user_id = nil
+    state = nil
+    
+    if state_param&.include?(':')
+      parts = state_param.split(':', 2)
+      user_id = parts[0].to_i
+      state = parts[1]
+    else
+      state = state_param
+    end
+    
+    # Retrieve state from database (with fallback to session)
+    stored_state = nil
+    if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens') && state_param
+      token_record = OauthRequestToken.find_and_delete(state_param)
+      if token_record
+        stored_state = token_record.request_secret
+        user_id ||= token_record.user_id
+      end
+    end
+    
+    # Fallback to session if database lookup failed
+    unless stored_state
+      stored_state = session[:oauth_state]
+      user_id ||= session[:user_id]
+    end
+    
+    if state != stored_state
+      Rails.logger.error "YouTube OAuth state mismatch: expected #{stored_state}, got #{state}"
       return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'YouTube'), allow_other_host: true
     end
     
-    user_id = session[:user_id]
     user = User.find_by(id: user_id)
     
     unless user
@@ -1012,7 +1063,7 @@ class Api::V1::OauthController < ApplicationController
     raise 'YouTube Client ID not configured' unless client_id
     client_secret = ENV['YOUTUBE_CLIENT_SECRET']
     raise 'YouTube Client Secret not configured' unless client_secret
-    redirect_uri = ENV['YOUTUBE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3001/youtube/callback' : 'https://social-rotation-frontend.onrender.com/youtube/callback')
+    redirect_uri = ENV['YOUTUBE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/youtube/callback' : "#{request.base_url}/api/v1/oauth/youtube/callback")
     
     token_url = "https://oauth2.googleapis.com/token"
     
