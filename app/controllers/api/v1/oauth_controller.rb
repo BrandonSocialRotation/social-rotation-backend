@@ -739,11 +739,12 @@ class Api::V1::OauthController < ApplicationController
     
     # Retrieve state from database (with fallback to session)
     stored_state = nil
-    if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens') && state
+    if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens') && state_param
       token_record = OauthRequestToken.find_and_delete(state_param)
       if token_record
-        stored_state = token_record.request_secret
-        user_id ||= token_record.user_id
+        # find_and_delete returns a Hash, not an object
+        stored_state = token_record[:secret] || token_record['secret']
+        user_id ||= (token_record[:user_id] || token_record['user_id'])
       end
     end
     
@@ -753,6 +754,7 @@ class Api::V1::OauthController < ApplicationController
       user_id ||= session[:user_id]
     end
     
+    # Compare the decoded state (part after colon) with stored secret
     if state != stored_state
       Rails.logger.error "Google OAuth state mismatch: expected #{stored_state}, got #{state}"
       return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'Google My Business'), allow_other_host: true
@@ -1036,8 +1038,9 @@ class Api::V1::OauthController < ApplicationController
     if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens') && state_param
       token_record = OauthRequestToken.find_and_delete(state_param)
       if token_record
-        stored_state = token_record.request_secret
-        user_id ||= token_record.user_id
+        # find_and_delete returns a Hash, not an object
+        stored_state = token_record[:secret] || token_record['secret']
+        user_id ||= (token_record[:user_id] || token_record['user_id'])
       end
     end
     
@@ -1047,6 +1050,7 @@ class Api::V1::OauthController < ApplicationController
       user_id ||= session[:user_id]
     end
     
+    # Compare the decoded state (part after colon) with stored secret
     if state != stored_state
       Rails.logger.error "YouTube OAuth state mismatch: expected #{stored_state}, got #{state}"
       return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'YouTube'), allow_other_host: true
