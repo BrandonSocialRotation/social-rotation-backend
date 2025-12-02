@@ -39,6 +39,7 @@ Rails.application.routes.draw do
       get 'oauth/linkedin/callback', to: 'oauth#linkedin_callback'
       get 'oauth/google/login', to: 'oauth#google_login'
       get 'oauth/google/callback', to: 'oauth#google_callback'
+      get 'oauth/test_google', to: 'oauth#test_google'
       get 'oauth/tiktok/login', to: 'oauth#tiktok_login'
       get 'oauth/tiktok/callback', to: 'oauth#tiktok_callback'
       get 'oauth/youtube/login', to: 'oauth#youtube_login'
