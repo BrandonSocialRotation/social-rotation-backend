@@ -818,26 +818,42 @@ class Api::V1::OauthController < ApplicationController
         
         # Fetch Google account info - non-blocking
         begin
-          if data['access_token']
-            google_info_url = "https://www.googleapis.com/oauth2/v2/userinfo?access_token=#{data['access_token']}"
-            google_info_response = HTTParty.get(google_info_url, timeout: 5)
+          access_token = data['access_token']
+          if access_token
+            google_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
+            google_info_response = HTTParty.get(google_info_url, {
+              headers: {
+                'Authorization' => "Bearer #{access_token}"
+              },
+              timeout: 5
+            })
+            
+            Rails.logger.info "Google user info API response: code=#{google_info_response.code}, body=#{google_info_response.body[0..200]}"
             
             if google_info_response.success?
               google_info_data = JSON.parse(google_info_response.body)
+              Rails.logger.info "Google user info data: #{google_info_data.inspect}"
               
               if user.respond_to?(:google_account_name=)
                 account_name = google_info_data['name'] || google_info_data['email']
                 if account_name
                   user.update!(google_account_name: account_name)
                   Rails.logger.info "Google account name saved: #{account_name}"
+                else
+                  Rails.logger.warn "Google user info missing name and email: #{google_info_data.inspect}"
                 end
+              else
+                Rails.logger.warn "User model does not respond to google_account_name="
               end
             else
-              Rails.logger.warn "Google user info API returned error: #{google_info_response.code}"
+              Rails.logger.warn "Google user info API returned error: #{google_info_response.code} - #{google_info_response.body[0..200]}"
             end
+          else
+            Rails.logger.warn "Google token exchange response missing access_token: #{data.keys.inspect}"
           end
         rescue => e
-          Rails.logger.warn "Failed to fetch Google account info (non-blocking): #{e.message}"
+          Rails.logger.error "Failed to fetch Google account info (non-blocking): #{e.class} - #{e.message}"
+          Rails.logger.error e.backtrace.join("\n")
           # Don't fail the connection if account info fetch fails
         end
         
@@ -1277,26 +1293,42 @@ class Api::V1::OauthController < ApplicationController
           
           # Fetch Pinterest user info - non-blocking
           begin
-            pinterest_info_url = "https://api.pinterest.com/v5/user_account"
-            pinterest_info_response = HTTParty.get(pinterest_info_url, {
-              headers: {
-                'Authorization' => "Bearer #{data['access_token']}"
-              },
-              timeout: 5
-            })
-            
-            if pinterest_info_response.success?
-              pinterest_info_data = JSON.parse(pinterest_info_response.body)
+            access_token = data['access_token']
+            if access_token
+              pinterest_info_url = "https://api.pinterest.com/v5/user_account"
+              pinterest_info_response = HTTParty.get(pinterest_info_url, {
+                headers: {
+                  'Authorization' => "Bearer #{access_token}"
+                },
+                timeout: 5
+              })
               
-              if pinterest_info_data['username'] && user.respond_to?(:pinterest_username=)
-                user.update!(pinterest_username: pinterest_info_data['username'])
-                Rails.logger.info "Pinterest username saved: #{pinterest_info_data['username']}"
+              Rails.logger.info "Pinterest user info API response: code=#{pinterest_info_response.code}, body=#{pinterest_info_response.body[0..200]}"
+              
+              if pinterest_info_response.success?
+                pinterest_info_data = JSON.parse(pinterest_info_response.body)
+                Rails.logger.info "Pinterest user info data: #{pinterest_info_data.inspect}"
+                
+                if user.respond_to?(:pinterest_username=)
+                  username = pinterest_info_data['username'] || pinterest_info_data.dig('profile', 'username')
+                  if username
+                    user.update!(pinterest_username: username)
+                    Rails.logger.info "Pinterest username saved: #{username}"
+                  else
+                    Rails.logger.warn "Pinterest user info missing username: #{pinterest_info_data.inspect}"
+                  end
+                else
+                  Rails.logger.warn "User model does not respond to pinterest_username="
+                end
+              else
+                Rails.logger.warn "Pinterest user info API returned error: #{pinterest_info_response.code} - #{pinterest_info_response.body[0..200]}"
               end
             else
-              Rails.logger.warn "Pinterest user info API returned error: #{pinterest_info_response.code}"
+              Rails.logger.warn "Pinterest token exchange response missing access_token: #{data.keys.inspect}"
             end
           rescue => e
-            Rails.logger.warn "Failed to fetch Pinterest user info (non-blocking): #{e.message}"
+            Rails.logger.error "Failed to fetch Pinterest user info (non-blocking): #{e.class} - #{e.message}"
+            Rails.logger.error e.backtrace.join("\n")
             # Don't fail the connection if account info fetch fails
           end
           
