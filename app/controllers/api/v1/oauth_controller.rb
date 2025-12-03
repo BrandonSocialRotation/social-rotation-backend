@@ -810,7 +810,15 @@ class Api::V1::OauthController < ApplicationController
         }
       })
       
+      Rails.logger.info "Google token exchange response: code=#{response.code}, body=#{response.body[0..500]}"
+      
+      unless response.success?
+        Rails.logger.error "Google token exchange failed: #{response.code} - #{response.body}"
+        return redirect_to oauth_callback_url(error: 'google_auth_failed', platform: 'Google My Business'), allow_other_host: true
+      end
+      
       data = JSON.parse(response.body)
+      Rails.logger.info "Google token exchange data keys: #{data.keys.inspect}, has refresh_token: #{data['refresh_token'].present?}, has access_token: #{data['access_token'].present?}"
       
       if data['refresh_token']
         # Store refresh token first (don't let account info fetch block connection)
@@ -858,7 +866,8 @@ class Api::V1::OauthController < ApplicationController
         end
         
         redirect_to oauth_callback_url(success: 'google_connected', platform: 'Google My Business'), allow_other_host: true
-        else
+      else
+        Rails.logger.error "Google OAuth failed - no refresh_token in response. Response data: #{data.inspect}"
         redirect_to oauth_callback_url(error: 'google_auth_failed', platform: 'Google My Business'), allow_other_host: true
       end
     rescue => e
@@ -1199,7 +1208,8 @@ class Api::V1::OauthController < ApplicationController
       
       # Pinterest OAuth 2.0 authorization URL
       # Pinterest requires scopes to be URL-encoded
-      scopes = "boards:read,boards:write,pins:read,pins:write"
+      # user_accounts:read is needed to fetch username
+      scopes = "boards:read,boards:write,pins:read,pins:write,user_accounts:read"
       oauth_url = "https://www.pinterest.com/oauth/?" \
                   "client_id=#{client_id}" \
                   "&redirect_uri=#{CGI.escape(redirect_uri)}" \
