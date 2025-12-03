@@ -176,6 +176,19 @@ class Api::V1::OauthController < ApplicationController
         # Store the access token
         user.update!(fb_user_access_key: data['access_token'])
         
+        # Fetch Facebook user info (name/email)
+        begin
+          fb_info_url = "https://graph.facebook.com/v18.0/me?fields=name,email&access_token=#{data['access_token']}"
+          fb_info_response = HTTParty.get(fb_info_url)
+          fb_info_data = JSON.parse(fb_info_response.body)
+          
+          if fb_info_data['name'] && user.respond_to?(:facebook_name=)
+            user.update!(facebook_name: fb_info_data['name'])
+          end
+        rescue => e
+          Rails.logger.warn "Failed to fetch Facebook user info: #{e.message}"
+        end
+        
         # Try to fetch Instagram Business account ID
         fetch_instagram_account(user)
         
@@ -790,6 +803,22 @@ class Api::V1::OauthController < ApplicationController
       
       if data['refresh_token']
         user.update!(google_refresh_token: data['refresh_token'])
+        
+        # Fetch Google account info
+        begin
+          if data['access_token']
+            google_info_url = "https://www.googleapis.com/oauth2/v2/userinfo?access_token=#{data['access_token']}"
+            google_info_response = HTTParty.get(google_info_url)
+            google_info_data = JSON.parse(google_info_response.body)
+            
+            if google_info_data['name'] && user.respond_to?(:google_account_name=)
+              user.update!(google_account_name: google_info_data['name'] || google_info_data['email'])
+            end
+          end
+        rescue => e
+          Rails.logger.warn "Failed to fetch Google account info: #{e.message}"
+        end
+        
         redirect_to oauth_callback_url(success: 'google_connected', platform: 'Google My Business'), allow_other_host: true
         else
         redirect_to oauth_callback_url(error: 'google_auth_failed', platform: 'Google My Business'), allow_other_host: true
@@ -1222,6 +1251,24 @@ class Api::V1::OauthController < ApplicationController
             pinterest_access_token: data['access_token'],
             pinterest_refresh_token: data['refresh_token']
           )
+          
+          # Fetch Pinterest user info
+          begin
+            pinterest_info_url = "https://api.pinterest.com/v5/user_account"
+            pinterest_info_response = HTTParty.get(pinterest_info_url, {
+              headers: {
+                'Authorization' => "Bearer #{data['access_token']}"
+              }
+            })
+            pinterest_info_data = JSON.parse(pinterest_info_response.body)
+            
+            if pinterest_info_data['username'] && user.respond_to?(:pinterest_username=)
+              user.update!(pinterest_username: pinterest_info_data['username'])
+            end
+          rescue => e
+            Rails.logger.warn "Failed to fetch Pinterest user info: #{e.message}"
+          end
+          
           redirect_to oauth_callback_url(success: 'pinterest_connected', platform: 'Pinterest'), allow_other_host: true
         else
           Rails.logger.error "Pinterest columns not found in users table. Migration may not have been run."
