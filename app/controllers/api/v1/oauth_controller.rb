@@ -1215,11 +1215,16 @@ class Api::V1::OauthController < ApplicationController
       data = JSON.parse(response.body)
       
       if data['access_token']
-        user.update!(
-          pinterest_access_token: data['access_token'],
-          pinterest_refresh_token: data['refresh_token']
-        )
-        redirect_to oauth_callback_url(success: 'pinterest_connected', platform: 'Pinterest'), allow_other_host: true
+        if user.respond_to?(:pinterest_access_token=)
+          user.update!(
+            pinterest_access_token: data['access_token'],
+            pinterest_refresh_token: data['refresh_token']
+          )
+          redirect_to oauth_callback_url(success: 'pinterest_connected', platform: 'Pinterest'), allow_other_host: true
+        else
+          Rails.logger.error "Pinterest columns not found in users table. Migration may not have been run."
+          redirect_to oauth_callback_url(error: 'pinterest_migration_required', platform: 'Pinterest'), allow_other_host: true
+        end
       else
         Rails.logger.error "Pinterest OAuth token exchange failed: #{data}"
         redirect_to oauth_callback_url(error: 'pinterest_auth_failed', platform: 'Pinterest'), allow_other_host: true
