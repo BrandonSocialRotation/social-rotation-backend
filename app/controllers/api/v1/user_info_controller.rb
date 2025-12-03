@@ -63,10 +63,12 @@ class Api::V1::UserInfoController < ApplicationController
 
   # POST /api/v1/user_info/disconnect_facebook
   def disconnect_facebook
-    current_user.update!(
+    update_params = {
       fb_user_access_key: nil,
       instagram_business_id: nil
-    )
+    }
+    update_params[:facebook_name] = nil if current_user.respond_to?(:facebook_name=)
+    current_user.update!(update_params)
     
     render json: { message: 'Facebook disconnected successfully' }
   end
@@ -107,10 +109,12 @@ class Api::V1::UserInfoController < ApplicationController
 
   # POST /api/v1/user_info/disconnect_google
   def disconnect_google
-    current_user.update!(
+    update_params = {
       google_refresh_token: nil,
       location_id: nil
-    )
+    }
+    update_params[:google_account_name] = nil if current_user.respond_to?(:google_account_name=)
+    current_user.update!(update_params)
     
     render json: { message: 'Google My Business disconnected successfully' }
   end
@@ -141,10 +145,12 @@ class Api::V1::UserInfoController < ApplicationController
   # POST /api/v1/user_info/disconnect_pinterest
   def disconnect_pinterest
     if current_user.respond_to?(:pinterest_access_token)
-      current_user.update!(
+      update_params = {
         pinterest_access_token: nil,
         pinterest_refresh_token: nil
-      )
+      }
+      update_params[:pinterest_username] = nil if current_user.respond_to?(:pinterest_username=)
+      current_user.update!(update_params)
       render json: { message: 'Pinterest disconnected successfully' }
     else
       render json: { message: 'Pinterest not connected' }, status: :bad_request
