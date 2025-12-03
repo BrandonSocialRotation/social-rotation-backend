@@ -3,10 +3,19 @@ class Api::V1::UserInfoController < ApplicationController
 
   # GET /api/v1/user_info
   def show
-    render json: {
-      user: user_json(current_user),
-      connected_accounts: get_connected_accounts
-    }
+    begin
+      render json: {
+        user: user_json(current_user),
+        connected_accounts: get_connected_accounts
+      }
+    rescue => e
+      Rails.logger.error "User info error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: {
+        error: 'Failed to load user info',
+        message: e.message
+      }, status: :internal_server_error
+    end
   end
 
   # PATCH /api/v1/user_info
