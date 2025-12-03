@@ -44,6 +44,8 @@ Rails.application.routes.draw do
       get 'oauth/tiktok/callback', to: 'oauth#tiktok_callback'
       get 'oauth/youtube/login', to: 'oauth#youtube_login'
       get 'oauth/youtube/callback', to: 'oauth#youtube_callback'
+      get 'oauth/pinterest/login', to: 'oauth#pinterest_login'
+      get 'oauth/pinterest/callback', to: 'oauth#pinterest_callback'
 
       # User info routes
       get 'user_info', to: 'user_info#show'

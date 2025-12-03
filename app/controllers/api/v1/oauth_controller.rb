@@ -1,5 +1,5 @@
 class Api::V1::OauthController < ApplicationController
-  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback]
+  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback]
   
   # Helper method to get the correct frontend URL for redirects
   def frontend_url
@@ -1097,6 +1097,137 @@ class Api::V1::OauthController < ApplicationController
     rescue => e
       Rails.logger.error "YouTube OAuth error: #{e.message}"
       redirect_to oauth_callback_url(error: 'youtube_auth_failed', platform: 'YouTube'), allow_other_host: true
+    end
+  end
+  
+  # GET /api/v1/oauth/pinterest/login
+  # Initiates Pinterest OAuth flow
+  def pinterest_login
+    begin
+      state = SecureRandom.hex(16)
+      user_id = current_user.id
+      
+      # Encode user_id in state parameter for cross-origin popup support
+      encoded_state = "#{user_id}:#{state}"
+      
+      # Store state in database for popup support (with fallback to session)
+      if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
+        OauthRequestToken.create!(
+          oauth_token: encoded_state,
+          request_secret: state,
+          user_id: user_id,
+          expires_at: 10.minutes.from_now
+        )
+      else
+        session[:oauth_state] = state
+        session[:user_id] = user_id
+      end
+      
+      client_id = ENV['PINTEREST_CLIENT_ID']
+      unless client_id
+        return render json: { error: 'Pinterest Client ID not configured' }, status: :internal_server_error
+      end
+      
+      redirect_uri = ENV['PINTEREST_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/pinterest/callback' : "#{request.base_url}/api/v1/oauth/pinterest/callback")
+      
+      # Pinterest OAuth 2.0 authorization URL
+      oauth_url = "https://www.pinterest.com/oauth/?" \
+                  "client_id=#{client_id}" \
+                  "&redirect_uri=#{CGI.escape(redirect_uri)}" \
+                  "&response_type=code" \
+                  "&scope=boards:read,boards:write,pins:read,pins:write" \
+                  "&state=#{CGI.escape(encoded_state)}"
+      
+      render json: { oauth_url: oauth_url }
+    rescue => e
+      Rails.logger.error "Pinterest OAuth login error: #{e.message}"
+      render json: { error: 'Failed to initiate Pinterest OAuth', details: e.message }, status: :internal_server_error
+    end
+  end
+  
+  # GET /api/v1/oauth/pinterest/callback
+  def pinterest_callback
+    code = params[:code]
+    state_param = params[:state]
+    
+    # Decode user_id from state parameter
+    user_id = nil
+    state = nil
+    
+    if state_param&.include?(':')
+      parts = state_param.split(':', 2)
+      user_id = parts[0].to_i
+      state = parts[1]
+    else
+      state = state_param
+    end
+    
+    # Retrieve state from database (with fallback to session)
+    stored_state = nil
+    if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens') && state_param
+      token_record = OauthRequestToken.find_and_delete(state_param)
+      if token_record
+        # find_and_delete returns a Hash, not an object
+        stored_state = token_record[:secret] || token_record['secret']
+        user_id ||= (token_record[:user_id] || token_record['user_id'])
+      end
+    end
+    
+    # Fallback to session if database lookup failed
+    unless stored_state
+      stored_state = session[:oauth_state]
+      user_id ||= session[:user_id]
+    end
+    
+    if state != stored_state
+      Rails.logger.error "Pinterest OAuth state mismatch: expected #{stored_state}, got #{state}"
+      return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'Pinterest'), allow_other_host: true
+    end
+    
+    user = User.find_by(id: user_id)
+    
+    unless user
+      return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'Pinterest'), allow_other_host: true
+    end
+    
+    # Exchange code for access token
+    client_id = ENV['PINTEREST_CLIENT_ID']
+    raise 'Pinterest Client ID not configured' unless client_id
+    client_secret = ENV['PINTEREST_CLIENT_SECRET']
+    raise 'Pinterest Client Secret not configured' unless client_secret
+    redirect_uri = ENV['PINTEREST_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/pinterest/callback' : "#{request.base_url}/api/v1/oauth/pinterest/callback")
+    
+    token_url = "https://api.pinterest.com/v5/oauth/token"
+    
+    begin
+      response = HTTParty.post(token_url, {
+        body: {
+          grant_type: 'authorization_code',
+          code: code,
+          redirect_uri: redirect_uri
+        },
+        headers: {
+          'Authorization' => "Basic #{Base64.strict_encode64("#{client_id}:#{client_secret}")}",
+          'Content-Type' => 'application/x-www-form-urlencoded'
+        }
+      })
+      
+      data = JSON.parse(response.body)
+      
+      if data['access_token']
+        user.update!(
+          pinterest_access_token: data['access_token'],
+          pinterest_refresh_token: data['refresh_token']
+        )
+        redirect_to oauth_callback_url(success: 'pinterest_connected', platform: 'Pinterest'), allow_other_host: true
+      else
+        Rails.logger.error "Pinterest OAuth token exchange failed: #{data}"
+        redirect_to oauth_callback_url(error: 'pinterest_auth_failed', platform: 'Pinterest'), allow_other_host: true
+      end
+    rescue => e
+      Rails.logger.error "Pinterest OAuth error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      redirect_to oauth_callback_url(error: 'pinterest_auth_failed', platform: 'Pinterest'), allow_other_host: true
     end
   end
   

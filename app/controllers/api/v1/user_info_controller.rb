@@ -129,6 +129,16 @@ class Api::V1::UserInfoController < ApplicationController
     render json: { message: 'YouTube disconnected successfully' }
   end
 
+  # POST /api/v1/user_info/disconnect_pinterest
+  def disconnect_pinterest
+    current_user.update!(
+      pinterest_access_token: nil,
+      pinterest_refresh_token: nil
+    )
+    
+    render json: { message: 'Pinterest disconnected successfully' }
+  end
+
   # POST /api/v1/user_info/toggle_instagram
   def toggle_instagram
     current_user.update!(post_to_instagram: params[:post_to_instagram] == 'true')
@@ -313,7 +323,8 @@ class Api::V1::UserInfoController < ApplicationController
       instagram_business_id: user.instagram_business_id,
       instagram_account: user.instagram_business_id.present? ? get_instagram_account_info(user) : nil,
       tiktok_connected: user.tiktok_access_token.present?,
-      youtube_connected: user.youtube_access_token.present?
+      youtube_connected: user.youtube_access_token.present?,
+      pinterest_connected: user.pinterest_access_token.present?
     }
   end
 end
