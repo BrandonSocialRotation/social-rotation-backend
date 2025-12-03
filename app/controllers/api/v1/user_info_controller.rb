@@ -329,10 +329,10 @@ class Api::V1::UserInfoController < ApplicationController
       youtube_connected: user.youtube_access_token.present?,
       pinterest_connected: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present?) || false,
       # Account information for connected platforms
-      twitter_account: user.twitter_connected ? { username: user.twitter_screen_name, user_id: user.twitter_user_id } : nil,
-      linkedin_account: user.linkedin_connected ? { profile_id: user.linkedin_profile_id } : nil,
-      tiktok_account: user.tiktok_connected ? { username: user.tiktok_username, user_id: user.tiktok_user_id } : nil,
-      youtube_account: user.youtube_connected ? { channel_id: user.youtube_channel_id } : nil,
+      twitter_account: (user.twitter_oauth_token.present? && user.respond_to?(:twitter_screen_name)) ? { username: user.twitter_screen_name, user_id: user.twitter_user_id } : nil,
+      linkedin_account: (user.linkedin_access_token.present? && user.respond_to?(:linkedin_profile_id)) ? { profile_id: user.linkedin_profile_id } : nil,
+      tiktok_account: (user.tiktok_access_token.present? && user.respond_to?(:tiktok_username)) ? { username: user.tiktok_username, user_id: user.tiktok_user_id } : nil,
+      youtube_account: (user.youtube_access_token.present? && user.respond_to?(:youtube_channel_id)) ? { channel_id: user.youtube_channel_id } : nil,
       pinterest_account: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present?) ? { connected: true } : nil
     }
   end
