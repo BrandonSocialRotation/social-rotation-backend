@@ -735,6 +735,7 @@ class Api::V1::OauthController < ApplicationController
                   "&response_type=code" \
                   "&scope=#{CGI.escape('https://www.googleapis.com/auth/business.manage')}" \
                   "&access_type=offline" \
+                  "&prompt=consent" \
                   "&state=#{CGI.escape(encoded_state)}"
       
       render json: { oauth_url: oauth_url }
@@ -820,9 +821,18 @@ class Api::V1::OauthController < ApplicationController
       data = JSON.parse(response.body)
       Rails.logger.info "Google token exchange data keys: #{data.keys.inspect}, has refresh_token: #{data['refresh_token'].present?}, has access_token: #{data['access_token'].present?}"
       
-      if data['refresh_token']
-        # Store refresh token first (don't let account info fetch block connection)
-        user.update!(google_refresh_token: data['refresh_token'])
+      # Accept connection if we have access_token, even if refresh_token is missing
+      # (refresh_token is only returned on first authorization or when prompt=consent is used)
+      if data['access_token']
+        # Store refresh token if provided, otherwise keep existing one
+        if data['refresh_token']
+          user.update!(google_refresh_token: data['refresh_token'])
+          Rails.logger.info "Google refresh token saved"
+        elsif user.google_refresh_token.present?
+          Rails.logger.info "Google refresh token not in response, but user already has one stored - keeping existing"
+        else
+          Rails.logger.warn "Google refresh token not in response and user doesn't have one stored. User may need to re-authorize with prompt=consent"
+        end
         
         # Fetch Google account info - non-blocking
         begin
@@ -867,7 +877,7 @@ class Api::V1::OauthController < ApplicationController
         
         redirect_to oauth_callback_url(success: 'google_connected', platform: 'Google My Business'), allow_other_host: true
       else
-        Rails.logger.error "Google OAuth failed - no refresh_token in response. Response data: #{data.inspect}"
+        Rails.logger.error "Google OAuth failed - no access_token in response. Response data: #{data.inspect}"
         redirect_to oauth_callback_url(error: 'google_auth_failed', platform: 'Google My Business'), allow_other_host: true
       end
     rescue => e
@@ -1083,6 +1093,7 @@ class Api::V1::OauthController < ApplicationController
                   "&response_type=code" \
                   "&scope=#{CGI.escape('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube')}" \
                   "&access_type=offline" \
+                  "&prompt=consent" \
                   "&state=#{CGI.escape(encoded_state)}"
       
       render json: { oauth_url: oauth_url }
@@ -1158,16 +1169,38 @@ class Api::V1::OauthController < ApplicationController
         }
       })
       
-      data = JSON.parse(response.body)
+      Rails.logger.info "YouTube token exchange response: code=#{response.code}, body=#{response.body[0..500]}"
       
-      if data['refresh_token']
-        user.update!(
-          youtube_refresh_token: data['refresh_token'],
-          youtube_access_token: data['access_token']
-        )
+      unless response.success?
+        Rails.logger.error "YouTube token exchange failed: #{response.code} - #{response.body}"
+        return redirect_to oauth_callback_url(error: 'youtube_auth_failed', platform: 'YouTube'), allow_other_host: true
+      end
+      
+      data = JSON.parse(response.body)
+      Rails.logger.info "YouTube token exchange data keys: #{data.keys.inspect}, has refresh_token: #{data['refresh_token'].present?}, has access_token: #{data['access_token'].present?}"
+      
+      # Accept connection if we have access_token, even if refresh_token is missing
+      if data['access_token']
+        # Store refresh token if provided, otherwise keep existing one
+        if data['refresh_token']
+          user.update!(
+            youtube_refresh_token: data['refresh_token'],
+            youtube_access_token: data['access_token']
+          )
+          Rails.logger.info "YouTube refresh token saved"
+        elsif user.youtube_refresh_token.present?
+          # Update access token but keep existing refresh token
+          user.update!(youtube_access_token: data['access_token'])
+          Rails.logger.info "YouTube refresh token not in response, but user already has one stored - keeping existing"
+        else
+          # Store access token temporarily, but warn about missing refresh token
+          user.update!(youtube_access_token: data['access_token'])
+          Rails.logger.warn "YouTube refresh token not in response and user doesn't have one stored. User may need to re-authorize with prompt=consent"
+        end
         
         redirect_to oauth_callback_url(success: 'youtube_connected', platform: 'YouTube'), allow_other_host: true
-        else
+      else
+        Rails.logger.error "YouTube OAuth failed - no access_token in response. Response data: #{data.inspect}"
         redirect_to oauth_callback_url(error: 'youtube_auth_failed', platform: 'YouTube'), allow_other_host: true
       end
     rescue => e
