@@ -386,7 +386,10 @@ class Api::V1::UserInfoController < ApplicationController
       linkedin_account: (user.linkedin_access_token.present? && user.respond_to?(:linkedin_profile_id) && user.linkedin_profile_id.present?) ? { profile_id: user.linkedin_profile_id } : nil,
       google_account: (user.google_refresh_token.present? && user.respond_to?(:google_account_name) && user.google_account_name.present?) ? { name: user.google_account_name } : nil,
       tiktok_account: (user.tiktok_access_token.present? && user.respond_to?(:tiktok_username) && user.tiktok_username.present?) ? { username: user.tiktok_username, user_id: user.tiktok_user_id } : nil,
-      youtube_account: (user.youtube_access_token.present? && user.respond_to?(:youtube_channel_id) && user.youtube_channel_id.present?) ? { channel_id: user.youtube_channel_id } : nil,
+      youtube_account: (user.youtube_access_token.present? && user.respond_to?(:youtube_channel_id) && user.youtube_channel_id.present?) ? { 
+        channel_id: user.youtube_channel_id,
+        channel_name: (user.respond_to?(:youtube_channel_name) && user.youtube_channel_name.present?) ? user.youtube_channel_name : nil
+      } : nil,
       pinterest_account: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present? && user.respond_to?(:pinterest_username) && user.pinterest_username.present?) ? { username: user.pinterest_username } : nil
     }
   end

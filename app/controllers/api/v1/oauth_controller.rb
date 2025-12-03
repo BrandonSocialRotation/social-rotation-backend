@@ -1205,6 +1205,63 @@ class Api::V1::OauthController < ApplicationController
           Rails.logger.warn "YouTube refresh token not in response and user doesn't have one stored. User may need to re-authorize with prompt=consent"
         end
         
+        # Fetch YouTube channel info - non-blocking
+        begin
+          access_token = data['access_token']
+          if access_token
+            # Get channel information using YouTube Data API v3
+            youtube_info_url = "https://www.googleapis.com/youtube/v3/channels"
+            youtube_info_response = HTTParty.get(youtube_info_url, {
+              query: {
+                part: 'snippet',
+                mine: 'true'
+              },
+              headers: {
+                'Authorization' => "Bearer #{access_token}"
+              },
+              timeout: 5
+            })
+            
+            Rails.logger.info "YouTube channel info API response: code=#{youtube_info_response.code}, body=#{youtube_info_response.body[0..200]}"
+            
+            if youtube_info_response.success?
+              youtube_info_data = JSON.parse(youtube_info_response.body)
+              Rails.logger.info "YouTube channel info data: #{youtube_info_data.inspect}"
+              
+              if youtube_info_data['items'] && youtube_info_data['items'].any?
+                channel = youtube_info_data['items'].first
+                channel_id = channel['id']
+                channel_title = channel.dig('snippet', 'title')
+                
+                # Save channel ID if column exists
+                if channel_id && user.respond_to?(:youtube_channel_id=)
+                  user.update!(youtube_channel_id: channel_id)
+                  Rails.logger.info "YouTube channel ID saved: #{channel_id}"
+                end
+                
+                # Save channel name if column exists
+                if channel_title && user.respond_to?(:youtube_channel_name=)
+                  user.update!(youtube_channel_name: channel_title)
+                  Rails.logger.info "YouTube channel name saved: #{channel_title}"
+                elsif channel_title && user.respond_to?(:youtube_account_name=)
+                  user.update!(youtube_account_name: channel_title)
+                  Rails.logger.info "YouTube account name saved: #{channel_title}"
+                end
+              else
+                Rails.logger.warn "YouTube channel info missing items: #{youtube_info_data.inspect}"
+              end
+            else
+              Rails.logger.warn "YouTube channel info API returned error: #{youtube_info_response.code} - #{youtube_info_response.body[0..200]}"
+            end
+          else
+            Rails.logger.warn "YouTube token exchange response missing access_token: #{data.keys.inspect}"
+          end
+        rescue => e
+          Rails.logger.error "Failed to fetch YouTube channel info (non-blocking): #{e.class} - #{e.message}"
+          Rails.logger.error e.backtrace.join("\n")
+          # Don't fail the connection if account info fetch fails
+        end
+        
         redirect_to oauth_callback_url(success: 'youtube_connected', platform: 'YouTube'), allow_other_host: true
       else
         Rails.logger.error "YouTube OAuth failed - no access_token in response. Response data: #{data.inspect}"
