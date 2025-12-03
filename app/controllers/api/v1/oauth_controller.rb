@@ -729,11 +729,18 @@ class Api::V1::OauthController < ApplicationController
       # Use production callback URL for Google OAuth
       redirect_uri = ENV['GOOGLE_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/google/callback' : "#{request.base_url}/api/v1/oauth/google/callback")
       
+      # Request both business.manage (for Google My Business) and userinfo scopes (for account name)
+      scopes = [
+        'https://www.googleapis.com/auth/business.manage',
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/userinfo.email'
+      ].join(' ')
+      
       oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" \
                   "client_id=#{client_id}" \
                   "&redirect_uri=#{CGI.escape(redirect_uri)}" \
                   "&response_type=code" \
-                  "&scope=#{CGI.escape('https://www.googleapis.com/auth/business.manage')}" \
+                  "&scope=#{CGI.escape(scopes)}" \
                   "&access_type=offline" \
                   "&prompt=consent" \
                   "&state=#{CGI.escape(encoded_state)}"
