@@ -1131,11 +1131,13 @@ class Api::V1::OauthController < ApplicationController
       redirect_uri = ENV['PINTEREST_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000/api/v1/oauth/pinterest/callback' : "#{request.base_url}/api/v1/oauth/pinterest/callback")
       
       # Pinterest OAuth 2.0 authorization URL
+      # Pinterest requires scopes to be URL-encoded
+      scopes = "boards:read,boards:write,pins:read,pins:write"
       oauth_url = "https://www.pinterest.com/oauth/?" \
                   "client_id=#{client_id}" \
                   "&redirect_uri=#{CGI.escape(redirect_uri)}" \
                   "&response_type=code" \
-                  "&scope=boards:read,boards:write,pins:read,pins:write" \
+                  "&scope=#{CGI.escape(scopes)}" \
                   "&state=#{CGI.escape(encoded_state)}"
       
       render json: { oauth_url: oauth_url }
