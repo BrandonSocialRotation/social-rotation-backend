@@ -173,24 +173,35 @@ class Api::V1::OauthController < ApplicationController
       data = JSON.parse(response.body)
       
       if data['access_token']
-        # Store the access token
+        # Store the access token first (don't let account info fetch block connection)
         user.update!(fb_user_access_key: data['access_token'])
         
-        # Fetch Facebook user info (name/email)
+        # Fetch Facebook user info (name/email) - non-blocking
         begin
           fb_info_url = "https://graph.facebook.com/v18.0/me?fields=name,email&access_token=#{data['access_token']}"
-          fb_info_response = HTTParty.get(fb_info_url)
-          fb_info_data = JSON.parse(fb_info_response.body)
+          fb_info_response = HTTParty.get(fb_info_url, timeout: 5)
           
-          if fb_info_data['name'] && user.respond_to?(:facebook_name=)
-            user.update!(facebook_name: fb_info_data['name'])
+          if fb_info_response.success?
+            fb_info_data = JSON.parse(fb_info_response.body)
+            
+            if fb_info_data['name'] && user.respond_to?(:facebook_name=)
+              user.update!(facebook_name: fb_info_data['name'])
+              Rails.logger.info "Facebook account name saved: #{fb_info_data['name']}"
+            end
+          else
+            Rails.logger.warn "Facebook user info API returned error: #{fb_info_response.code}"
           end
         rescue => e
-          Rails.logger.warn "Failed to fetch Facebook user info: #{e.message}"
+          Rails.logger.warn "Failed to fetch Facebook user info (non-blocking): #{e.message}"
+          # Don't fail the connection if account info fetch fails
         end
         
-        # Try to fetch Instagram Business account ID
-        fetch_instagram_account(user)
+        # Try to fetch Instagram Business account ID (non-blocking)
+        begin
+          fetch_instagram_account(user)
+        rescue => e
+          Rails.logger.warn "Failed to fetch Instagram account (non-blocking): #{e.message}"
+        end
         
         # Redirect back to frontend OAuth callback
         redirect_to oauth_callback_url(success: 'facebook_connected', platform: 'Facebook'), allow_other_host: true
@@ -802,21 +813,32 @@ class Api::V1::OauthController < ApplicationController
       data = JSON.parse(response.body)
       
       if data['refresh_token']
+        # Store refresh token first (don't let account info fetch block connection)
         user.update!(google_refresh_token: data['refresh_token'])
         
-        # Fetch Google account info
+        # Fetch Google account info - non-blocking
         begin
           if data['access_token']
             google_info_url = "https://www.googleapis.com/oauth2/v2/userinfo?access_token=#{data['access_token']}"
-            google_info_response = HTTParty.get(google_info_url)
-            google_info_data = JSON.parse(google_info_response.body)
+            google_info_response = HTTParty.get(google_info_url, timeout: 5)
             
-            if google_info_data['name'] && user.respond_to?(:google_account_name=)
-              user.update!(google_account_name: google_info_data['name'] || google_info_data['email'])
+            if google_info_response.success?
+              google_info_data = JSON.parse(google_info_response.body)
+              
+              if user.respond_to?(:google_account_name=)
+                account_name = google_info_data['name'] || google_info_data['email']
+                if account_name
+                  user.update!(google_account_name: account_name)
+                  Rails.logger.info "Google account name saved: #{account_name}"
+                end
+              end
+            else
+              Rails.logger.warn "Google user info API returned error: #{google_info_response.code}"
             end
           end
         rescue => e
-          Rails.logger.warn "Failed to fetch Google account info: #{e.message}"
+          Rails.logger.warn "Failed to fetch Google account info (non-blocking): #{e.message}"
+          # Don't fail the connection if account info fetch fails
         end
         
         redirect_to oauth_callback_url(success: 'google_connected', platform: 'Google My Business'), allow_other_host: true
@@ -1247,26 +1269,35 @@ class Api::V1::OauthController < ApplicationController
       
       if data['access_token']
         if user.respond_to?(:pinterest_access_token=)
+          # Store tokens first (don't let account info fetch block connection)
           user.update!(
             pinterest_access_token: data['access_token'],
             pinterest_refresh_token: data['refresh_token']
           )
           
-          # Fetch Pinterest user info
+          # Fetch Pinterest user info - non-blocking
           begin
             pinterest_info_url = "https://api.pinterest.com/v5/user_account"
             pinterest_info_response = HTTParty.get(pinterest_info_url, {
               headers: {
                 'Authorization' => "Bearer #{data['access_token']}"
-              }
+              },
+              timeout: 5
             })
-            pinterest_info_data = JSON.parse(pinterest_info_response.body)
             
-            if pinterest_info_data['username'] && user.respond_to?(:pinterest_username=)
-              user.update!(pinterest_username: pinterest_info_data['username'])
+            if pinterest_info_response.success?
+              pinterest_info_data = JSON.parse(pinterest_info_response.body)
+              
+              if pinterest_info_data['username'] && user.respond_to?(:pinterest_username=)
+                user.update!(pinterest_username: pinterest_info_data['username'])
+                Rails.logger.info "Pinterest username saved: #{pinterest_info_data['username']}"
+              end
+            else
+              Rails.logger.warn "Pinterest user info API returned error: #{pinterest_info_response.code}"
             end
           rescue => e
-            Rails.logger.warn "Failed to fetch Pinterest user info: #{e.message}"
+            Rails.logger.warn "Failed to fetch Pinterest user info (non-blocking): #{e.message}"
+            # Don't fail the connection if account info fetch fails
           end
           
           redirect_to oauth_callback_url(success: 'pinterest_connected', platform: 'Pinterest'), allow_other_host: true
