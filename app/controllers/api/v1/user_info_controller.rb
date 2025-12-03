@@ -61,6 +61,43 @@ class Api::V1::UserInfoController < ApplicationController
     }
   end
 
+  # GET /api/v1/user_info/debug
+  # Debug endpoint to check what account info is stored
+  def debug
+    user = current_user
+    render json: {
+      user_id: user.id,
+      email: user.email,
+      # Facebook
+      fb_user_access_key: user.fb_user_access_key.present? ? 'present' : 'nil',
+      facebook_name: user.respond_to?(:facebook_name) ? user.facebook_name : 'column_not_exists',
+      # Twitter
+      twitter_oauth_token: user.twitter_oauth_token.present? ? 'present' : 'nil',
+      twitter_screen_name: user.respond_to?(:twitter_screen_name) ? user.twitter_screen_name : 'column_not_exists',
+      # LinkedIn
+      linkedin_access_token: user.linkedin_access_token.present? ? 'present' : 'nil',
+      linkedin_profile_id: user.respond_to?(:linkedin_profile_id) ? user.linkedin_profile_id : 'column_not_exists',
+      # Google
+      google_refresh_token: user.google_refresh_token.present? ? 'present' : 'nil',
+      google_account_name: user.respond_to?(:google_account_name) ? user.google_account_name : 'column_not_exists',
+      # TikTok
+      tiktok_access_token: user.tiktok_access_token.present? ? 'present' : 'nil',
+      tiktok_username: user.respond_to?(:tiktok_username) ? user.tiktok_username : 'column_not_exists',
+      # YouTube
+      youtube_access_token: user.youtube_access_token.present? ? 'present' : 'nil',
+      youtube_channel_id: user.respond_to?(:youtube_channel_id) ? user.youtube_channel_id : 'column_not_exists',
+      # Pinterest
+      pinterest_access_token: user.respond_to?(:pinterest_access_token) ? (user.pinterest_access_token.present? ? 'present' : 'nil') : 'column_not_exists',
+      pinterest_username: user.respond_to?(:pinterest_username) ? user.pinterest_username : 'column_not_exists',
+      # Instagram
+      instagram_business_id: user.instagram_business_id,
+      # All columns check
+      has_facebook_name_column: user.respond_to?(:facebook_name),
+      has_google_account_name_column: user.respond_to?(:google_account_name),
+      has_pinterest_username_column: user.respond_to?(:pinterest_username)
+    }
+  end
+
   # POST /api/v1/user_info/disconnect_facebook
   def disconnect_facebook
     update_params = {
