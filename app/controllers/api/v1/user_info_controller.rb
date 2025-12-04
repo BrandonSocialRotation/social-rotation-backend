@@ -4,6 +4,9 @@ class Api::V1::UserInfoController < ApplicationController
   # GET /api/v1/user_info
   def show
     begin
+      # Fetch YouTube channel name if missing (non-blocking)
+      fetch_youtube_channel_name_if_missing(current_user)
+      
       render json: {
         user: user_json(current_user),
         connected_accounts: get_connected_accounts
@@ -392,6 +395,52 @@ class Api::V1::UserInfoController < ApplicationController
       } : nil,
       pinterest_account: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present? && user.respond_to?(:pinterest_username) && user.pinterest_username.present?) ? { username: user.pinterest_username } : nil
     }
+  end
+  
+  # Fetch YouTube channel name if missing (non-blocking)
+  def fetch_youtube_channel_name_if_missing(user)
+    return unless user.youtube_access_token.present?
+    return if user.respond_to?(:youtube_channel_name) && user.youtube_channel_name.present?
+    return unless user.respond_to?(:youtube_channel_name=) # Column must exist
+    
+    begin
+      # Get channel information using YouTube Data API v3
+      youtube_info_url = "https://www.googleapis.com/youtube/v3/channels"
+      youtube_info_response = HTTParty.get(youtube_info_url, {
+        query: {
+          part: 'snippet',
+          mine: 'true'
+        },
+        headers: {
+          'Authorization' => "Bearer #{user.youtube_access_token}"
+        },
+        timeout: 3
+      })
+      
+      if youtube_info_response.success?
+        youtube_info_data = JSON.parse(youtube_info_response.body)
+        
+        if youtube_info_data['items'] && youtube_info_data['items'].any?
+          channel = youtube_info_data['items'].first
+          channel_id = channel['id']
+          channel_title = channel.dig('snippet', 'title')
+          
+          # Save channel ID if missing
+          if channel_id && user.respond_to?(:youtube_channel_id=) && user.youtube_channel_id.blank?
+            user.update!(youtube_channel_id: channel_id)
+          end
+          
+          # Save channel name
+          if channel_title
+            user.update!(youtube_channel_name: channel_title)
+            Rails.logger.info "YouTube channel name fetched and saved: #{channel_title}"
+          end
+        end
+      end
+    rescue => e
+      Rails.logger.warn "Failed to fetch YouTube channel name (non-blocking): #{e.message}"
+      # Don't fail the request if this fails
+    end
   end
 end
 
