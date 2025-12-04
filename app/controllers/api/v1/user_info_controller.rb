@@ -173,11 +173,14 @@ class Api::V1::UserInfoController < ApplicationController
 
   # POST /api/v1/user_info/disconnect_youtube
   def disconnect_youtube
-    current_user.update!(
+    update_params = {
       youtube_access_token: nil,
       youtube_refresh_token: nil,
       youtube_channel_id: nil
-    )
+    }
+    update_params[:youtube_channel_name] = nil if current_user.respond_to?(:youtube_channel_name=)
+    
+    current_user.update!(update_params)
     
     render json: { message: 'YouTube disconnected successfully' }
   end
