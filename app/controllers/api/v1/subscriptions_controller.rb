@@ -191,6 +191,14 @@ class Api::V1::SubscriptionsController < ApplicationController
         mode: 'subscription',
         success_url: success_url,
         cancel_url: cancel_url,
+        # Disable Pay with Link and require card entry
+        payment_method_options: {
+          card: {
+            require_cvc: true
+          }
+        },
+        # Collect billing address (can help reduce fraud checks)
+        billing_address_collection: 'required',
         metadata: {
           user_id: current_user.id.to_s,
           plan_id: plan.id.to_s,
