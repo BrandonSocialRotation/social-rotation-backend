@@ -396,7 +396,9 @@ class Api::V1::SubscriptionsController < ApplicationController
   end
   
   def frontend_url
-    ENV['FRONTEND_URL'] || 'https://social-rotation-frontend-f4mwb.ondigitalocean.app'
+    url = ENV['FRONTEND_URL'] || 'https://social-rotation-frontend-f4mwb.ondigitalocean.app'
+    # Remove trailing slash to avoid double slashes
+    url.chomp('/')
   end
   
   def get_or_create_stripe_customer(account)
