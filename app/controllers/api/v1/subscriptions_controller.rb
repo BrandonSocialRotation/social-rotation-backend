@@ -179,13 +179,18 @@ class Api::V1::SubscriptionsController < ApplicationController
       
       # Create Checkout Session
       # Store registration info in metadata - account will be created in webhook
+      success_url = "#{frontend_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
+      cancel_url = "#{frontend_url}/register?error=subscription_canceled"
+      
+      Rails.logger.info "Creating Stripe checkout session with success_url: #{success_url}, cancel_url: #{cancel_url}"
+      
       session = Stripe::Checkout::Session.create({
         customer: customer.id,
         payment_method_types: ['card'],
         line_items: line_items,
         mode: 'subscription',
-        success_url: "#{frontend_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}",
-        cancel_url: "#{frontend_url}/register?error=subscription_canceled",
+        success_url: success_url,
+        cancel_url: cancel_url,
         metadata: {
           user_id: current_user.id.to_s,
           plan_id: plan.id.to_s,
@@ -417,8 +422,15 @@ class Api::V1::SubscriptionsController < ApplicationController
   
   def frontend_url
     url = ENV['FRONTEND_URL'] || 'https://social-rotation-frontend-f4mwb.ondigitalocean.app'
-    # Remove trailing slash to avoid double slashes
-    url.chomp('/')
+    # Remove any whitespace and trailing slashes
+    url = url.strip.chomp('/')
+    # Ensure URL is valid and starts with http:// or https://
+    unless url.match?(/\Ahttps?:\/\//)
+      Rails.logger.error "Invalid FRONTEND_URL format: #{url}"
+      url = 'https://my.socialrotation.app'
+    end
+    Rails.logger.info "Frontend URL: #{url}"
+    url
   end
   
   def get_or_create_stripe_customer(account)
