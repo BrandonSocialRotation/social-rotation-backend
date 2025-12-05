@@ -146,15 +146,37 @@ class Api::V1::SubscriptionsController < ApplicationController
           quantity: 1,
         }]
       else
-        # For fixed-price plans, use the plan's stripe_price_id
-        unless plan.stripe_price_id.present?
-          return render json: { error: 'Plan does not have a Stripe price configured' }, status: :bad_request
+        # For fixed-price plans, use the plan's stripe_price_id if available
+        # Otherwise, create a price dynamically
+        if plan.stripe_price_id.present?
+          line_items = [{
+            price: plan.stripe_price_id,
+            quantity: 1,
+          }]
+        else
+          # Create a price dynamically for fixed-price plans
+          price_cents = plan.price_cents || 0
+          unless price_cents > 0
+            return render json: { error: 'Plan does not have a price configured' }, status: :bad_request
+          end
+          
+          stripe_price = Stripe::Price.create({
+            unit_amount: price_cents,
+            currency: 'usd',
+            recurring: {
+              interval: billing_period == 'annual' ? 'year' : 'month',
+            },
+            product_data: {
+              name: plan.name,
+              description: plan.description || "Subscription for #{plan.name}"
+            }
+          })
+          
+          line_items = [{
+            price: stripe_price.id,
+            quantity: 1,
+          }]
         end
-        
-        line_items = [{
-          price: plan.stripe_price_id,
-          quantity: 1,
-        }]
       end
       
       # Create Checkout Session
