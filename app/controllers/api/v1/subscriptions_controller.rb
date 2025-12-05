@@ -136,8 +136,7 @@ class Api::V1::SubscriptionsController < ApplicationController
             interval: billing_period == 'annual' ? 'year' : 'month',
           },
           product_data: {
-            name: "#{plan.name} (#{user_count} user#{user_count != 1 ? 's' : ''})",
-            description: "Subscription for #{user_count} user#{user_count != 1 ? 's' : ''}"
+            name: "#{plan.name} (#{user_count} user#{user_count != 1 ? 's' : ''})"
           }
         })
         
@@ -167,8 +166,7 @@ class Api::V1::SubscriptionsController < ApplicationController
               interval: billing_period == 'annual' ? 'year' : 'month',
             },
             product_data: {
-              name: plan.name,
-              description: "Subscription for #{plan.name}"
+              name: plan.name
             }
           })
           
