@@ -23,7 +23,50 @@ class Api::V1::AuthController < ApplicationController
         }, status: :unprocessable_entity
       end
       
-      # Create user WITHOUT account (account_id = nil)
+      # Check if user already exists
+      existing_user = User.find_by(email: params[:email])
+      
+      if existing_user
+        # If user exists but has no account (didn't complete payment), allow them to continue
+        if existing_user.account_id.nil?
+          # Prepare update params
+          update_params = user_params.merge(
+            account_id: nil, # Still no account until payment
+            is_account_admin: false,
+            role: params[:account_type] == 'agency' ? 'reseller' : nil
+          )
+          
+          # Update user info and allow them to proceed to payment
+          if existing_user.update(update_params)
+            token = JsonWebToken.encode(user_id: existing_user.id)
+            render json: {
+              user: user_json(existing_user),
+              token: token,
+              message: 'Please complete payment to activate your account.'
+            }, status: :ok
+            return
+          else
+            # Update failed, return errors
+            render json: {
+              error: 'Registration failed',
+              message: existing_user.errors.full_messages.join('. '),
+              details: existing_user.errors.full_messages,
+              errors: existing_user.errors.as_json
+            }, status: :unprocessable_entity
+            return
+          end
+        else
+          # User exists and has an account - email is taken
+          render json: {
+            error: 'Email already registered',
+            message: 'This email is already registered. Please login instead.',
+            field: 'email'
+          }, status: :unprocessable_entity
+          return
+        end
+      end
+      
+      # Create new user WITHOUT account (account_id = nil)
       # Account will be created in Stripe webhook after payment succeeds
       # Registration metadata (account_type, company_name) will be stored in Stripe checkout session metadata
       user = User.new(user_params.merge(
