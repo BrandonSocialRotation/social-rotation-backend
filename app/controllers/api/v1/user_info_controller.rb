@@ -210,6 +210,49 @@ class Api::V1::UserInfoController < ApplicationController
     }
   end
 
+  # DELETE /api/v1/user_info/delete_test_account
+  # Delete a test account by email (for testing purposes)
+  # Requires: email parameter
+  def delete_test_account
+    email = params[:email]
+    
+    unless email.present?
+      return render json: { error: 'Email is required' }, status: :bad_request
+    end
+    
+    user = User.find_by(email: email)
+    
+    unless user
+      return render json: { error: 'User not found' }, status: :not_found
+    end
+    
+    # Prevent deleting your own account
+    if user.id == current_user.id
+      return render json: { error: 'Cannot delete your own account' }, status: :bad_request
+    end
+    
+    begin
+      # Delete associated account if user is account admin
+      if user.account && user.is_account_admin
+        account = user.account
+        # Delete subscription if exists
+        account.subscription&.destroy
+        # Delete account (this will cascade delete the user)
+        account.destroy
+        message = "User and account deleted successfully"
+      else
+        # Just delete the user
+        user.destroy
+        message = "User deleted successfully"
+      end
+      
+      render json: { message: message, deleted_email: email }
+    rescue => e
+      Rails.logger.error "Error deleting account: #{e.message}"
+      render json: { error: "Failed to delete account: #{e.message}" }, status: :internal_server_error
+    end
+  end
+
   # POST /api/v1/user_info/convert_to_agency
   # Convert a personal account to an agency account
   def convert_to_agency
