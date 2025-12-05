@@ -168,7 +168,7 @@ class Api::V1::SubscriptionsController < ApplicationController
             },
             product_data: {
               name: plan.name,
-              description: plan.description || "Subscription for #{plan.name}"
+              description: "Subscription for #{plan.name}"
             }
           })
           
