@@ -5,6 +5,9 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
+  # Stripe webhook endpoint (matches Stripe's configured URL)
+  post "stripe/subscription_created", to: "api/v1/subscriptions#webhook"
+
   # API Routes
   namespace :api do
     namespace :v1 do
@@ -76,6 +79,8 @@ Rails.application.routes.draw do
           get 'images/:image_id', to: 'buckets#single_image'
           patch 'images/:image_id', to: 'buckets#update_image'
           delete 'images/:image_id', to: 'buckets#delete_image'
+          get 'videos', to: 'buckets#videos'
+          post 'videos/upload', to: 'buckets#upload_video'
           get 'randomize', to: 'buckets#randomize'
         end
         collection do
