@@ -180,7 +180,7 @@ class Api::V1::SubscriptionsController < ApplicationController
       # Create Checkout Session
       # Store registration info in metadata - account will be created in webhook
       base_url = frontend_url
-      success_url = "#{base_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
+      success_url = "#{base_url}/dashboard?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
       cancel_url = "#{base_url}/register?error=subscription_canceled"
       
       # Validate URLs before sending to Stripe
