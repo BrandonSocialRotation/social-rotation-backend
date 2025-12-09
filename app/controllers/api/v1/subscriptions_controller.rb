@@ -179,19 +179,27 @@ class Api::V1::SubscriptionsController < ApplicationController
       
       # Create Checkout Session
       # Store registration info in metadata - account will be created in webhook
-      success_url = "#{frontend_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
-      cancel_url = "#{frontend_url}/register?error=subscription_canceled"
+      base_url = frontend_url
+      success_url = "#{base_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
+      cancel_url = "#{base_url}/register?error=subscription_canceled"
+      
+      # Validate URLs before sending to Stripe
+      unless valid_url?(success_url) && valid_url?(cancel_url)
+        Rails.logger.error "Invalid URLs generated - success_url: #{success_url}, cancel_url: #{cancel_url}"
+        return render json: { error: 'Invalid frontend URL configuration' }, status: :internal_server_error
+      end
       
       Rails.logger.info "Creating Stripe checkout session with success_url: #{success_url}, cancel_url: #{cancel_url}"
       
       session = Stripe::Checkout::Session.create({
         customer: customer.id,
+        # Only allow card payments (no Link, Apple Pay, Google Pay, etc.)
         payment_method_types: ['card'],
         line_items: line_items,
         mode: 'subscription',
         success_url: success_url,
         cancel_url: cancel_url,
-        # Disable Pay with Link and require card entry
+        # Disable Pay with Link explicitly
         payment_method_options: {
           card: {
             require_cvc: true
@@ -199,6 +207,10 @@ class Api::V1::SubscriptionsController < ApplicationController
         },
         # Collect billing address (can help reduce fraud checks)
         billing_address_collection: 'required',
+        # Disable automatic tax (if not needed)
+        automatic_tax: {
+          enabled: false
+        },
         metadata: {
           user_id: current_user.id.to_s,
           plan_id: plan.id.to_s,
@@ -429,7 +441,7 @@ class Api::V1::SubscriptionsController < ApplicationController
   end
   
   def frontend_url
-    url = ENV['FRONTEND_URL'] || 'https://social-rotation-frontend-f4mwb.ondigitalocean.app'
+    url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
     # Remove any whitespace and trailing slashes
     url = url.strip.chomp('/')
     # Ensure URL is valid and starts with http:// or https://
@@ -437,8 +449,17 @@ class Api::V1::SubscriptionsController < ApplicationController
       Rails.logger.error "Invalid FRONTEND_URL format: #{url}"
       url = 'https://my.socialrotation.app'
     end
+    # Remove any trailing slashes again after validation
+    url = url.chomp('/')
     Rails.logger.info "Frontend URL: #{url}"
     url
+  end
+  
+  def valid_url?(url_string)
+    uri = URI.parse(url_string)
+    uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
+  rescue URI::InvalidURIError
+    false
   end
   
   def get_or_create_stripe_customer(account)
