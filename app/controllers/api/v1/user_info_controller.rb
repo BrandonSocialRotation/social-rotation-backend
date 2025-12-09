@@ -210,6 +210,44 @@ class Api::V1::UserInfoController < ApplicationController
     }
   end
 
+  # DELETE /api/v1/user_info/delete_account
+  # Delete the current user's account
+  # Cancels Stripe subscription, deletes account and all associated data
+  def delete_account
+    user = current_user
+    account = user.account
+    
+    begin
+      # Cancel Stripe subscription if exists
+      if account&.subscription&.stripe_subscription_id.present?
+        Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+        begin
+          Stripe::Subscription.delete(account.subscription.stripe_subscription_id)
+          Rails.logger.info "Stripe subscription #{account.subscription.stripe_subscription_id} canceled"
+        rescue Stripe::StripeError => e
+          Rails.logger.error "Failed to cancel Stripe subscription: #{e.message}"
+          # Continue with deletion even if Stripe cancel fails
+        end
+      end
+      
+      # Delete account if user is account admin (this will cascade delete the user)
+      if account && user.is_account_admin
+        account.destroy
+        message = "Account and user deleted successfully"
+      else
+        # Just delete the user (for personal accounts or sub-accounts)
+        user.destroy
+        message = "User account deleted successfully"
+      end
+      
+      render json: { message: message }
+    rescue => e
+      Rails.logger.error "Error deleting account: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: "Failed to delete account: #{e.message}" }, status: :internal_server_error
+    end
+  end
+
   # DELETE /api/v1/user_info/delete_test_account
   # Delete a test account by email (for testing purposes)
   # Requires: email parameter
