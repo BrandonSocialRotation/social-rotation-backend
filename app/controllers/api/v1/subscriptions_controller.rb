@@ -199,12 +199,6 @@ class Api::V1::SubscriptionsController < ApplicationController
         mode: 'subscription',
         success_url: success_url,
         cancel_url: cancel_url,
-        # Disable Pay with Link explicitly
-        payment_method_options: {
-          card: {
-            require_cvc: true
-          }
-        },
         # Collect billing address (can help reduce fraud checks)
         billing_address_collection: 'required',
         # Disable automatic tax (if not needed)
