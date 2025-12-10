@@ -19,11 +19,13 @@ class Api::V1::BucketsController < ApplicationController
     # Safely get bucket_videos if the association exists
     bucket_videos_data = []
     begin
-      if @bucket.respond_to?(:bucket_videos)
-        bucket_videos_data = @bucket.bucket_videos.includes(:video).map { |bv| bucket_video_json(bv) }
-      end
+      bucket_videos_data = @bucket.bucket_videos.includes(:video).map { |bv| bucket_video_json(bv) }
+    rescue NoMethodError, ActiveRecord::StatementInvalid => e
+      Rails.logger.warn "bucket_videos not available: #{e.message}"
+      bucket_videos_data = []
     rescue => e
-      Rails.logger.warn "bucket_videos association not available: #{e.message}"
+      Rails.logger.warn "Error loading bucket_videos: #{e.message}"
+      bucket_videos_data = []
     end
     
     render json: {
@@ -106,18 +108,17 @@ class Api::V1::BucketsController < ApplicationController
   # GET /api/v1/buckets/:id/videos
   def videos
     begin
-      if @bucket.respond_to?(:bucket_videos)
-        @bucket_videos = @bucket.bucket_videos.includes(:video).order(:friendly_name)
-        render json: {
-          bucket_videos: @bucket_videos.map { |bv| bucket_video_json(bv) }
-        }
-      else
-        render json: {
-          bucket_videos: []
-        }
-      end
+      @bucket_videos = @bucket.bucket_videos.includes(:video).order(:friendly_name)
+      render json: {
+        bucket_videos: @bucket_videos.map { |bv| bucket_video_json(bv) }
+      }
+    rescue NoMethodError, ActiveRecord::StatementInvalid => e
+      Rails.logger.warn "bucket_videos not available: #{e.message}"
+      render json: {
+        bucket_videos: []
+      }
     rescue => e
-      Rails.logger.warn "bucket_videos association not available: #{e.message}"
+      Rails.logger.warn "Error loading bucket_videos: #{e.message}"
       render json: {
         bucket_videos: []
       }
@@ -174,31 +175,37 @@ class Api::V1::BucketsController < ApplicationController
       )
       
       if video.save
-        # Create BucketVideo record linking the video to this bucket (if association exists)
-        unless @bucket.respond_to?(:bucket_videos)
-          return render json: { error: 'Video support not available' }, status: :not_implemented
-        end
-        
-        bucket_video = @bucket.bucket_videos.build(
-          video_id: video.id,
-          friendly_name: friendly_name,
-          description: params[:description] || '',
-          twitter_description: params[:twitter_description] || '',
-          post_to: params[:post_to] || 0,
-          use_watermark: params[:use_watermark] == '1' || params[:use_watermark] == true
-        )
-        
-        if bucket_video.save
-          render json: {
-            bucket_video: bucket_video_json(bucket_video),
-            message: 'Video uploaded successfully'
-          }, status: :created
-        else
-          # If bucket_video fails to save, clean up the video
+        # Create BucketVideo record linking the video to this bucket
+        begin
+          bucket_video = @bucket.bucket_videos.build(
+            video_id: video.id,
+            friendly_name: friendly_name,
+            description: params[:description] || '',
+            twitter_description: params[:twitter_description] || '',
+            post_to: params[:post_to] || 0,
+            use_watermark: params[:use_watermark] == '1' || params[:use_watermark] == true
+          )
+          
+          if bucket_video.save
+            render json: {
+              bucket_video: bucket_video_json(bucket_video),
+              message: 'Video uploaded successfully'
+            }, status: :created
+          else
+            # If bucket_video fails to save, clean up the video
+            video.destroy
+            render json: {
+              errors: bucket_video.errors.full_messages
+            }, status: :unprocessable_entity
+          end
+        rescue NoMethodError, ActiveRecord::StatementInvalid => e
+          Rails.logger.warn "bucket_videos not available: #{e.message}"
           video.destroy
-          render json: {
-            errors: bucket_video.errors.full_messages
-          }, status: :unprocessable_entity
+          render json: { error: 'Video support not available' }, status: :not_implemented
+        rescue => e
+          Rails.logger.error "Error creating bucket_video: #{e.message}"
+          video.destroy
+          render json: { error: 'Failed to link video to bucket' }, status: :internal_server_error
         end
       else
         render json: {
