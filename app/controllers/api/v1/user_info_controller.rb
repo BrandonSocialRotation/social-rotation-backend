@@ -222,12 +222,13 @@ class Api::V1::UserInfoController < ApplicationController
       if account&.subscription&.stripe_subscription_id.present?
         Stripe.api_key = ENV['STRIPE_SECRET_KEY']
         begin
-          # Retrieve the subscription first
+          # Retrieve the subscription first to check its status
           stripe_subscription = Stripe::Subscription.retrieve(account.subscription.stripe_subscription_id)
           
-          # Only try to delete if it's not already canceled
-          unless stripe_subscription.status == 'canceled'
-            stripe_subscription.delete
+          # Only try to delete if it's not already canceled or deleted
+          unless stripe_subscription.status == 'canceled' || stripe_subscription.status == 'incomplete_expired'
+            # Use the class method to delete the subscription
+            Stripe::Subscription.delete(account.subscription.stripe_subscription_id)
             Rails.logger.info "Stripe subscription #{account.subscription.stripe_subscription_id} canceled and deleted"
           else
             Rails.logger.info "Stripe subscription #{account.subscription.stripe_subscription_id} already canceled"
