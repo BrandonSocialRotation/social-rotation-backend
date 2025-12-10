@@ -14,10 +14,22 @@ class Api::V1::BucketsController < ApplicationController
 
   # GET /api/v1/buckets/:id
   def show
+    bucket_images_data = @bucket.bucket_images.includes(:image).map { |bi| bucket_image_json(bi) }
+    
+    # Safely get bucket_videos if the association exists
+    bucket_videos_data = []
+    begin
+      if @bucket.respond_to?(:bucket_videos)
+        bucket_videos_data = @bucket.bucket_videos.includes(:video).map { |bv| bucket_video_json(bv) }
+      end
+    rescue => e
+      Rails.logger.warn "bucket_videos association not available: #{e.message}"
+    end
+    
     render json: {
       bucket: bucket_json(@bucket),
-      bucket_images: @bucket.bucket_images.includes(:image).map { |bi| bucket_image_json(bi) },
-      bucket_videos: @bucket.bucket_videos.includes(:video).map { |bv| bucket_video_json(bv) },
+      bucket_images: bucket_images_data,
+      bucket_videos: bucket_videos_data,
       bucket_schedules: @bucket.bucket_schedules.map { |bs| bucket_schedule_json(bs) }
     }
   end
@@ -93,10 +105,23 @@ class Api::V1::BucketsController < ApplicationController
 
   # GET /api/v1/buckets/:id/videos
   def videos
-    @bucket_videos = @bucket.bucket_videos.includes(:video).order(:friendly_name)
-    render json: {
-      bucket_videos: @bucket_videos.map { |bv| bucket_video_json(bv) }
-    }
+    begin
+      if @bucket.respond_to?(:bucket_videos)
+        @bucket_videos = @bucket.bucket_videos.includes(:video).order(:friendly_name)
+        render json: {
+          bucket_videos: @bucket_videos.map { |bv| bucket_video_json(bv) }
+        }
+      else
+        render json: {
+          bucket_videos: []
+        }
+      end
+    rescue => e
+      Rails.logger.warn "bucket_videos association not available: #{e.message}"
+      render json: {
+        bucket_videos: []
+      }
+    end
   end
 
   # POST /api/v1/buckets/:id/videos/upload
@@ -149,7 +174,11 @@ class Api::V1::BucketsController < ApplicationController
       )
       
       if video.save
-        # Create BucketVideo record linking the video to this bucket
+        # Create BucketVideo record linking the video to this bucket (if association exists)
+        unless @bucket.respond_to?(:bucket_videos)
+          return render json: { error: 'Video support not available' }, status: :not_implemented
+        end
+        
         bucket_video = @bucket.bucket_videos.build(
           video_id: video.id,
           friendly_name: friendly_name,
