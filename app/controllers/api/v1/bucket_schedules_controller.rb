@@ -30,7 +30,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
     if params[:bucket_schedule].present?
       schedule_params = params.require(:bucket_schedule).permit(
         :schedule, :schedule_type, :post_to, :description, :twitter_description,
-        :times_sent, :skip_image, :bucket_image_id
+        :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn
       )
     end
     
@@ -249,7 +249,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
   def bucket_schedule_params
     params.require(:bucket_schedule).permit(
       :schedule, :schedule_type, :post_to, :description, :twitter_description,
-      :times_sent, :skip_image, :bucket_image_id
+      :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn
     )
   end
 
@@ -273,7 +273,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
   end
 
   def bucket_schedule_json(bucket_schedule)
-    {
+    json = {
       id: bucket_schedule.id,
       schedule: bucket_schedule.schedule,
       schedule_type: bucket_schedule.schedule_type,
@@ -295,6 +295,25 @@ class Api::V1::BucketSchedulesController < ApplicationController
       created_at: bucket_schedule.created_at,
       updated_at: bucket_schedule.updated_at
     }
+    
+    # Safely add page ID fields if they exist
+    begin
+      if bucket_schedule.has_attribute?(:facebook_page_id)
+        json[:facebook_page_id] = bucket_schedule.facebook_page_id
+      end
+    rescue => e
+      Rails.logger.debug "facebook_page_id column not available: #{e.message}"
+    end
+    
+    begin
+      if bucket_schedule.has_attribute?(:linkedin_organization_urn)
+        json[:linkedin_organization_urn] = bucket_schedule.linkedin_organization_urn
+      end
+    rescue => e
+      Rails.logger.debug "linkedin_organization_urn column not available: #{e.message}"
+    end
+    
+    json
   end
 
   def send_history_json(send_history)
