@@ -487,12 +487,12 @@ class Api::V1::BucketsController < ApplicationController
       updated_at: bucket_image.updated_at
     }
     
-    # Safely add page ID fields if they exist
-    if bucket_image.respond_to?(:facebook_page_id)
+    # Safely add page ID fields if they exist (check both respond_to and has_attribute for safety)
+    if bucket_image.respond_to?(:facebook_page_id) && bucket_image.class.column_names.include?('facebook_page_id')
       json[:facebook_page_id] = bucket_image.facebook_page_id
     end
     
-    if bucket_image.respond_to?(:linkedin_organization_urn)
+    if bucket_image.respond_to?(:linkedin_organization_urn) && bucket_image.class.column_names.include?('linkedin_organization_urn')
       json[:linkedin_organization_urn] = bucket_image.linkedin_organization_urn
     end
     

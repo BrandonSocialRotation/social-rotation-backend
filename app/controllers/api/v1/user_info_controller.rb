@@ -219,63 +219,83 @@ class Api::V1::UserInfoController < ApplicationController
     user_email = user.email # Store email before deletion for logging
     
     begin
-      # Cancel Stripe subscription if exists (even if already canceled)
-      if account&.subscription&.stripe_subscription_id.present?
-        Stripe.api_key = ENV['STRIPE_SECRET_KEY']
-        begin
-          # Retrieve the subscription first to check its status
-          stripe_subscription = Stripe::Subscription.retrieve(account.subscription.stripe_subscription_id)
-          
-          # Only try to cancel if it's not already canceled or incomplete_expired
-          unless stripe_subscription.status == 'canceled' || stripe_subscription.status == 'incomplete_expired'
-            # Cancel the subscription immediately
-            stripe_subscription.cancel
-            Rails.logger.info "Stripe subscription #{account.subscription.stripe_subscription_id} canceled for user #{user_email}"
-          else
-            Rails.logger.info "Stripe subscription #{account.subscription.stripe_subscription_id} already canceled for user #{user_email}"
-          end
-        rescue Stripe::InvalidRequestError => e
-          # Subscription might not exist in Stripe anymore (already deleted)
-          Rails.logger.warn "Stripe subscription not found or already deleted for user #{user_email}: #{e.message}"
-        rescue Stripe::StripeError => e
-          Rails.logger.error "Failed to cancel Stripe subscription for user #{user_email}: #{e.message}"
-          # Continue with deletion even if Stripe cancel fails
-        end
-      end
-      
       # Store user ID and account info before deletion for logging
       user_id = user.id
       account_id = account&.id
       is_admin = user.is_account_admin
+      stripe_customer_id = account&.subscription&.stripe_customer_id
+      stripe_subscription_id = account&.subscription&.stripe_subscription_id
       
-      # Delete account if user is account admin (this will cascade delete the user and subscription)
+      # Cancel and delete Stripe subscription and customer if they exist
+      if stripe_subscription_id.present? || stripe_customer_id.present?
+        Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+        
+        # Cancel subscription if it exists
+        if stripe_subscription_id.present?
+          begin
+            stripe_subscription = Stripe::Subscription.retrieve(stripe_subscription_id)
+            
+            # Only try to cancel if it's not already canceled or incomplete_expired
+            unless stripe_subscription.status == 'canceled' || stripe_subscription.status == 'incomplete_expired'
+              stripe_subscription.cancel
+              Rails.logger.info "Stripe subscription #{stripe_subscription_id} canceled for user #{user_email}"
+            else
+              Rails.logger.info "Stripe subscription #{stripe_subscription_id} already canceled for user #{user_email}"
+            end
+          rescue Stripe::InvalidRequestError => e
+            Rails.logger.warn "Stripe subscription not found or already deleted for user #{user_email}: #{e.message}"
+          rescue Stripe::StripeError => e
+            Rails.logger.error "Failed to cancel Stripe subscription for user #{user_email}: #{e.message}"
+          end
+        end
+        
+        # Delete Stripe customer if it exists (this also deletes all subscriptions)
+        if stripe_customer_id.present?
+          begin
+            Stripe::Customer.delete(stripe_customer_id)
+            Rails.logger.info "Stripe customer #{stripe_customer_id} deleted for user #{user_email}"
+          rescue Stripe::InvalidRequestError => e
+            Rails.logger.warn "Stripe customer not found or already deleted for user #{user_email}: #{e.message}"
+          rescue Stripe::StripeError => e
+            Rails.logger.error "Failed to delete Stripe customer for user #{user_email}: #{e.message}"
+          end
+        end
+      end
+      
+      # Delete subscription record from database if it exists
+      if account&.subscription
+        Rails.logger.info "Deleting subscription record for account #{account_id}"
+        account.subscription.destroy
+      end
+      
+      # Delete account if user is account admin (this will cascade delete all users in the account)
       if account && is_admin
         Rails.logger.info "Deleting account #{account_id} and all associated users for admin user #{user_email}"
-        account.destroy
+        account.destroy!
         message = "Account and user deleted successfully"
       else
-        # For personal accounts or sub-accounts, delete the user directly
-        # This will cascade delete buckets, videos, etc. via dependent: :destroy
+        # For personal accounts or sub-accounts
         Rails.logger.info "Deleting user #{user_id} (#{user_email})"
-        
-        # Also delete the subscription record if it exists
-        if account&.subscription
-          Rails.logger.info "Deleting subscription record for user #{user_id}"
-          account.subscription.destroy
-        end
         
         # Delete the account if it exists and has no other users
         if account && account.users.count <= 1
           Rails.logger.info "Deleting account #{account_id} as it has no remaining users"
-          account.destroy
+          account.destroy!
         end
         
-        # Finally, delete the user (this will cascade delete all user data)
-        user.destroy
+        # Finally, delete the user (this will cascade delete all user data: buckets, videos, etc.)
+        # Use destroy! to ensure it actually deletes and raises error if it fails
+        user.destroy!
         message = "User account deleted successfully"
       end
       
-      Rails.logger.info "Successfully deleted account for user #{user_email} (ID: #{user_id})"
+      # Verify deletion by checking if user still exists
+      if User.exists?(user_id)
+        Rails.logger.error "User #{user_id} still exists after deletion attempt!"
+        raise "Failed to delete user - user still exists in database"
+      end
+      
+      Rails.logger.info "Successfully deleted user #{user_id} (#{user_email}) and all associated data"
       render json: { message: message }
     rescue => e
       Rails.logger.error "Error deleting account for user #{user_email}: #{e.message}"
