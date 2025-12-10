@@ -218,15 +218,15 @@ class Api::V1::UserInfoController < ApplicationController
     account = user.account
     user_email = user.email # Store email before deletion for logging
     
+    # Store user ID and account info before deletion for logging
+    user_id = user.id
+    account_id = account&.id
+    is_admin = user.is_account_admin
+    stripe_customer_id = account&.subscription&.stripe_customer_id
+    stripe_subscription_id = account&.subscription&.stripe_subscription_id
+    
     begin
-      # Store user ID and account info before deletion for logging
-      user_id = user.id
-      account_id = account&.id
-      is_admin = user.is_account_admin
-      stripe_customer_id = account&.subscription&.stripe_customer_id
-      stripe_subscription_id = account&.subscription&.stripe_subscription_id
-      
-      # Cancel and delete Stripe subscription and customer if they exist
+      # Cancel and delete Stripe subscription and customer if they exist (do this BEFORE database deletion)
       if stripe_subscription_id.present? || stripe_customer_id.present?
         Stripe.api_key = ENV['STRIPE_SECRET_KEY']
         
@@ -262,15 +262,25 @@ class Api::V1::UserInfoController < ApplicationController
         end
       end
       
-      # Delete subscription record from database if it exists
-      if account&.subscription
-        Rails.logger.info "Deleting subscription record for account #{account_id}"
-        account.subscription.destroy
-      end
+      # Use a transaction to ensure all database deletions happen atomically
+      ActiveRecord::Base.transaction do
+        # Delete subscription record from database if it exists
+        if account&.subscription
+          Rails.logger.info "Deleting subscription record for account #{account_id}"
+          account.subscription.destroy
+        end
       
       # Delete account if user is account admin (this will cascade delete all users in the account)
       if account && is_admin
         Rails.logger.info "Deleting account #{account_id} and all associated users for admin user #{user_email}"
+        
+        # Delete all users in the account first (to avoid foreign key issues)
+        account.users.each do |acc_user|
+          Rails.logger.info "Deleting user #{acc_user.id} (#{acc_user.email}) from account #{account_id}"
+          acc_user.destroy!
+        end
+        
+        # Then delete the account
         account.destroy!
         message = "Account and user deleted successfully"
       else
@@ -278,14 +288,26 @@ class Api::V1::UserInfoController < ApplicationController
         Rails.logger.info "Deleting user #{user_id} (#{user_email})"
         
         # Delete the account if it exists and has no other users
-        if account && account.users.count <= 1
-          Rails.logger.info "Deleting account #{account_id} as it has no remaining users"
-          account.destroy!
+        if account
+          user_count = account.users.count
+          Rails.logger.info "Account #{account_id} has #{user_count} user(s)"
+          
+          if user_count <= 1
+            Rails.logger.info "Deleting account #{account_id} as it has no remaining users"
+            # Delete the user first (which will be the only user)
+            user.destroy!
+            # Then delete account (user is already deleted, so this should work)
+            account.destroy!
+          else
+            # Account has other users, just delete this user
+            Rails.logger.info "Account #{account_id} has other users, only deleting user #{user_id}"
+            user.destroy!
+          end
+        else
+          # No account, just delete the user
+          user.destroy!
         end
         
-        # Finally, delete the user (this will cascade delete all user data: buckets, videos, etc.)
-        # Use destroy! to ensure it actually deletes and raises error if it fails
-        user.destroy!
         message = "User account deleted successfully"
       end
       
@@ -295,8 +317,15 @@ class Api::V1::UserInfoController < ApplicationController
         raise "Failed to delete user - user still exists in database"
       end
       
+        Rails.logger.info "Verified: User #{user_id} (#{user_email}) has been completely deleted from database"
+      end # end transaction
+      
       Rails.logger.info "Successfully deleted user #{user_id} (#{user_email}) and all associated data"
       render json: { message: message }
+    rescue ActiveRecord::RecordNotDestroyed => e
+      Rails.logger.error "Failed to delete user #{user_id} (#{user_email}): #{e.message}"
+      Rails.logger.error e.record.errors.full_messages.join(', ')
+      render json: { error: "Failed to delete account: #{e.message}" }, status: :internal_server_error
     rescue => e
       Rails.logger.error "Error deleting account for user #{user_email}: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
