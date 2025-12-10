@@ -1,6 +1,6 @@
 class Api::V1::BucketsController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_bucket, only: [:show, :update, :destroy, :page, :randomize, :images, :single_image, :upload_image, :add_image]
+  before_action :set_bucket, only: [:show, :update, :destroy, :page, :randomize, :images, :single_image, :upload_image, :add_image, :videos, :upload_video]
   before_action :set_bucket_for_image_actions, only: [:update_image, :delete_image]
   before_action :set_bucket_image, only: [:update_image, :delete_image]
 
@@ -17,6 +17,7 @@ class Api::V1::BucketsController < ApplicationController
     render json: {
       bucket: bucket_json(@bucket),
       bucket_images: @bucket.bucket_images.includes(:image).map { |bi| bucket_image_json(bi) },
+      bucket_videos: @bucket.bucket_videos.includes(:video).map { |bv| bucket_video_json(bv) },
       bucket_schedules: @bucket.bucket_schedules.map { |bs| bucket_schedule_json(bs) }
     }
   end
@@ -88,6 +89,98 @@ class Api::V1::BucketsController < ApplicationController
     render json: {
       bucket_images: @bucket_images.map { |bi| bucket_image_json(bi) }
     }
+  end
+
+  # GET /api/v1/buckets/:id/videos
+  def videos
+    @bucket_videos = @bucket.bucket_videos.includes(:video).order(:friendly_name)
+    render json: {
+      bucket_videos: @bucket_videos.map { |bv| bucket_video_json(bv) }
+    }
+  end
+
+  # POST /api/v1/buckets/:id/videos/upload
+  # Uploads a video to a bucket
+  # Creates both a Video record and a BucketVideo record
+  def upload_video
+    if params[:file].blank?
+      return render json: { error: 'No file provided' }, status: :bad_request
+    end
+
+    uploaded_file = params[:file]
+    
+    # Validate file type
+    allowed_types = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm']
+    unless allowed_types.include?(uploaded_file.content_type) || ['.mp4', '.mov', '.avi', '.webm'].include?(File.extname(uploaded_file.original_filename).downcase)
+      return render json: { error: 'Invalid video file type. Supported formats: MP4, MOV, AVI, WEBM' }, status: :bad_request
+    end
+    
+    # Generate a unique filename to prevent collisions
+    file_extension = File.extname(uploaded_file.original_filename)
+    unique_filename = "#{SecureRandom.uuid}#{file_extension}"
+    
+    # Extract friendly name from original filename (without extension)
+    friendly_name = File.basename(uploaded_file.original_filename, file_extension)
+    
+    begin
+      # Store file based on environment
+      if Rails.env.production?
+        # Support both naming conventions
+        spaces_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+        if spaces_key.present?
+          # Production: Upload to DigitalOcean Spaces
+          relative_path = upload_to_spaces(uploaded_file, unique_filename, 'videos')
+        else
+          # Production without DigitalOcean: Use a placeholder URL
+          Rails.logger.warn "DigitalOcean Spaces not configured, using placeholder video"
+          relative_path = "placeholder/videos/#{unique_filename}"
+        end
+      else
+        # Development/Test: Store locally
+        relative_path = upload_locally(uploaded_file, unique_filename, 'videos')
+      end
+      
+      # Create Video record
+      video = Video.new(
+        user: current_user,
+        file_path: relative_path,
+        friendly_name: friendly_name,
+        status: Video::STATUS_PROCESSED
+      )
+      
+      if video.save
+        # Create BucketVideo record linking the video to this bucket
+        bucket_video = @bucket.bucket_videos.build(
+          video_id: video.id,
+          friendly_name: friendly_name,
+          description: params[:description] || '',
+          twitter_description: params[:twitter_description] || '',
+          post_to: params[:post_to] || 0,
+          use_watermark: params[:use_watermark] == '1' || params[:use_watermark] == true
+        )
+        
+        if bucket_video.save
+          render json: {
+            bucket_video: bucket_video_json(bucket_video),
+            message: 'Video uploaded successfully'
+          }, status: :created
+        else
+          # If bucket_video fails to save, clean up the video
+          video.destroy
+          render json: {
+            errors: bucket_video.errors.full_messages
+          }, status: :unprocessable_entity
+        end
+      else
+        render json: {
+          errors: video.errors.full_messages
+        }, status: :unprocessable_entity
+      end
+    rescue => e
+      Rails.logger.error "Video upload error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: "Video upload failed: #{e.message}" }, status: :internal_server_error
+    end
   end
 
   # GET /api/v1/buckets/:id/images/:image_id
@@ -171,7 +264,7 @@ class Api::V1::BucketsController < ApplicationController
   end
   
   # Upload file to DigitalOcean Spaces
-  def upload_to_spaces(uploaded_file, unique_filename)
+  def upload_to_spaces(uploaded_file, unique_filename, folder = 'images')
     require 'aws-sdk-s3'
     
     # Support both naming conventions
@@ -189,7 +282,7 @@ class Api::V1::BucketsController < ApplicationController
       region: region,
       force_path_style: false
     )
-    key = "#{Rails.env}/#{unique_filename}"
+    key = "#{Rails.env}/#{folder}/#{unique_filename}"
     
     # Upload the file
     s3_client.put_object(
@@ -204,9 +297,9 @@ class Api::V1::BucketsController < ApplicationController
   end
   
   # Upload file locally (development/test)
-  def upload_locally(uploaded_file, unique_filename)
+  def upload_locally(uploaded_file, unique_filename, folder = 'images')
     # Create directory if it doesn't exist
-    upload_dir = Rails.root.join('public', 'uploads', Rails.env.to_s)
+    upload_dir = Rails.root.join('public', 'uploads', Rails.env.to_s, folder)
     FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
     
     # Save the file
@@ -216,7 +309,7 @@ class Api::V1::BucketsController < ApplicationController
     end
     
     # Return relative path for database
-    "uploads/#{Rails.env}/#{unique_filename}"
+    "uploads/#{Rails.env}/#{folder}/#{unique_filename}"
   end
 
   # POST /api/v1/buckets/:id/images (add existing image by ID)
@@ -357,7 +450,7 @@ class Api::V1::BucketsController < ApplicationController
   end
 
   def bucket_image_params
-    params.require(:bucket_image).permit(:description, :twitter_description, :use_watermark, :force_send_date, :repeat, :post_to)
+    params.require(:bucket_image).permit(:description, :twitter_description, :use_watermark, :force_send_date, :repeat, :post_to, :facebook_page_id, :linkedin_organization_urn)
   end
 
   def bucket_json(bucket)
@@ -385,6 +478,8 @@ class Api::V1::BucketsController < ApplicationController
       repeat: bucket_image.repeat,
       post_to: bucket_image.post_to,
       use_watermark: bucket_image.use_watermark,
+      facebook_page_id: bucket_image.facebook_page_id,
+      linkedin_organization_urn: bucket_image.linkedin_organization_urn,
       image: {
         id: bucket_image.image.id,
         file_path: bucket_image.image.file_path,
@@ -392,6 +487,26 @@ class Api::V1::BucketsController < ApplicationController
       },
       created_at: bucket_image.created_at,
       updated_at: bucket_image.updated_at
+    }
+  end
+
+  def bucket_video_json(bucket_video)
+    {
+      id: bucket_video.id,
+      friendly_name: bucket_video.friendly_name,
+      description: bucket_video.description,
+      twitter_description: bucket_video.twitter_description,
+      post_to: bucket_video.post_to,
+      use_watermark: bucket_video.use_watermark,
+      video: {
+        id: bucket_video.video.id,
+        file_path: bucket_video.video.file_path,
+        source_url: bucket_video.video.get_source_url,
+        friendly_name: bucket_video.video.friendly_name,
+        status: bucket_video.video.status
+      },
+      created_at: bucket_video.created_at,
+      updated_at: bucket_video.updated_at
     }
   end
 

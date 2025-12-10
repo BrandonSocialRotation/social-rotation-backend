@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_11_25_211032) do
+ActiveRecord::Schema[7.1].define(version: 2025_12_10_183345) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -56,6 +56,8 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_25_211032) do
     t.boolean "use_watermark"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "facebook_page_id"
+    t.string "linkedin_organization_urn"
     t.index ["bucket_id"], name: "index_bucket_images_on_bucket_id"
     t.index ["image_id"], name: "index_bucket_images_on_image_id"
   end
@@ -93,6 +95,21 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_25_211032) do
     t.index ["bucket_schedule_id"], name: "index_bucket_send_histories_on_bucket_schedule_id"
   end
 
+  create_table "bucket_videos", force: :cascade do |t|
+    t.bigint "bucket_id", null: false
+    t.bigint "video_id", null: false
+    t.string "friendly_name"
+    t.text "description"
+    t.text "twitter_description"
+    t.integer "post_to"
+    t.boolean "use_watermark", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bucket_id", "video_id"], name: "index_bucket_videos_on_bucket_id_and_video_id", unique: true
+    t.index ["bucket_id"], name: "index_bucket_videos_on_bucket_id"
+    t.index ["video_id"], name: "index_bucket_videos_on_video_id"
+  end
+
   create_table "buckets", force: :cascade do |t|
     t.string "name"
     t.text "description"
@@ -121,6 +138,17 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_25_211032) do
     t.datetime "updated_at", null: false
     t.index ["bucket_id"], name: "index_market_items_on_bucket_id"
     t.index ["front_image_id"], name: "index_market_items_on_front_image_id"
+  end
+
+  create_table "oauth_request_tokens", force: :cascade do |t|
+    t.string "oauth_token"
+    t.string "request_secret"
+    t.integer "user_id"
+    t.datetime "expires_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["expires_at"], name: "index_oauth_request_tokens_on_expires_at"
+    t.index ["oauth_token"], name: "index_oauth_request_tokens_on_oauth_token", unique: true
   end
 
   create_table "plans", force: :cascade do |t|
@@ -253,6 +281,12 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_25_211032) do
     t.boolean "is_account_admin", default: false
     t.integer "status", default: 1
     t.string "role", default: "user"
+    t.string "pinterest_access_token"
+    t.string "pinterest_refresh_token"
+    t.string "facebook_name"
+    t.string "google_account_name"
+    t.string "pinterest_username"
+    t.string "youtube_channel_name"
     t.index ["email"], name: "index_users_on_email", unique: true
   end
 
@@ -275,6 +309,8 @@ ActiveRecord::Schema[7.1].define(version: 2025_11_25_211032) do
   add_foreign_key "bucket_send_histories", "bucket_images"
   add_foreign_key "bucket_send_histories", "bucket_schedules"
   add_foreign_key "bucket_send_histories", "buckets"
+  add_foreign_key "bucket_videos", "buckets"
+  add_foreign_key "bucket_videos", "videos"
   add_foreign_key "buckets", "users"
   add_foreign_key "market_items", "buckets"
   add_foreign_key "market_items", "images", column: "front_image_id"

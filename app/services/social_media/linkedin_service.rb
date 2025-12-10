@@ -9,11 +9,15 @@ module SocialMedia
     # Post to LinkedIn with image
     # @param message [String] Post text
     # @param image_path [String] Local path to image file
+    # @param organization_id [String, nil] Optional organization/company URN to post to. If nil, posts to personal profile.
     # @return [Hash] Response from LinkedIn API
-    def post_with_image(message, image_path)
+    def post_with_image(message, image_path, organization_id: nil)
       unless @user.linkedin_access_token.present?
         raise "User does not have LinkedIn connected"
       end
+      
+      # Determine the author URN (personal profile or organization)
+      author_urn = organization_id || get_personal_profile_urn
       
       # Try to get profile ID if not stored - but don't fail if we can't get it
       # We'll try to extract it from the posting API response
@@ -35,13 +39,68 @@ module SocialMedia
       end
       
       # Step 1: Register upload
-      asset_urn = register_upload
+      asset_urn = register_upload(author_urn: author_urn)
       
       # Step 2: Upload image
       upload_image(asset_urn, image_path)
       
       # Step 3: Create post
-      create_post(message, asset_urn)
+      create_post(message, asset_urn, author_urn: author_urn)
+    end
+    
+    # Fetch all LinkedIn organizations/companies the user manages
+    # @return [Array<Hash>] Array of organization objects with id, name, and URN
+    def fetch_organizations
+      unless @user.linkedin_access_token.present?
+        raise "User does not have LinkedIn connected"
+      end
+      
+      url = "#{API_BASE_URL}/organizationAcls?q=roleAssignee"
+      headers = {
+        'Authorization' => "Bearer #{@user.linkedin_access_token}",
+        'X-Restli-Protocol-Version' => '2.0.0'
+      }
+      
+      response = HTTParty.get(url, headers: headers)
+      
+      unless response.success?
+        Rails.logger.warn "LinkedIn organizations fetch failed: #{response.code} - #{response.body}"
+        return []
+      end
+      
+      data = JSON.parse(response.body)
+      organizations = []
+      
+      if data['elements']
+        # Extract organization URNs from the ACLs
+        org_urns = data['elements'].map { |acl| acl['organization~'] }.compact.uniq
+        
+        # Fetch details for each organization
+        org_urns.each do |org_urn|
+          begin
+            org_data = fetch_organization_details(org_urn)
+            organizations << org_data if org_data
+          rescue => e
+            Rails.logger.warn "Failed to fetch details for organization #{org_urn}: #{e.message}"
+          end
+        end
+      end
+      
+      organizations
+    end
+    
+    # Get personal profile URN
+    # @return [String] URN in format "urn:li:person:PROFILE_ID"
+    def get_personal_profile_urn
+      unless @user.linkedin_profile_id.present?
+        fetch_profile_id
+      end
+      
+      if @user.linkedin_profile_id.present?
+        "urn:li:person:#{@user.linkedin_profile_id}"
+      else
+        raise "LinkedIn profile ID is required"
+      end
     end
     
     private
@@ -168,20 +227,11 @@ module SocialMedia
     end
     
     # Register an upload with LinkedIn
+    # @param author_urn [String] URN of the author (person or organization)
     # @return [String] Asset URN
-    def register_upload
-      # Profile ID is required for registerUpload - if we don't have it, we need to get it first
-      unless @user.linkedin_profile_id.present?
-        # Try one more time to get it from token
-        profile_id = extract_profile_id_from_token
-        if profile_id
-          @user.update!(linkedin_profile_id: profile_id)
-          Rails.logger.info "LinkedIn profile ID extracted from token before upload: #{profile_id}"
-        else
-          # Try to get it by attempting upload without owner - LinkedIn error might tell us
-          Rails.logger.warn "No LinkedIn profile ID available - will try upload without owner to extract from error"
-        end
-      end
+    def register_upload(author_urn: nil)
+      # Use provided author_urn or get personal profile URN
+      owner_urn = author_urn || get_personal_profile_urn
       
       url = "#{API_BASE_URL}/assets?action=registerUpload"
       headers = {
@@ -190,11 +240,9 @@ module SocialMedia
         'X-Restli-Protocol-Version' => '2.0.0'
       }
       
-      # Profile ID is required - if we still don't have it, try without owner to get error with profile ID
-      owner_urn = @user.linkedin_profile_id.present? ? "urn:li:person:#{@user.linkedin_profile_id}" : nil
-      
       body = {
         registerUploadRequest: {
+          owner: owner_urn,
           recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
           serviceRelationships: [
             {
@@ -205,55 +253,13 @@ module SocialMedia
         }
       }
       
-      # Owner is required - if we don't have profile ID, try without it to see error
-      if owner_urn
-        body[:registerUploadRequest][:owner] = owner_urn
-      end
-      
       response = HTTParty.post(url, headers: headers, body: body.to_json)
       data = JSON.parse(response.body)
       
-      # If registration failed, try to extract profile ID from error
       unless response.success?
         error_msg = data['message'] || data.to_s || response.body
-        Rails.logger.warn "LinkedIn upload registration failed: #{error_msg}"
-        Rails.logger.warn "Full error response: #{data.inspect}"
-        
-        # Try multiple patterns to extract profile ID from error
-        profile_id = nil
-        
-        # Pattern 1: urn:li:person:XXXXX
-        if error_msg.include?('person:')
-          match = error_msg.match(/urn:li:person:([A-Za-z0-9_-]+)/)
-          profile_id = match[1] if match
-        end
-        
-        # Pattern 2: Look for numeric ID in error
-        unless profile_id
-          match = error_msg.match(/person[:\s]+([A-Za-z0-9_-]+)/i)
-          profile_id = match[1] if match
-        end
-        
-        # Pattern 3: Check if error contains a LinkedIn URN format
-        unless profile_id
-          match = error_msg.match(/([A-Za-z0-9_-]{10,})/)
-          # LinkedIn profile IDs are typically alphanumeric and at least 10 characters
-          profile_id = match[1] if match && match[1].length >= 10
-        end
-        
-        if profile_id && !@user.linkedin_profile_id.present?
-          @user.update!(linkedin_profile_id: profile_id)
-          Rails.logger.info "Extracted LinkedIn profile ID from error message: #{profile_id}"
-          # Retry with the extracted profile ID
-          return register_upload
-        end
-        
-        # If we still don't have profile ID, provide helpful error
-        if !@user.linkedin_profile_id.present?
-          raise "LinkedIn profile ID is required for posting. Please enable OpenID Connect in your LinkedIn app settings (Products > Sign In with LinkedIn using OpenID Connect) and reconnect your LinkedIn account. Error: #{error_msg}"
-        else
-          raise "Failed to register LinkedIn upload: #{error_msg}"
-        end
+        Rails.logger.error "LinkedIn upload registration failed: #{error_msg}"
+        raise "Failed to register LinkedIn upload: #{error_msg}"
       end
       
       if data['value']
@@ -394,12 +400,11 @@ module SocialMedia
     # Create LinkedIn post
     # @param message [String] Post text
     # @param asset_urn [String] Asset URN of uploaded image
+    # @param author_urn [String] URN of the author (person or organization)
     # @return [Hash] Response from LinkedIn API
-    def create_post(message, asset_urn)
-      # Profile ID is required for posting - if we still don't have it, we can't proceed
-      unless @user.linkedin_profile_id.present?
-        raise "LinkedIn profile ID is required for posting. Please reconnect LinkedIn with OpenID Connect enabled in your LinkedIn app settings, or contact support."
-      end
+    def create_post(message, asset_urn, author_urn: nil)
+      # Use provided author_urn or get personal profile URN
+      owner_urn = author_urn || get_personal_profile_urn
       
       url = "#{API_BASE_URL}/ugcPosts"
       headers = {
@@ -409,7 +414,7 @@ module SocialMedia
       }
       
       body = {
-        author: "urn:li:person:#{@user.linkedin_profile_id}",
+        author: owner_urn,
         lifecycleState: 'PUBLISHED',
         specificContent: {
           'com.linkedin.ugc.ShareContent' => {
@@ -442,23 +447,43 @@ module SocialMedia
       unless response.success?
         error_msg = data['message'] || response.body
         Rails.logger.error "LinkedIn post creation failed: #{error_msg}"
-        
-        # Try to extract profile ID from error if it's mentioned
-        if error_msg.include?('person:') && !@user.linkedin_profile_id.present?
-          match = error_msg.match(/urn:li:person:(\w+)/)
-          if match
-            profile_id = match[1]
-            @user.update!(linkedin_profile_id: profile_id)
-            Rails.logger.info "Extracted LinkedIn profile ID from post error: #{profile_id}"
-            # Retry the post
-            return create_post(message, asset_urn)
-          end
-        end
-        
         raise "Failed to create LinkedIn post: #{error_msg}"
       end
       
       data
+    end
+    
+    # Fetch organization details
+    # @param org_urn [String] Organization URN (e.g., "urn:li:organization:12345")
+    # @return [Hash, nil] Organization details with id, name, and URN
+    def fetch_organization_details(org_urn)
+      # Extract organization ID from URN
+      org_id = org_urn.split(':').last
+      
+      url = "#{API_BASE_URL}/organizations/#{org_id}"
+      headers = {
+        'Authorization' => "Bearer #{@user.linkedin_access_token}",
+        'X-Restli-Protocol-Version' => '2.0.0'
+      }
+      
+      params = {
+        projection: '(id,localizedName)'
+      }
+      
+      response = HTTParty.get(url, headers: headers, query: params)
+      
+      unless response.success?
+        Rails.logger.warn "Failed to fetch organization details for #{org_urn}: #{response.code}"
+        return nil
+      end
+      
+      data = JSON.parse(response.body)
+      
+      {
+        id: data['id'],
+        name: data['localizedName'] || data['name'] || "Organization #{org_id}",
+        urn: org_urn
+      }
     end
   end
 end

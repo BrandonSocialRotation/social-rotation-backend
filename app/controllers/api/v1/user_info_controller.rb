@@ -538,6 +538,56 @@ class Api::V1::UserInfoController < ApplicationController
       # Don't fail the request if this fails
     end
   end
+  
+  # GET /api/v1/user_info/facebook_pages
+  def facebook_pages
+    begin
+      unless current_user.fb_user_access_key.present?
+        render json: { error: 'Facebook not connected' }, status: :bad_request
+        return
+      end
+      
+      service = SocialMedia::FacebookService.new(current_user)
+      pages = service.fetch_pages
+      
+      render json: { pages: pages }
+    rescue => e
+      Rails.logger.error "Error fetching Facebook pages: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: "Failed to fetch Facebook pages: #{e.message}" }, status: :internal_server_error
+    end
+  end
+  
+  # GET /api/v1/user_info/linkedin_organizations
+  def linkedin_organizations
+    begin
+      unless current_user.linkedin_access_token.present?
+        render json: { error: 'LinkedIn not connected' }, status: :bad_request
+        return
+      end
+      
+      service = SocialMedia::LinkedinService.new(current_user)
+      organizations = service.fetch_organizations
+      
+      # Also include personal profile as an option
+      begin
+        personal_urn = service.get_personal_profile_urn
+        organizations.unshift({
+          id: current_user.linkedin_profile_id,
+          name: 'Personal Profile',
+          urn: personal_urn
+        })
+      rescue => e
+        Rails.logger.warn "Could not get personal profile URN: #{e.message}"
+      end
+      
+      render json: { organizations: organizations }
+    rescue => e
+      Rails.logger.error "Error fetching LinkedIn organizations: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: "Failed to fetch LinkedIn organizations: #{e.message}" }, status: :internal_server_error
+    end
+  end
 end
 
 

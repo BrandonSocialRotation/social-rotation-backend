@@ -7,12 +7,14 @@ class SocialMediaPosterService
   BIT_GMB = 16
   BIT_PINTEREST = 32
   
-  def initialize(user, bucket_image, post_to_flags, description, twitter_description = nil)
+  def initialize(user, bucket_image, post_to_flags, description, twitter_description = nil, facebook_page_id: nil, linkedin_organization_urn: nil)
     @user = user
     @bucket_image = bucket_image
     @post_to = post_to_flags
     @description = description
     @twitter_description = twitter_description || description
+    @facebook_page_id = facebook_page_id || bucket_image.facebook_page_id
+    @linkedin_organization_urn = linkedin_organization_urn || bucket_image.linkedin_organization_urn
     @temp_files = [] # Track temp files for cleanup
   end
   
@@ -134,7 +136,7 @@ class SocialMediaPosterService
   def post_to_facebook(image_url)
     begin
       service = SocialMedia::FacebookService.new(@user)
-      response = service.post_photo(@description, image_url)
+      response = service.post_photo(@description, image_url, page_id: @facebook_page_id)
       
       { success: true, response: response }
     rescue => e
@@ -173,7 +175,7 @@ class SocialMediaPosterService
   def post_to_linkedin(image_path)
     begin
       service = SocialMedia::LinkedinService.new(@user)
-      response = service.post_with_image(@description, image_path)
+      response = service.post_with_image(@description, image_path, organization_id: @linkedin_organization_urn)
       
       { success: true, response: response }
     rescue => e
