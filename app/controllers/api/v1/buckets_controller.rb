@@ -488,12 +488,20 @@ class Api::V1::BucketsController < ApplicationController
     }
     
     # Safely add page ID fields if they exist (check if column exists in database)
-    if bucket_image.class.column_names.include?('facebook_page_id')
-      json[:facebook_page_id] = bucket_image.facebook_page_id
+    begin
+      if bucket_image.has_attribute?(:facebook_page_id)
+        json[:facebook_page_id] = bucket_image.facebook_page_id
+      end
+    rescue => e
+      Rails.logger.debug "facebook_page_id column not available: #{e.message}"
     end
     
-    if bucket_image.class.column_names.include?('linkedin_organization_urn')
-      json[:linkedin_organization_urn] = bucket_image.linkedin_organization_urn
+    begin
+      if bucket_image.has_attribute?(:linkedin_organization_urn)
+        json[:linkedin_organization_urn] = bucket_image.linkedin_organization_urn
+      end
+    rescue => e
+      Rails.logger.debug "linkedin_organization_urn column not available: #{e.message}"
     end
     
     json
