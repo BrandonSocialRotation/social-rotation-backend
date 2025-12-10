@@ -469,7 +469,7 @@ class Api::V1::BucketsController < ApplicationController
   end
 
   def bucket_image_json(bucket_image)
-    {
+    json = {
       id: bucket_image.id,
       friendly_name: bucket_image.friendly_name,
       description: bucket_image.description,
@@ -478,8 +478,6 @@ class Api::V1::BucketsController < ApplicationController
       repeat: bucket_image.repeat,
       post_to: bucket_image.post_to,
       use_watermark: bucket_image.use_watermark,
-      facebook_page_id: bucket_image.facebook_page_id,
-      linkedin_organization_urn: bucket_image.linkedin_organization_urn,
       image: {
         id: bucket_image.image.id,
         file_path: bucket_image.image.file_path,
@@ -488,6 +486,17 @@ class Api::V1::BucketsController < ApplicationController
       created_at: bucket_image.created_at,
       updated_at: bucket_image.updated_at
     }
+    
+    # Safely add page ID fields if they exist
+    if bucket_image.respond_to?(:facebook_page_id)
+      json[:facebook_page_id] = bucket_image.facebook_page_id
+    end
+    
+    if bucket_image.respond_to?(:linkedin_organization_urn)
+      json[:linkedin_organization_urn] = bucket_image.linkedin_organization_urn
+    end
+    
+    json
   end
 
   def bucket_video_json(bucket_video)
