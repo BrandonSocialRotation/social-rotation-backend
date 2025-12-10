@@ -13,8 +13,20 @@ class SocialMediaPosterService
     @post_to = post_to_flags
     @description = description
     @twitter_description = twitter_description || description
-    @facebook_page_id = facebook_page_id || bucket_image.facebook_page_id
-    @linkedin_organization_urn = linkedin_organization_urn || bucket_image.linkedin_organization_urn
+    
+    # Safely get page IDs from bucket_image if columns exist
+    if facebook_page_id.nil? && bucket_image.class.column_names.include?('facebook_page_id')
+      @facebook_page_id = bucket_image.facebook_page_id
+    else
+      @facebook_page_id = facebook_page_id
+    end
+    
+    if linkedin_organization_urn.nil? && bucket_image.class.column_names.include?('linkedin_organization_urn')
+      @linkedin_organization_urn = bucket_image.linkedin_organization_urn
+    else
+      @linkedin_organization_urn = linkedin_organization_urn
+    end
+    
     @temp_files = [] # Track temp files for cleanup
   end
   
