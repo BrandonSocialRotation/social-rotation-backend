@@ -87,11 +87,12 @@ class ApplicationController < ActionController::API
     action_name = params[:action]
     
     # Skip subscription check for:
-    # - Auth and OAuth controllers (already handled by auth_or_oauth_controller?)
+    # - Auth and OAuth controllers (login actions and callbacks)
     # - Subscriptions controller (to allow viewing/managing subscriptions)
     # - User info controller (to allow viewing profile/subscription status)
     # - Plans controller (to allow viewing available plans)
     auth_or_oauth_controller? ||
+    controller_path.start_with?('api/v1/oauth') || # Skip all OAuth actions (login and callbacks)
     controller_path.start_with?('api/v1/subscriptions') ||
     controller_path.start_with?('api/v1/user_info') ||
     controller_path.start_with?('api/v1/plans')
