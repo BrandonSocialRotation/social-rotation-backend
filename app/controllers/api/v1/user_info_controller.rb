@@ -64,6 +64,17 @@ class Api::V1::UserInfoController < ApplicationController
     }
   end
 
+  # GET /api/v1/user_info/test_pages_endpoint
+  # Test endpoint to verify deployment
+  def test_pages_endpoint
+    render json: { 
+      message: 'Pages endpoints are deployed!',
+      timestamp: Time.current.iso8601,
+      has_facebook_pages_method: respond_to?(:facebook_pages, true),
+      has_linkedin_organizations_method: respond_to?(:linkedin_organizations, true)
+    }
+  end
+
   # GET /api/v1/user_info/debug
   # Debug endpoint to check what account info is stored
   def debug
