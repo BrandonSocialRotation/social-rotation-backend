@@ -1,6 +1,18 @@
 class Api::V1::UserInfoController < ApplicationController
   before_action :authenticate_user!
 
+  # GET /api/v1/user_info/check_deployment
+  # Simple endpoint to verify deployment
+  def check_deployment
+    render json: {
+      deployed: true,
+      commit: `git rev-parse HEAD`.strip rescue 'unknown',
+      has_facebook_pages: self.class.instance_methods(false).include?(:facebook_pages),
+      has_linkedin_orgs: self.class.instance_methods(false).include?(:linkedin_organizations),
+      timestamp: Time.current.iso8601
+    }
+  end
+
   # GET /api/v1/user_info
   def show
     begin
