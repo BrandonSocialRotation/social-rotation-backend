@@ -623,11 +623,33 @@ class Api::V1::UserInfoController < ApplicationController
       service = SocialMedia::FacebookService.new(current_user)
       pages = service.fetch_pages
       
+      if pages.empty?
+        Rails.logger.warn "No Facebook pages found for user #{current_user.id}. This could mean: 1) User has no pages, 2) Missing pages_manage_posts permission, 3) Token expired."
+      end
+      
       render json: { pages: pages }
     rescue => e
       Rails.logger.error "Error fetching Facebook pages: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
-      render json: { error: "Failed to fetch Facebook pages: #{e.message}" }, status: :internal_server_error
+      
+      # Provide more helpful error messages
+      error_message = e.message
+      status = :internal_server_error
+      
+      # Check for specific error types
+      if error_message.include?('permission') || error_message.include?('scope') || error_message.include?('OAuthException')
+        status = :forbidden
+        error_message = "Facebook permission error. Please disconnect and reconnect your Facebook account to grant the 'pages_manage_posts' permission."
+      elsif error_message.include?('expired') || error_message.include?('invalid')
+        status = :unauthorized
+        error_message = "Facebook access token expired or invalid. Please reconnect your Facebook account."
+      end
+      
+      render json: { 
+        error: "Failed to fetch Facebook pages: #{error_message}",
+        suggestion: error_message.include?('permission') || error_message.include?('expired') || error_message.include?('invalid') ? 
+          "Please go to your profile page and reconnect Facebook." : nil
+      }, status: status
     end
   end
   
