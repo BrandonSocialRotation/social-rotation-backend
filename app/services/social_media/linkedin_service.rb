@@ -55,37 +55,52 @@ module SocialMedia
         raise "User does not have LinkedIn connected"
       end
       
-      url = "#{API_BASE_URL}/organizationAcls?q=roleAssignee"
+      # Use the correct endpoint for organizational entity ACLs
+      url = "#{API_BASE_URL}/organizationalEntityAcls?q=roleAssignee"
       headers = {
         'Authorization' => "Bearer #{@user.linkedin_access_token}",
         'X-Restli-Protocol-Version' => '2.0.0'
       }
       
+      Rails.logger.info "Fetching LinkedIn organizations from: #{url}"
       response = HTTParty.get(url, headers: headers)
       
       unless response.success?
-        Rails.logger.warn "LinkedIn organizations fetch failed: #{response.code} - #{response.body}"
+        Rails.logger.error "LinkedIn organizations fetch failed: #{response.code} - #{response.body}"
         return []
       end
       
       data = JSON.parse(response.body)
+      Rails.logger.info "LinkedIn organizations API response: #{data.inspect}"
+      
       organizations = []
       
       if data['elements']
         # Extract organization URNs from the ACLs
-        org_urns = data['elements'].map { |acl| acl['organization~'] }.compact.uniq
+        # The response structure is: elements[].organizationalTarget
+        org_urns = data['elements'].map { |element| element['organizationalTarget'] }.compact.uniq
+        Rails.logger.info "Found #{org_urns.length} organization URNs: #{org_urns.inspect}"
         
         # Fetch details for each organization
         org_urns.each do |org_urn|
           begin
             org_data = fetch_organization_details(org_urn)
-            organizations << org_data if org_data
+            if org_data
+              organizations << org_data
+              Rails.logger.info "Successfully fetched organization: #{org_data[:name]} (#{org_data[:urn]})"
+            else
+              Rails.logger.warn "No data returned for organization #{org_urn}"
+            end
           rescue => e
-            Rails.logger.warn "Failed to fetch details for organization #{org_urn}: #{e.message}"
+            Rails.logger.error "Failed to fetch details for organization #{org_urn}: #{e.message}"
+            Rails.logger.error e.backtrace.join("\n")
           end
         end
+      else
+        Rails.logger.warn "No 'elements' in LinkedIn organizations response. Full response: #{data.inspect}"
       end
       
+      Rails.logger.info "Returning #{organizations.length} organizations"
       organizations
     end
     

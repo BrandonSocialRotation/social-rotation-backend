@@ -48,18 +48,34 @@ module SocialMedia
         limit: 1000
       }
       
+      Rails.logger.info "Fetching Facebook pages from: #{url}"
       response = HTTParty.get(url, query: params)
+      
+      unless response.success?
+        Rails.logger.error "Facebook pages fetch failed: #{response.code} - #{response.body}"
+        raise "Facebook API error: #{response.code} - #{response.body}"
+      end
+      
       data = JSON.parse(response.body)
+      Rails.logger.info "Facebook pages API response keys: #{data.keys.inspect}"
+      
+      if data['error']
+        Rails.logger.error "Facebook API returned error: #{data['error']}"
+        raise "Facebook API error: #{data['error']['message'] || data['error']}"
+      end
       
       if data['data']
-        data['data'].map do |page|
+        pages = data['data'].map do |page|
           {
             id: page['id'],
             name: page['name'],
             access_token: page['access_token']
           }
         end
+        Rails.logger.info "Successfully fetched #{pages.length} Facebook pages: #{pages.map { |p| p[:name] }.join(', ')}"
+        pages
       else
+        Rails.logger.warn "No 'data' in Facebook pages response. Full response: #{data.inspect}"
         []
       end
     end
