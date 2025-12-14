@@ -52,6 +52,7 @@ Rails.application.routes.draw do
 
       # User info routes
       get 'user_info', to: 'user_info#show'
+      get 'user_info/check_deployment_public', to: 'user_info#check_deployment_public'
       get 'user_info/check_deployment', to: 'user_info#check_deployment'
       get 'user_info/debug', to: 'user_info#debug'
       patch 'user_info', to: 'user_info#update'
