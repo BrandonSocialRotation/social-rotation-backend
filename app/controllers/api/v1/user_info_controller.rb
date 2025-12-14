@@ -1,45 +1,5 @@
 class Api::V1::UserInfoController < ApplicationController
   before_action :authenticate_user!
-  skip_before_action :authenticate_user!, only: [:check_deployment_public]
-  skip_before_action :require_active_subscription!, only: [:check_deployment_public]
-
-  # GET /api/v1/user_info/check_deployment_public
-  # Public endpoint (no auth) to verify deployment
-  def check_deployment_public
-    commit_hash = begin
-      `git rev-parse HEAD`.strip
-    rescue
-      'unknown'
-    end
-    
-    render json: {
-      deployed: true,
-      commit: commit_hash,
-      has_facebook_pages: self.class.instance_methods(false).include?(:facebook_pages),
-      has_linkedin_orgs: self.class.instance_methods(false).include?(:linkedin_organizations),
-      all_methods: self.class.instance_methods(false).sort,
-      timestamp: Time.current.iso8601,
-      routes_loaded: Rails.application.routes.routes.any? { |r| r.path.spec.to_s.include?('facebook_pages') }
-    }
-  end
-
-  # GET /api/v1/user_info/check_deployment
-  # Simple endpoint to verify deployment (requires auth)
-  def check_deployment
-    commit_hash = begin
-      `git rev-parse HEAD`.strip
-    rescue
-      'unknown'
-    end
-    
-    render json: {
-      deployed: true,
-      commit: commit_hash,
-      has_facebook_pages: self.class.instance_methods(false).include?(:facebook_pages),
-      has_linkedin_orgs: self.class.instance_methods(false).include?(:linkedin_organizations),
-      timestamp: Time.current.iso8601
-    }
-  end
 
   # GET /api/v1/user_info
   def show
