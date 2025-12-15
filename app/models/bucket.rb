@@ -10,7 +10,11 @@ class Bucket < ApplicationRecord
   has_many :bucket_images, dependent: :destroy
   # Bucket can access images through bucket_images join table
   has_many :images, through: :bucket_images
-  # Bucket has many schedules (when to post images) - destroy when bucket deleted
+  # Bucket has many bucket_videos (videos in this collection) - destroy when bucket deleted
+  has_many :bucket_videos, dependent: :destroy
+  # Bucket can access videos through bucket_videos join table
+  has_many :videos, through: :bucket_videos
+  # Bucket has many schedules (when to post images/videos) - destroy when bucket deleted
   has_many :bucket_schedules, dependent: :destroy
   # Bucket tracks send history (posts already made) - destroy when bucket deleted
   has_many :bucket_send_histories, dependent: :destroy

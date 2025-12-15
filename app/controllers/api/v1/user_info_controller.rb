@@ -665,6 +665,16 @@ class Api::V1::UserInfoController < ApplicationController
     end
   end
   
+  # GET /api/v1/user_info/deployment_test
+  # Simple endpoint to verify deployment is working
+  def deployment_test
+    render json: { 
+      message: 'Deployment test successful - commit 6d3959a',
+      timestamp: Time.current.iso8601,
+      methods_available: ['facebook_pages', 'linkedin_organizations']
+    }
+  end
+
   # GET /api/v1/user_info/linkedin_organizations
   # Returns list of LinkedIn organizations user manages
   def linkedin_organizations
