@@ -174,26 +174,79 @@ class ComprehensiveAnalyticsService
       page_token = get_facebook_page_token
       return {} unless page_token
 
-      # Fetch page insights
+      # Fetch page info first to get current follower count
       page_id = get_facebook_page_id
       return {} unless page_id
 
+      # Get current page fans (followers) count
+      page_info_url = "https://graph.facebook.com/v18.0/#{page_id}"
+      page_info_params = {
+        access_token: page_token,
+        fields: 'fan_count,followers_count'
+      }
+
+      page_info_response = HTTParty.get(page_info_url, query: page_info_params)
+      current_followers = 0
+      
+      if page_info_response.success?
+        page_data = JSON.parse(page_info_response.body)
+        # Try both fan_count and followers_count (different API versions use different fields)
+        current_followers = page_data['fan_count'] || page_data['followers_count'] || 0
+        Rails.logger.info "Facebook page followers: #{current_followers}"
+      else
+        Rails.logger.error "Failed to fetch Facebook page info: #{page_info_response.code} - #{page_info_response.body}"
+      end
+
+      # Fetch engagement insights for the range
       url = "https://graph.facebook.com/v18.0/#{page_id}/insights"
       params = {
         access_token: page_token,
-        metric: 'page_fans,page_engaged_users,page_post_engagements',
+        metric: 'page_engaged_users,page_post_engagements',
         period: 'day',
         since: (Time.current.beginning_of_day - (range_to_days(range) - 1).days).to_i,
         until: Time.current.end_of_day.to_i
       }
 
       response = HTTParty.get(url, query: params)
-      return {} unless response.success?
+      engagement_data = parse_facebook_insights(response.success? ? JSON.parse(response.body) : {}, range)
+      
+      # Get follower growth from insights
+      follower_growth_url = "https://graph.facebook.com/v18.0/#{page_id}/insights"
+      follower_growth_params = {
+        access_token: page_token,
+        metric: 'page_fans',
+        period: 'day',
+        since: (Time.current.beginning_of_day - (range_to_days(range) - 1).days).to_i,
+        until: Time.current.end_of_day.to_i
+      }
 
-      data = JSON.parse(response.body)
-      parse_facebook_insights(data, range)
+      follower_growth_response = HTTParty.get(follower_growth_url, query: follower_growth_params)
+      new_followers = 0
+      
+      if follower_growth_response.success?
+        growth_data = JSON.parse(follower_growth_response.body)
+        if growth_data['data'] && growth_data['data'].first
+          values = growth_data['data'].first['values'] || []
+          if values.length >= 2
+            first_value = values.first['value'] || 0
+            last_value = values.last['value'] || 0
+            new_followers = [0, last_value - first_value].max
+          end
+        end
+      end
+
+      {
+        engagement: engagement_data[:engagement] || 0,
+        followers: current_followers,
+        new_followers: new_followers,
+        engaged_users: engagement_data[:engaged_users] || 0,
+        likes: 0,
+        comments: 0,
+        shares: 0
+      }
     rescue => e
       Rails.logger.error "Error fetching Facebook analytics: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
       {}
     end
   end
@@ -292,7 +345,6 @@ class ComprehensiveAnalyticsService
   end
 
   def parse_facebook_insights(data, range)
-    fans = 0
     engaged_users = 0
     post_engagements = 0
 
@@ -302,8 +354,6 @@ class ComprehensiveAnalyticsService
         values = insight['values'] || []
         
         case metric_name
-        when 'page_fans'
-          fans = values.last ? (values.last['value'] || 0) : 0
         when 'page_engaged_users'
           engaged_users = values.sum { |v| v['value'] || 0 }
         when 'page_post_engagements'
@@ -312,21 +362,8 @@ class ComprehensiveAnalyticsService
       end
     end
 
-    # Calculate new followers (follower growth)
-    new_followers = 0
-    if data['data']
-      fans_insight = data['data'].find { |i| i['name'] == 'page_fans' }
-      if fans_insight && fans_insight['values'] && fans_insight['values'].length >= 2
-        first_value = fans_insight['values'].first['value'] || 0
-        last_value = fans_insight['values'].last['value'] || 0
-        new_followers = [0, last_value - first_value].max
-      end
-    end
-
     {
       engagement: post_engagements,
-      followers: fans,
-      new_followers: new_followers,
       engaged_users: engaged_users,
       likes: 0, # Would need separate API call
       comments: 0, # Would need separate API call

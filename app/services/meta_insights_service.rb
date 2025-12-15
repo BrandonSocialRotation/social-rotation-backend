@@ -56,7 +56,7 @@ class MetaInsightsService
     # Fetch new followers (follower growth)
     new_followers = fetch_new_followers(ig_business_id, page_token, period)
     
-    {
+    result = {
       engagement: engagement_data[:total] || 0,
       followers: followers_count || 0,
       new_followers: new_followers || 0,
@@ -65,11 +65,22 @@ class MetaInsightsService
       shares: engagement_data[:shares] || 0,
       saves: engagement_data[:saves] || 0
     }
+    
+    Rails.logger.info "Instagram analytics fetched successfully: followers=#{result[:followers]}, engagement=#{result[:engagement]}"
+    result
   rescue => e
     Rails.logger.error "Error fetching Instagram analytics: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
-    # Return mock data on error
-    mock_summary(range)
+    # Return empty data on error, not mock data
+    {
+      engagement: 0,
+      followers: 0,
+      new_followers: 0,
+      likes: 0,
+      comments: 0,
+      shares: 0,
+      saves: 0
+    }
   end
 
   def fetch_live_timeseries(metric, range)
@@ -133,16 +144,24 @@ class MetaInsightsService
     url = "#{BASE_URL}/#{ig_business_id}"
     params = {
       access_token: access_token,
-      fields: 'followers_count'
+      fields: 'followers_count,username'
     }
     
     response = HTTParty.get(url, query: params)
     
     if response.success?
       data = JSON.parse(response.body)
-      data['followers_count'] || 0
+      followers = data['followers_count'] || 0
+      Rails.logger.info "Instagram followers fetched: #{followers} for account #{data['username'] || ig_business_id}"
+      followers
     else
-      Rails.logger.error "Failed to fetch followers count: #{response.code} - #{response.body}"
+      Rails.logger.error "Failed to fetch Instagram followers count: #{response.code} - #{response.body}"
+      error_data = begin
+        JSON.parse(response.body)
+      rescue
+        {}
+      end
+      Rails.logger.error "Instagram API error: #{error_data['error'] || response.body}"
       0
     end
   end
