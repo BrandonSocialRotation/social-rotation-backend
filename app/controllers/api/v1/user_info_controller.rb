@@ -668,10 +668,19 @@ class Api::V1::UserInfoController < ApplicationController
   # GET /api/v1/user_info/deployment_test
   # Simple endpoint to verify deployment is working
   def deployment_test
+    # Check if methods actually exist
+    has_facebook = respond_to?(:facebook_pages, true)
+    has_linkedin = respond_to?(:linkedin_organizations, true)
+    
     render json: { 
-      message: 'Deployment test successful - commit 6d3959a',
+      message: 'Deployment test - commit 44c1c6c',
       timestamp: Time.current.iso8601,
-      methods_available: ['facebook_pages', 'linkedin_organizations']
+      methods_available: ['facebook_pages', 'linkedin_organizations'],
+      methods_exist: {
+        facebook_pages: has_facebook,
+        linkedin_organizations: has_linkedin
+      },
+      controller_methods: self.class.instance_methods(false).sort
     }
   end
 
