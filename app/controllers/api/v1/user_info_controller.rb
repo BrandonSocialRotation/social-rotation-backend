@@ -1,5 +1,7 @@
 class Api::V1::UserInfoController < ApplicationController
   before_action :authenticate_user!
+  
+  # Deployment verification: Methods should exist at lines 628 and 689
 
   # GET /api/v1/user_info
   def show
