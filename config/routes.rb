@@ -17,7 +17,11 @@ Rails.application.routes.draw do
       get 'subscriptions/webhook'
       get 'plans/index'
       get 'plans/show'
-      # Analytics (Instagram / Meta)
+      # Analytics endpoints
+      get 'analytics/overall', to: 'analytics#overall_summary'
+      get 'analytics/platform/:platform', to: 'analytics#platform_summary'
+      get 'analytics/timeseries', to: 'analytics#timeseries'
+      # Legacy Instagram endpoints (backward compatibility)
       get 'analytics/instagram/summary', to: 'analytics#instagram_summary'
       get 'analytics/instagram/timeseries', to: 'analytics#instagram_timeseries'
       get 'sub_accounts/index'
