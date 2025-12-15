@@ -42,7 +42,17 @@ class MetaInsightsService
     
     unless page_token
       Rails.logger.warn "Could not get page access token for Instagram Business Account"
-      return mock_summary(range)
+      Rails.logger.warn "User ID: #{@user.id}, Instagram Business ID: #{@user.instagram_business_id}"
+      # Return empty data instead of mock data
+      return {
+        engagement: 0,
+        followers: 0,
+        new_followers: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        saves: 0
+      }
     end
 
     ig_business_id = @user.instagram_business_id
