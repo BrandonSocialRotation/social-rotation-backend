@@ -70,6 +70,7 @@ Rails.application.routes.draw do
       get 'user_info/watermark_preview', to: 'user_info#watermark_preview'
       get 'user_info/standard_preview', to: 'user_info#standard_preview'
       get 'user_info/test_pages_endpoint', to: 'user_info#test_pages_endpoint'
+      # Facebook and LinkedIn page/organization endpoints
       get 'user_info/facebook_pages', to: 'user_info#facebook_pages'
       get 'user_info/linkedin_organizations', to: 'user_info#linkedin_organizations'
 
