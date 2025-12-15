@@ -624,6 +624,7 @@ class Api::V1::UserInfoController < ApplicationController
   end
   
   # GET /api/v1/user_info/facebook_pages
+  # Returns list of Facebook pages user has access to
   def facebook_pages
     begin
       unless current_user.fb_user_access_key.present?
@@ -665,6 +666,7 @@ class Api::V1::UserInfoController < ApplicationController
   end
   
   # GET /api/v1/user_info/linkedin_organizations
+  # Returns list of LinkedIn organizations user manages
   def linkedin_organizations
     begin
       unless current_user.linkedin_access_token.present?
