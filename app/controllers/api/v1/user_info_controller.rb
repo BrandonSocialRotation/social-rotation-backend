@@ -627,6 +627,8 @@ class Api::V1::UserInfoController < ApplicationController
   
   # GET /api/v1/user_info/facebook_pages
   # Returns list of Facebook pages user has access to
+  public
+  
   def facebook_pages
     begin
       unless current_user.fb_user_access_key.present?
@@ -717,7 +719,6 @@ class Api::V1::UserInfoController < ApplicationController
       render json: { error: "Failed to fetch LinkedIn organizations: #{e.message}" }, status: :internal_server_error
     end
   end
-end
 
 
 
