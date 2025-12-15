@@ -157,7 +157,7 @@ class SocialMediaVideoPosterService
   # Post to YouTube
   def post_to_youtube(video_path)
     begin
-      service = SocialMedia::YouTubeService.new(@user)
+      service = SocialMedia::YoutubeService.new(@user)
       # Use friendly_name as title, description as description
       title = @bucket_video.friendly_name || @bucket_video.video.friendly_name || 'Video Post'
       response = service.post_video(title, @description, video_path)

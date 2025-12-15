@@ -1,5 +1,5 @@
 module SocialMedia
-  class YouTubeService
+  class YoutubeService
     BASE_URL = 'https://www.googleapis.com/youtube/v3'
     UPLOAD_URL = 'https://www.googleapis.com/upload/youtube/v3/videos'
     
