@@ -719,9 +719,4 @@ class Api::V1::UserInfoController < ApplicationController
       render json: { error: "Failed to fetch LinkedIn organizations: #{e.message}" }, status: :internal_server_error
     end
   end
-
-
-
-
-
-# Force rebuild 1765834704
+end
