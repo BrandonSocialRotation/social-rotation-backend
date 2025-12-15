@@ -91,11 +91,13 @@ class ApplicationController < ActionController::API
     # - Subscriptions controller (to allow viewing/managing subscriptions)
     # - User info controller (to allow viewing profile/subscription status)
     # - Plans controller (to allow viewing available plans)
+    # - Analytics controller (to allow viewing analytics data)
     auth_or_oauth_controller? ||
     controller_path.start_with?('api/v1/oauth') || # Skip all OAuth actions (login and callbacks)
     controller_path.start_with?('api/v1/subscriptions') ||
     controller_path.start_with?('api/v1/user_info') ||
-    controller_path.start_with?('api/v1/plans')
+    controller_path.start_with?('api/v1/plans') ||
+    controller_path.start_with?('api/v1/analytics')
   end
   
   # Require active subscription for accessing the app
