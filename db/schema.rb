@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_12_10_183345) do
+ActiveRecord::Schema[7.1].define(version: 2025_12_10_211326) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -75,6 +75,8 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_10_183345) do
     t.integer "skip_image"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "facebook_page_id"
+    t.string "linkedin_organization_urn"
     t.index ["bucket_id"], name: "index_bucket_schedules_on_bucket_id"
     t.index ["bucket_image_id"], name: "index_bucket_schedules_on_bucket_image_id"
   end

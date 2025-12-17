@@ -40,7 +40,6 @@ module RebrandSocialRotation
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
-    # Force rebuild timestamp: 2025-12-15
     
     # Enable sessions for OAuth flows
     config.middleware.use ActionDispatch::Cookies

@@ -5,23 +5,13 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
-  # Stripe webhook endpoint (matches Stripe's configured URL)
-  post "stripe/subscription_created", to: "api/v1/subscriptions#webhook"
-
   # API Routes
   namespace :api do
     namespace :v1 do
-      get 'subscriptions/create'
-      get 'subscriptions/checkout_session'
-      get 'subscriptions/cancel'
-      get 'subscriptions/webhook'
+      # Legacy GET routes removed - using POST routes in resources block below
       get 'plans/index'
       get 'plans/show'
-      # Analytics endpoints
-      get 'analytics/overall', to: 'analytics#overall_summary'
-      get 'analytics/platform/:platform', to: 'analytics#platform_summary'
-      get 'analytics/timeseries', to: 'analytics#timeseries'
-      # Legacy Instagram endpoints (backward compatibility)
+      # Analytics (Instagram / Meta)
       get 'analytics/instagram/summary', to: 'analytics#instagram_summary'
       get 'analytics/instagram/timeseries', to: 'analytics#instagram_timeseries'
       get 'sub_accounts/index'
@@ -69,15 +59,9 @@ Rails.application.routes.draw do
       post 'user_info/disconnect_youtube', to: 'user_info#disconnect_youtube'
       post 'user_info/toggle_instagram', to: 'user_info#toggle_instagram'
       post 'user_info/convert_to_agency', to: 'user_info#convert_to_agency'
-      delete 'user_info/delete_account', to: 'user_info#delete_account'
       delete 'user_info/delete_test_account', to: 'user_info#delete_test_account'
       get 'user_info/watermark_preview', to: 'user_info#watermark_preview'
       get 'user_info/standard_preview', to: 'user_info#standard_preview'
-      get 'user_info/test_pages_endpoint', to: 'user_info#test_pages_endpoint'
-      # Facebook and LinkedIn page/organization endpoints
-      get 'user_info/deployment_test', to: 'user_info#deployment_test'
-      get 'user_info/facebook_pages', to: 'user_info#facebook_pages'
-      get 'user_info/linkedin_organizations', to: 'user_info#linkedin_organizations'
 
       # Bucket routes
       resources :buckets do

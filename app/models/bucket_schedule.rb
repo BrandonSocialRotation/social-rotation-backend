@@ -117,21 +117,25 @@ class BucketSchedule < ApplicationRecord
     if schedule_type == SCHEDULE_TYPE_ONCE || schedule_type == SCHEDULE_TYPE_ANNUALLY
       if bucket_image
         if twitter_text
-          return twitter_description.present? ? twitter_description : bucket_image.twitter_description
+          return twitter_description.present? ? twitter_description : (bucket_image.twitter_description || '')
         else
-          return description.present? ? description : bucket_image.description
+          return description.present? ? description : (bucket_image.description || '')
         end
       else
         return ''
       end
     end
-    
+
+    # For rotation schedules, get next image from bucket
     bucket_image = get_next_bucket_image_due(offset, skip_offset)
     
+    # If no image found (bucket has no images), return empty string
+    return '' unless bucket_image
+
     if twitter_text
-      bucket_image&.twitter_description || ''
+      bucket_image.twitter_description || ''
     else
-      bucket_image&.description || ''
+      bucket_image.description || ''
     end
   end
   
@@ -167,7 +171,11 @@ class BucketSchedule < ApplicationRecord
     return DEFAULT_TIME unless schedule
     
     parts = schedule.split(' ')
-    return DEFAULT_TIME if parts.length < 2 || parts[0] == '*' || parts[1] == '*'
+    # Handle invalid cron format
+    unless valid_cron_format?
+      return DEFAULT_TIME
+    end
+    return DEFAULT_TIME if parts[0] == '*' || parts[1] == '*'
     
     "#{parts[1]}:#{parts[0]}" # Hour:Minute
   end
@@ -176,7 +184,11 @@ class BucketSchedule < ApplicationRecord
     return Date.current.strftime('%Y-%m-%d') unless schedule
     
     parts = schedule.split(' ')
-    return Date.current.strftime('%Y-%m-%d') if parts.length < 4 || parts[3] == '*' || parts[2] == '*'
+    # Handle invalid cron format
+    unless valid_cron_format?
+      return Date.current.strftime('%Y-%m-%d')
+    end
+    return Date.current.strftime('%Y-%m-%d') if parts[3] == '*' || parts[2] == '*'
     
     "#{Date.current.year}-#{parts[3]}-#{parts[2]}" # Year-Month-Day
   end

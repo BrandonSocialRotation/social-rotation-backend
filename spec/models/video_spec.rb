@@ -14,6 +14,13 @@ RSpec.describe Video, type: :model do
   describe 'methods' do
     let(:user) { create(:user) }
     let(:video) { create(:video, user: user, file_path: 'test/video.mp4') }
+    
+    before do
+      # Ensure test environment uses correct default endpoint
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+    end
 
     describe '#get_source_url' do
       it 'generates source URL' do

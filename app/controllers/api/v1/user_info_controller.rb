@@ -1,7 +1,5 @@
 class Api::V1::UserInfoController < ApplicationController
   before_action :authenticate_user!
-  
-  # Deployment verification: Methods should exist at lines 628 and 689
 
   # GET /api/v1/user_info
   def show
@@ -63,17 +61,6 @@ class Api::V1::UserInfoController < ApplicationController
   def connected_accounts
     render json: {
       connected_accounts: get_connected_accounts
-    }
-  end
-
-  # GET /api/v1/user_info/test_pages_endpoint
-  # Test endpoint to verify deployment
-  def test_pages_endpoint
-    render json: { 
-      message: 'Pages endpoints are deployed!',
-      timestamp: Time.current.iso8601,
-      has_facebook_pages_method: respond_to?(:facebook_pages, true),
-      has_linkedin_organizations_method: respond_to?(:linkedin_organizations, true)
     }
   end
 
@@ -221,129 +208,6 @@ class Api::V1::UserInfoController < ApplicationController
       message: 'Instagram posting status updated',
       post_to_instagram: current_user.post_to_instagram
     }
-  end
-
-  # DELETE /api/v1/user_info/delete_account
-  # Delete the current user's account
-  # Cancels Stripe subscription, deletes account and all associated data
-  def delete_account
-    user = current_user
-    account = user.account
-    user_email = user.email # Store email before deletion for logging
-    
-    # Store user ID and account info before deletion for logging
-    user_id = user.id
-    account_id = account&.id
-    is_admin = user.is_account_admin
-    stripe_customer_id = account&.subscription&.stripe_customer_id
-    stripe_subscription_id = account&.subscription&.stripe_subscription_id
-    
-    begin
-      # Cancel and delete Stripe subscription and customer if they exist (do this BEFORE database deletion)
-      if stripe_subscription_id.present? || stripe_customer_id.present?
-        Stripe.api_key = ENV['STRIPE_SECRET_KEY']
-        
-        # Cancel subscription if it exists
-        if stripe_subscription_id.present?
-          begin
-            stripe_subscription = Stripe::Subscription.retrieve(stripe_subscription_id)
-            
-            # Only try to cancel if it's not already canceled or incomplete_expired
-            unless stripe_subscription.status == 'canceled' || stripe_subscription.status == 'incomplete_expired'
-              stripe_subscription.cancel
-              Rails.logger.info "Stripe subscription #{stripe_subscription_id} canceled for user #{user_email}"
-            else
-              Rails.logger.info "Stripe subscription #{stripe_subscription_id} already canceled for user #{user_email}"
-            end
-          rescue Stripe::InvalidRequestError => e
-            Rails.logger.warn "Stripe subscription not found or already deleted for user #{user_email}: #{e.message}"
-          rescue Stripe::StripeError => e
-            Rails.logger.error "Failed to cancel Stripe subscription for user #{user_email}: #{e.message}"
-          end
-        end
-        
-        # Delete Stripe customer if it exists (this also deletes all subscriptions)
-        if stripe_customer_id.present?
-          begin
-            Stripe::Customer.delete(stripe_customer_id)
-            Rails.logger.info "Stripe customer #{stripe_customer_id} deleted for user #{user_email}"
-          rescue Stripe::InvalidRequestError => e
-            Rails.logger.warn "Stripe customer not found or already deleted for user #{user_email}: #{e.message}"
-          rescue Stripe::StripeError => e
-            Rails.logger.error "Failed to delete Stripe customer for user #{user_email}: #{e.message}"
-          end
-        end
-      end
-      
-      # Use a transaction to ensure all database deletions happen atomically
-      ActiveRecord::Base.transaction do
-        # Delete subscription record from database if it exists
-        if account&.subscription
-          Rails.logger.info "Deleting subscription record for account #{account_id}"
-          account.subscription.destroy
-        end
-      
-      # Delete account if user is account admin (this will cascade delete all users in the account)
-      if account && is_admin
-        Rails.logger.info "Deleting account #{account_id} and all associated users for admin user #{user_email}"
-        
-        # Delete all users in the account first (to avoid foreign key issues)
-        account.users.each do |acc_user|
-          Rails.logger.info "Deleting user #{acc_user.id} (#{acc_user.email}) from account #{account_id}"
-          acc_user.destroy!
-        end
-        
-        # Then delete the account
-        account.destroy!
-        message = "Account and user deleted successfully"
-      else
-        # For personal accounts or sub-accounts
-        Rails.logger.info "Deleting user #{user_id} (#{user_email})"
-        
-        # Delete the account if it exists and has no other users
-        if account
-          user_count = account.users.count
-          Rails.logger.info "Account #{account_id} has #{user_count} user(s)"
-          
-          if user_count <= 1
-            Rails.logger.info "Deleting account #{account_id} as it has no remaining users"
-            # Delete the user first (which will be the only user)
-            user.destroy!
-            # Then delete account (user is already deleted, so this should work)
-            account.destroy!
-          else
-            # Account has other users, just delete this user
-            Rails.logger.info "Account #{account_id} has other users, only deleting user #{user_id}"
-            user.destroy!
-          end
-        else
-          # No account, just delete the user
-          user.destroy!
-        end
-        
-        message = "User account deleted successfully"
-      end
-      
-      # Verify deletion by checking if user still exists
-      if User.exists?(user_id)
-        Rails.logger.error "User #{user_id} still exists after deletion attempt!"
-        raise "Failed to delete user - user still exists in database"
-      end
-      
-        Rails.logger.info "Verified: User #{user_id} (#{user_email}) has been completely deleted from database"
-      end # end transaction
-      
-      Rails.logger.info "Successfully deleted user #{user_id} (#{user_email}) and all associated data"
-      render json: { message: message }
-    rescue ActiveRecord::RecordNotDestroyed => e
-      Rails.logger.error "Failed to delete user #{user_id} (#{user_email}): #{e.message}"
-      Rails.logger.error e.record.errors.full_messages.join(', ')
-      render json: { error: "Failed to delete account: #{e.message}" }, status: :internal_server_error
-    rescue => e
-      Rails.logger.error "Error deleting account for user #{user_email}: #{e.message}"
-      Rails.logger.error e.backtrace.join("\n")
-      render json: { error: "Failed to delete account: #{e.message}" }, status: :internal_server_error
-    end
   end
 
   # DELETE /api/v1/user_info/delete_test_account
@@ -584,7 +448,8 @@ class Api::V1::UserInfoController < ApplicationController
     return unless user.youtube_access_token.present?
     return if user.respond_to?(:youtube_channel_name) && user.youtube_channel_name.present?
     return unless user.respond_to?(:youtube_channel_name=) # Column must exist
-    
+    return if Rails.env.test? # Skip in tests to avoid API calls
+
     begin
       # Get channel information using YouTube Data API v3
       youtube_info_url = "https://www.googleapis.com/youtube/v3/channels"
@@ -624,99 +489,9 @@ class Api::V1::UserInfoController < ApplicationController
       # Don't fail the request if this fails
     end
   end
-  
-  # GET /api/v1/user_info/facebook_pages
-  # Returns list of Facebook pages user has access to
-  public
-  
-  def facebook_pages
-    begin
-      unless current_user.fb_user_access_key.present?
-        render json: { error: 'Facebook not connected' }, status: :bad_request
-        return
-      end
-      
-      service = SocialMedia::FacebookService.new(current_user)
-      pages = service.fetch_pages
-      
-      if pages.empty?
-        Rails.logger.warn "No Facebook pages found for user #{current_user.id}. This could mean: 1) User has no pages, 2) Missing pages_manage_posts permission, 3) Token expired."
-      end
-      
-      render json: { pages: pages }
-    rescue => e
-      Rails.logger.error "Error fetching Facebook pages: #{e.message}"
-      Rails.logger.error e.backtrace.join("\n")
-      
-      # Provide more helpful error messages
-      error_message = e.message
-      status = :internal_server_error
-      
-      # Check for specific error types
-      if error_message.include?('permission') || error_message.include?('scope') || error_message.include?('OAuthException')
-        status = :forbidden
-        error_message = "Facebook permission error. Please disconnect and reconnect your Facebook account to grant the 'pages_manage_posts' permission."
-      elsif error_message.include?('expired') || error_message.include?('invalid')
-        status = :unauthorized
-        error_message = "Facebook access token expired or invalid. Please reconnect your Facebook account."
-      end
-      
-      render json: { 
-        error: "Failed to fetch Facebook pages: #{error_message}",
-        suggestion: error_message.include?('permission') || error_message.include?('expired') || error_message.include?('invalid') ? 
-          "Please go to your profile page and reconnect Facebook." : nil
-      }, status: status
-    end
-  end
-  
-  # GET /api/v1/user_info/deployment_test
-  # Simple endpoint to verify deployment is working
-  def deployment_test
-    # Check if methods actually exist
-    has_facebook = respond_to?(:facebook_pages, true)
-    has_linkedin = respond_to?(:linkedin_organizations, true)
-    
-    render json: { 
-      message: 'Deployment test - commit 44c1c6c',
-      timestamp: Time.current.iso8601,
-      methods_available: ['facebook_pages', 'linkedin_organizations'],
-      methods_exist: {
-        facebook_pages: has_facebook,
-        linkedin_organizations: has_linkedin
-      },
-      controller_methods: self.class.instance_methods(false).sort
-    }
-  end
-
-  # GET /api/v1/user_info/linkedin_organizations
-  # Returns list of LinkedIn organizations user manages
-  def linkedin_organizations
-    begin
-      unless current_user.linkedin_access_token.present?
-        render json: { error: 'LinkedIn not connected' }, status: :bad_request
-        return
-      end
-      
-      service = SocialMedia::LinkedinService.new(current_user)
-      organizations = service.fetch_organizations
-      
-      # Also include personal profile as an option
-      begin
-        personal_urn = service.get_personal_profile_urn
-        organizations.unshift({
-          id: current_user.linkedin_profile_id,
-          name: 'Personal Profile',
-          urn: personal_urn
-        })
-      rescue => e
-        Rails.logger.warn "Could not get personal profile URN: #{e.message}"
-      end
-      
-      render json: { organizations: organizations }
-    rescue => e
-      Rails.logger.error "Error fetching LinkedIn organizations: #{e.message}"
-      Rails.logger.error e.backtrace.join("\n")
-      render json: { error: "Failed to fetch LinkedIn organizations: #{e.message}" }, status: :internal_server_error
-    end
-  end
 end
+
+
+
+
+

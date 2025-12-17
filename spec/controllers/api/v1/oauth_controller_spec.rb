@@ -14,7 +14,11 @@ RSpec.describe Api::V1::OauthController, type: :controller do
   # Test: Facebook OAuth
   describe 'Facebook OAuth' do
     describe 'GET #facebook_login' do
-      before { request.headers['Authorization'] = "Bearer #{generate_token(user)}" }
+      before do
+        request.headers['Authorization'] = "Bearer #{generate_token(user)}"
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('FACEBOOK_APP_ID').and_return('test_app_id')
+      end
 
       it 'redirects to Facebook OAuth URL' do
         get :facebook_login
@@ -48,7 +52,12 @@ RSpec.describe Api::V1::OauthController, type: :controller do
   # Test: LinkedIn OAuth
   describe 'LinkedIn OAuth' do
     describe 'GET #linkedin_login' do
-      before { request.headers['Authorization'] = "Bearer #{generate_token(user)}" }
+      before do
+        request.headers['Authorization'] = "Bearer #{generate_token(user)}"
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('LINKEDIN_CLIENT_ID').and_return('test_client_id')
+        allow(ENV).to receive(:[]).with('LINKEDIN_CALLBACK').and_return(nil)
+      end
 
       it 'redirects to LinkedIn OAuth URL' do
         get :linkedin_login
@@ -76,7 +85,12 @@ RSpec.describe Api::V1::OauthController, type: :controller do
   # Test: Google OAuth
   describe 'Google OAuth' do
     describe 'GET #google_login' do
-      before { request.headers['Authorization'] = "Bearer #{generate_token(user)}" }
+      before do
+        request.headers['Authorization'] = "Bearer #{generate_token(user)}"
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('GOOGLE_CLIENT_ID').and_return('test_client_id')
+        allow(ENV).to receive(:[]).with('GOOGLE_CALLBACK').and_return(nil)
+      end
 
       it 'redirects to Google OAuth URL' do
         get :google_login
@@ -141,7 +155,12 @@ RSpec.describe Api::V1::OauthController, type: :controller do
   # Test: TikTok OAuth
   describe 'TikTok OAuth' do
     describe 'GET #tiktok_login' do
-      before { request.headers['Authorization'] = "Bearer #{generate_token(user)}" }
+      before do
+        request.headers['Authorization'] = "Bearer #{generate_token(user)}"
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('TIKTOK_CLIENT_KEY').and_return('test_client_key')
+        allow(ENV).to receive(:[]).with('TIKTOK_CALLBACK').and_return(nil)
+      end
 
       it 'redirects to TikTok OAuth URL' do
         get :tiktok_login
@@ -152,6 +171,29 @@ RSpec.describe Api::V1::OauthController, type: :controller do
       it 'stores state in session' do
         get :tiktok_login
         expect(session[:tiktok_state]).to be_present
+      end
+    end
+  end
+
+  # Test: YouTube OAuth
+  describe 'YouTube OAuth' do
+    describe 'GET #youtube_login' do
+      before do
+        request.headers['Authorization'] = "Bearer #{generate_token(user)}"
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('YOUTUBE_CLIENT_ID').and_return('test_client_id')
+        allow(ENV).to receive(:[]).with('YOUTUBE_CALLBACK').and_return(nil)
+      end
+
+      it 'redirects to YouTube OAuth URL' do
+        get :youtube_login
+        expect(response).to have_http_status(:redirect)
+        expect(response.location).to include('accounts.google.com')
+      end
+
+      it 'stores state in session' do
+        get :youtube_login
+        expect(session[:youtube_state]).to be_present
       end
     end
 
@@ -169,7 +211,12 @@ RSpec.describe Api::V1::OauthController, type: :controller do
   # Test: YouTube OAuth
   describe 'YouTube OAuth' do
     describe 'GET #youtube_login' do
-      before { request.headers['Authorization'] = "Bearer #{generate_token(user)}" }
+      before do
+        request.headers['Authorization'] = "Bearer #{generate_token(user)}"
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('YOUTUBE_CLIENT_ID').and_return('test_client_id')
+        allow(ENV).to receive(:[]).with('YOUTUBE_CALLBACK').and_return(nil)
+      end
 
       it 'redirects to YouTube OAuth URL' do
         get :youtube_login

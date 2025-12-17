@@ -29,11 +29,14 @@ class AccountFeature < ApplicationRecord
   private
   
   def set_defaults
-    self.allow_marketplace ||= false
-    self.allow_rss ||= true  # Enable RSS by default for all accounts
-    self.max_users ||= 1
-    self.max_buckets ||= 10
-    self.max_images_per_bucket ||= 100
+    self.allow_marketplace = true if allow_marketplace.nil?
+    self.allow_rss = true if allow_rss.nil?  # Enable RSS by default for all accounts
+    self.allow_integrations = true if allow_integrations.nil?
+    self.allow_watermark = true if allow_watermark.nil?
+    # Always set to new defaults for new records (override database defaults)
+    self.max_users = 50 if max_users.nil? || max_users == 1
+    self.max_buckets = 100 if max_buckets.nil? || max_buckets == 10
+    self.max_images_per_bucket = 1000 if max_images_per_bucket.nil? || max_images_per_bucket == 100
   end
   
   # Apply plan limits if account has a plan

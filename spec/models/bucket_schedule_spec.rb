@@ -148,7 +148,7 @@ RSpec.describe BucketSchedule, type: :model do
       end
 
       it 'returns default time for invalid schedule' do
-        bucket_schedule.update!(schedule: 'invalid')
+        bucket_schedule.update_column(:schedule, 'invalid') # Skip validation
         expect(bucket_schedule.get_time_format).to eq(BucketSchedule::DEFAULT_TIME)
       end
     end
@@ -167,7 +167,7 @@ RSpec.describe BucketSchedule, type: :model do
       end
 
       it 'returns current date for invalid schedule' do
-        bucket_schedule.update!(schedule: 'invalid')
+        bucket_schedule.update_column(:schedule, 'invalid') # Skip validation
         expected_date = Date.current.strftime('%Y-%m-%d')
         expect(bucket_schedule.get_scheduled_date_format).to eq(expected_date)
       end
@@ -214,6 +214,8 @@ RSpec.describe BucketSchedule, type: :model do
 
         it 'returns empty string when no bucket_image' do
           bucket_schedule.update!(bucket_image: nil)
+          # Ensure bucket has no images for this test
+          bucket_schedule.bucket.bucket_images.destroy_all
           result = bucket_schedule.get_next_description_due
           expect(result).to eq('')
         end

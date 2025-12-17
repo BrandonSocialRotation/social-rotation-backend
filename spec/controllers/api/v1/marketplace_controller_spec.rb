@@ -56,6 +56,11 @@ RSpec.describe Api::V1::MarketplaceController, type: :controller do
 
       before do
         allow(controller).to receive(:current_user).and_return(super_admin)
+        # Clear existing market items to ensure clean test
+        MarketItem.destroy_all
+        # Create exactly 3 items for super admin
+        create(:market_item, bucket: create(:bucket, user: super_admin), visible: true)
+        create(:market_item, bucket: create(:bucket, user: super_admin), visible: true)
         create(:market_item, bucket: create(:bucket, user: super_admin), visible: true)
       end
 
@@ -76,8 +81,14 @@ RSpec.describe Api::V1::MarketplaceController, type: :controller do
 
       before do
         allow(controller).to receive(:current_user).and_return(regular_user)
+        # Clear existing market items to ensure clean test
+        MarketItem.destroy_all
+        # Create exactly 1 item for this reseller
         create(:market_item, bucket: reseller_bucket, visible: true)
-        create(:market_item, bucket: create(:bucket, user: create(:user)), visible: true) # Different reseller
+        # Create items for different reseller (should not appear)
+        other_reseller = create(:account, is_reseller: true)
+        other_reseller_user = create(:user, account: other_reseller, is_account_admin: true)
+        create(:market_item, bucket: create(:bucket, user: other_reseller_user), visible: true)
       end
 
       it 'shows items from same reseller account' do
@@ -86,7 +97,10 @@ RSpec.describe Api::V1::MarketplaceController, type: :controller do
         expect(response).to have_http_status(:ok)
         json_response = JSON.parse(response.body)
         expect(json_response['market_items'].length).to eq(1)
-        expect(json_response['market_items'].first['bucket']['user_id']).to eq(reseller_user.id)
+        # Verify the market item belongs to the reseller's bucket
+        market_item_id = json_response['market_items'].first['id']
+        market_item = MarketItem.find(market_item_id)
+        expect(market_item.bucket.user.account_id).to eq(reseller_account.id)
       end
     end
 

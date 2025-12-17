@@ -10,15 +10,14 @@ module SocialMedia
     # Post a photo to Facebook page
     # @param message [String] The post message/caption
     # @param image_url [String] Public URL of the image to post
-    # @param page_id [String, nil] Optional page ID to post to. If nil, uses first available page.
     # @return [Hash] Response from Facebook API
-    def post_photo(message, image_url, page_id: nil)
+    def post_photo(message, image_url)
       unless @user.fb_user_access_key.present?
         raise "User does not have Facebook connected"
       end
       
-      # Get page access token for the specified page
-      page_token, selected_page_id = get_page_access_token(page_id: page_id)
+      # Get page access token
+      page_token = get_page_access_token
       
       unless page_token
         raise "Could not get Facebook page access token"
@@ -28,157 +27,9 @@ module SocialMedia
       extension = File.extname(image_url).downcase
       
       if ['.gif', '.mp4'].include?(extension)
-        post_video(message, image_url, page_token, selected_page_id)
+        post_video(message, image_url, page_token)
       else
-        post_image(message, image_url, page_token, selected_page_id)
-      end
-    end
-    
-    # Fetch all Facebook pages the user has access to
-    # @return [Array<Hash>] Array of page objects with id, name, and access_token
-    def fetch_pages
-      unless @user.fb_user_access_key.present?
-        raise "User does not have Facebook connected"
-      end
-      
-      # First, check if the user's access token has the required permissions
-      check_token_permissions
-      
-      url = "#{BASE_URL}/me/accounts"
-      params = {
-        access_token: @user.fb_user_access_key,
-        fields: 'id,name,access_token',
-        limit: 1000
-      }
-      
-      Rails.logger.info "Fetching Facebook pages from: #{url}"
-      Rails.logger.info "Using access token (first 20 chars): #{@user.fb_user_access_key[0..20]}..."
-      
-      response = HTTParty.get(url, query: params)
-      
-      unless response.success?
-        Rails.logger.error "Facebook pages fetch failed: #{response.code} - #{response.body}"
-        error_data = begin
-          JSON.parse(response.body)
-        rescue
-          { 'error' => { 'message' => response.body } }
-        end
-        
-        error_message = error_data.dig('error', 'message') || error_data['error'] || response.body
-        error_code = error_data.dig('error', 'code')
-        error_type = error_data.dig('error', 'type')
-        
-        Rails.logger.error "Facebook API Error Details - Code: #{error_code}, Type: #{error_type}, Message: #{error_message}"
-        
-        # Check for specific permission errors
-        if error_code == 200 || error_type == 'OAuthException' || error_message.include?('permission') || error_message.include?('scope')
-          raise "Facebook permission error: #{error_message}. Please reconnect your Facebook account to grant the 'pages_manage_posts' permission."
-        end
-        
-        raise "Facebook API error (#{error_code}): #{error_message}"
-      end
-      
-      data = JSON.parse(response.body)
-      Rails.logger.info "Facebook pages API response keys: #{data.keys.inspect}"
-      Rails.logger.info "Facebook pages API response (full): #{data.inspect}"
-      
-      if data['error']
-        error_message = data['error']['message'] || data['error'].to_s
-        error_code = data['error']['code']
-        error_type = data['error']['type']
-        
-        Rails.logger.error "Facebook API returned error: Code: #{error_code}, Type: #{error_type}, Message: #{error_message}"
-        
-        # Check for permission errors
-        if error_code == 200 || error_type == 'OAuthException' || error_message.include?('permission') || error_message.include?('scope')
-          raise "Facebook permission error: #{error_message}. Please reconnect your Facebook account to grant the 'pages_manage_posts' permission."
-        end
-        
-        raise "Facebook API error: #{error_message}"
-      end
-      
-      if data['data']
-        pages = data['data'].map do |page|
-          {
-            id: page['id'],
-            name: page['name'],
-            access_token: page['access_token']
-          }
-        end
-        Rails.logger.info "Successfully fetched #{pages.length} Facebook pages: #{pages.map { |p| p[:name] }.join(', ')}"
-        pages
-      else
-        Rails.logger.warn "No 'data' in Facebook pages response. Full response: #{data.inspect}"
-        
-        # If we got a successful response but no data, check if it's a permissions issue
-        if data['paging'] || data.empty?
-          Rails.logger.warn "User may not have any pages, or may not have granted pages_manage_posts permission"
-        end
-        
-        []
-      end
-    end
-    
-    # Check if the user's access token has the required permissions
-    # Uses Facebook's debug_token endpoint to verify permissions
-    def check_token_permissions
-      app_id = ENV['FACEBOOK_APP_ID']
-      app_secret = ENV['FACEBOOK_APP_SECRET']
-      
-      # Skip debug check if app credentials are not available
-      unless app_id.present? && app_secret.present?
-        Rails.logger.warn "Facebook app credentials not configured, skipping token debug check"
-        return
-      end
-      
-      debug_url = "#{BASE_URL}/debug_token"
-      app_access_token = "#{app_id}|#{app_secret}"
-      params = {
-        input_token: @user.fb_user_access_key,
-        access_token: app_access_token
-      }
-      
-      begin
-        response = HTTParty.get(debug_url, query: params)
-        debug_data = JSON.parse(response.body)
-        
-        if debug_data['data']
-          token_data = debug_data['data']
-          scopes = token_data['scopes'] || []
-          expires_at = token_data['expires_at']
-          is_valid = token_data['is_valid']
-          
-          Rails.logger.info "Facebook token debug - Valid: #{is_valid}, Scopes: #{scopes.join(', ')}, Expires: #{expires_at}"
-          
-          # Check if token has expired
-          if expires_at && expires_at > 0 && Time.at(expires_at) < Time.now
-            raise "Facebook access token has expired. Please reconnect your Facebook account."
-          end
-          
-          # Check if token is valid
-          unless is_valid
-            raise "Facebook access token is invalid. Please reconnect your Facebook account."
-          end
-          
-          # Check for required permissions
-          required_permissions = ['pages_manage_posts', 'pages_read_engagement']
-          missing_permissions = required_permissions - scopes
-          
-          if missing_permissions.any?
-            Rails.logger.warn "Missing Facebook permissions: #{missing_permissions.join(', ')}. Current scopes: #{scopes.join(', ')}"
-            # Don't raise here - let the actual API call fail with a better error message
-            # But log it for debugging
-          else
-            Rails.logger.info "Facebook token has all required permissions"
-          end
-        elsif debug_data['error']
-          Rails.logger.warn "Facebook debug_token error: #{debug_data['error']}"
-        else
-          Rails.logger.warn "Could not debug Facebook token: #{debug_data.inspect}"
-        end
-      rescue => e
-        Rails.logger.warn "Failed to check Facebook token permissions (non-blocking): #{e.message}"
-        # Don't fail the request if debug fails - continue with the actual API call
+        post_image(message, image_url, page_token)
       end
     end
     
@@ -237,6 +88,51 @@ module SocialMedia
       JSON.parse(response.body)
     end
     
+    # Fetch user's Facebook pages
+    # @return [Array] Array of page hashes with id, name, and access_token
+    def fetch_pages
+      unless @user.fb_user_access_key.present?
+        raise "User does not have Facebook connected"
+      end
+      
+      url = "#{BASE_URL}/me/accounts"
+      params = {
+        access_token: @user.fb_user_access_key,
+        limit: 1000
+      }
+      
+      response = HTTParty.get(url, query: params)
+      
+      unless response.success?
+        error_data = JSON.parse(response.body) rescue {}
+        error_msg = error_data.dig('error', 'message') || 'Facebook API error'
+        Rails.logger.error "Facebook fetch_pages API error: #{error_msg}"
+        raise "Facebook API error: #{error_msg}"
+      end
+      
+      data = JSON.parse(response.body)
+      
+      if data['data'] && data['data'].any?
+        data['data'].map do |page|
+          {
+            id: page['id'],
+            name: page['name'],
+            access_token: page['access_token']
+          }
+        end
+      else
+        []
+      end
+    rescue => e
+      Rails.logger.error "Facebook fetch_pages error: #{e.message}"
+      # Re-raise if it's an authentication error
+      if e.message.include?('does not have Facebook connected') || e.message.include?('Facebook API error')
+        raise e
+      end
+      raise "User does not have Facebook connected" if e.is_a?(RuntimeError)
+      []
+    end
+    
     # Wait for video to finish processing on Instagram
     # @param creation_id [String] Media container ID
     # @param page_token [String] Page access token
@@ -270,8 +166,8 @@ module SocialMedia
     private
     
     # Post an image to Facebook
-    def post_image(message, image_url, page_token, page_id)
-      url = "#{BASE_URL}/#{page_id}/photos"
+    def post_image(message, image_url, page_token)
+      url = "#{BASE_URL}/me/photos"
       params = {
         message: message,
         url: image_url,
@@ -283,8 +179,8 @@ module SocialMedia
     end
     
     # Post a video to Facebook
-    def post_video(message, video_url, page_token, page_id)
-      url = "#{BASE_URL}/#{page_id}/videos"
+    def post_video(message, video_url, page_token)
+      url = "#{BASE_URL}/me/videos"
       params = {
         description: message,
         file_url: video_url,
@@ -296,13 +192,12 @@ module SocialMedia
     end
     
     # Get the page access token from user's access token
-    # @param page_id [String, nil] Optional page ID. If nil, uses first available page.
-    # @return [Array<String, String>] Returns [page_token, page_id] or [nil, nil] if no pages found
-    def get_page_access_token(page_id: nil)
+    # In production, you'd fetch the user's pages and let them select one
+    # For now, we'll use the first page
+    def get_page_access_token
       url = "#{BASE_URL}/me/accounts"
       params = {
         access_token: @user.fb_user_access_key,
-        fields: 'id,name,access_token',
         limit: 1000
       }
       
@@ -310,23 +205,10 @@ module SocialMedia
       data = JSON.parse(response.body)
       
       if data['data'] && data['data'].any?
-        if page_id
-          # Find the specific page
-          page = data['data'].find { |p| p['id'] == page_id }
-          if page
-            [page['access_token'], page['id']]
-          else
-            # Page not found, use first page as fallback
-            first_page = data['data'].first
-            [first_page['access_token'], first_page['id']]
-          end
-        else
-          # Return the first page's access token
-          first_page = data['data'].first
-          [first_page['access_token'], first_page['id']]
-        end
+        # Return the first page's access token
+        data['data'].first['access_token']
       else
-        [nil, nil]
+        nil
       end
     end
   end

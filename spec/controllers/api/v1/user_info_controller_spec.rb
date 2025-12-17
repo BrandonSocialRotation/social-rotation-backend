@@ -403,6 +403,9 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
         youtube_access_token: 'youtube_token'
       )
 
+      # Mock HTTParty to prevent actual API calls (even though test env should skip)
+      allow(HTTParty).to receive(:get).and_return(double(success?: true, body: '{}'))
+
       get :show
 
       json_response = JSON.parse(response.body)
@@ -418,6 +421,18 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
     end
 
     it 'shows disconnected status when tokens are nil' do
+      # Create a user without any tokens
+      user_without_tokens = create(:user,
+        fb_user_access_key: nil,
+        twitter_oauth_token: nil,
+        linkedin_access_token: nil,
+        google_refresh_token: nil,
+        instagram_business_id: nil,
+        tiktok_access_token: nil,
+        youtube_access_token: nil
+      )
+      allow(controller).to receive(:current_user).and_return(user_without_tokens)
+      
       get :show
 
       json_response = JSON.parse(response.body)

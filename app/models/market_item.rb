@@ -23,8 +23,8 @@ class MarketItem < ApplicationRecord
     return front_image.get_source_url if front_image
     
     if bucket&.bucket_images&.any?
-      first_image = bucket.bucket_images.order(:friendly_name).first&.image
-      return first_image.get_source_url if first_image
+      first_bucket_image = bucket.bucket_images.order(:friendly_name).first
+      return first_bucket_image.image.get_source_url if first_bucket_image&.image
     end
     
     '/img/no_image_available.gif'
@@ -34,8 +34,8 @@ class MarketItem < ApplicationRecord
     return front_image.friendly_name if front_image
     
     if bucket&.bucket_images&.any?
-      first_image = bucket.bucket_images.order(:friendly_name).first&.image
-      return first_image.friendly_name if first_image
+      first_bucket_image = bucket.bucket_images.order(:friendly_name).first
+      return first_bucket_image.friendly_name if first_bucket_image
     end
     
     'N/A'

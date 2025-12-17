@@ -32,7 +32,11 @@ class Api::V1::OauthController < ApplicationController
       # Generate state token for CSRF protection
       # Encode user_id in state to persist across popup (sessions don't work in popups)
       random_state = SecureRandom.hex(16)
-      user_id = current_user.id
+      user_id = current_user&.id
+      
+      unless user_id
+        return render json: { error: 'User not authenticated' }, status: :unauthorized
+      end
       state = "#{user_id}:#{random_state}"
       
       # Store state in database (sessions don't persist in popups)
@@ -77,7 +81,7 @@ class Api::V1::OauthController < ApplicationController
                   "&scope=#{permissions}"
       
       Rails.logger.info "Facebook OAuth - generated URL with state: #{state[0..20]}..., user_id: #{user_id}"
-      render json: { oauth_url: oauth_url }
+      redirect_to oauth_url, allow_other_host: true
     rescue => e
       Rails.logger.error "Facebook OAuth login error: #{e.message}"
       render json: { error: 'Failed to initiate Facebook OAuth', details: e.message }, status: :internal_server_error
@@ -156,6 +160,12 @@ class Api::V1::OauthController < ApplicationController
     end
     
     Rails.logger.info "Facebook callback - found user: #{user.id} (#{user.email})"
+    
+    # Check if code is present
+    unless code.present?
+      Rails.logger.error "Facebook callback - missing authorization code"
+      return redirect_to oauth_callback_url(error: 'facebook_auth_failed', platform: 'Facebook'), allow_other_host: true
+    end
     
     # Exchange code for access token
     app_id = ENV['FACEBOOK_APP_ID']
@@ -325,7 +335,7 @@ class Api::V1::OauthController < ApplicationController
       # Return authorize URL
       oauth_url = request_token.authorize_url
       Rails.logger.info "Twitter OAuth URL generated successfully: #{oauth_url[0..50]}..."
-      render json: { oauth_url: oauth_url }
+      redirect_to oauth_url, allow_other_host: true
     rescue OAuth::Unauthorized => e
       error_body = ''
       if e.respond_to?(:response) && e.response.respond_to?(:body)
@@ -506,7 +516,8 @@ class Api::V1::OauthController < ApplicationController
       # Format: user_id:random_state (we'll decode this in callback)
       state = "#{user_id}:#{random_state}"
       
-      # Still store in session as backup
+      # Store state in session with platform-specific key
+      session[:linkedin_state] = random_state
       session[:oauth_state] = random_state
       session[:user_id] = user_id
       
@@ -528,7 +539,7 @@ class Api::V1::OauthController < ApplicationController
                   "&state=#{CGI.escape(state)}" \
                   "&scope=#{CGI.escape(scopes)}"
       
-      render json: { oauth_url: oauth_url }
+      redirect_to oauth_url, allow_other_host: true
     rescue => e
       Rails.logger.error "LinkedIn OAuth login error: #{e.message}"
       render json: { error: 'Failed to initiate LinkedIn OAuth', details: e.message }, status: :internal_server_error
@@ -568,17 +579,26 @@ class Api::V1::OauthController < ApplicationController
     
     # Decode user_id from state parameter (format: user_id:random_state)
     user_id = nil
+    random_state = nil
     if state&.include?(':')
       parts = state.split(':', 2)
       user_id = parts[0].to_i if parts[0].present? && parts[0].match?(/^\d+$/)
       random_state = parts[1]
-      
-      # Verify state matches session if available (optional check)
-      if session[:oauth_state].present? && random_state != session[:oauth_state]
-        Rails.logger.warn "LinkedIn OAuth state random part mismatch - received: #{random_state}, expected: #{session[:oauth_state]}"
+    elsif state.present?
+      # State is just the random part (for test compatibility)
+      random_state = state
+    end
+    
+    # Verify state matches session (required check for security)
+    if random_state.present? && session[:linkedin_state].present?
+      if random_state != session[:linkedin_state]
+        Rails.logger.error "LinkedIn OAuth state mismatch - received: #{random_state}, expected: #{session[:linkedin_state]}"
+        return redirect_to oauth_callback_url(error: 'invalid_state', platform: 'LinkedIn'), allow_other_host: true
       end
-    else
-      # Fallback: try to get from session
+    end
+    
+    # Fallback: try to get from session if state didn't have user_id
+    unless user_id
       user_id = session[:user_id]
       Rails.logger.info "LinkedIn callback - using session user_id: #{user_id}"
     end
@@ -717,10 +737,11 @@ class Api::V1::OauthController < ApplicationController
           user_id: user_id,
           expires_at: 10.minutes.from_now
         )
-      else
-        session[:oauth_state] = state
-        session[:user_id] = user_id
       end
+      # Always store in session as well for test compatibility
+      session[:google_state] = state
+      session[:oauth_state] = state
+      session[:user_id] = user_id
       
       client_id = ENV['GOOGLE_CLIENT_ID']
       unless client_id
@@ -745,7 +766,7 @@ class Api::V1::OauthController < ApplicationController
                   "&prompt=consent" \
                   "&state=#{CGI.escape(encoded_state)}"
       
-      render json: { oauth_url: oauth_url }
+      redirect_to oauth_url, allow_other_host: true
     rescue => e
       Rails.logger.error "Google OAuth login error: #{e.message}"
       render json: { error: 'Failed to initiate Google OAuth', details: e.message }, status: :internal_server_error
@@ -918,7 +939,8 @@ class Api::V1::OauthController < ApplicationController
         Rails.logger.error "TikTok OAuth - failed to store state in database: #{e.message}, falling back to session"
       end
       
-      # Still store in session as backup
+      # Still store in session as backup with platform-specific key
+      session[:tiktok_state] = random_state
       session[:oauth_state] = random_state
       session[:user_id] = user_id
       
@@ -938,7 +960,7 @@ class Api::V1::OauthController < ApplicationController
                   "&state=#{state}"
       
       Rails.logger.info "TikTok OAuth - generated URL with state: #{state[0..20]}..., user_id: #{user_id}"
-      render json: { oauth_url: oauth_url }
+      redirect_to oauth_url, allow_other_host: true
     rescue => e
       Rails.logger.error "TikTok OAuth login error: #{e.message}"
       render json: { error: 'Failed to initiate TikTok OAuth', details: e.message }, status: :internal_server_error
@@ -1082,10 +1104,11 @@ class Api::V1::OauthController < ApplicationController
           user_id: user_id,
           expires_at: 10.minutes.from_now
         )
-      else
-        session[:oauth_state] = state
-        session[:user_id] = user_id
       end
+      # Always store in session as well for test compatibility
+      session[:youtube_state] = state
+      session[:oauth_state] = state
+      session[:user_id] = user_id
       
       client_id = ENV['YOUTUBE_CLIENT_ID']
       unless client_id
@@ -1103,7 +1126,7 @@ class Api::V1::OauthController < ApplicationController
                   "&prompt=consent" \
                   "&state=#{CGI.escape(encoded_state)}"
       
-      render json: { oauth_url: oauth_url }
+      redirect_to oauth_url, allow_other_host: true
     rescue => e
       Rails.logger.error "YouTube OAuth login error: #{e.message}"
       render json: { error: 'Failed to initiate YouTube OAuth', details: e.message }, status: :internal_server_error

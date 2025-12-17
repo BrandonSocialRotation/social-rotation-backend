@@ -5,7 +5,8 @@ class ApplicationController < ActionController::API
   # ActionController::API doesn't have CSRF protection by default
 
   # Handle authentication
-  before_action :authenticate_user!, unless: :auth_or_oauth_controller?
+  # Note: Individual controllers can skip this with skip_before_action
+  before_action :authenticate_user!
   
   # Require active subscription for all authenticated routes (except subscription management)
   before_action :require_active_subscription!, unless: :skip_subscription_check?
@@ -72,12 +73,19 @@ class ApplicationController < ActionController::API
 
   # Check if the current controller is AuthController or OauthController callback actions
   def auth_or_oauth_controller?
-    controller_path = params[:controller]
-    action_name = params[:action]
+    # Check if we're in AuthController (all actions skip auth)
+    return true if self.class.name == 'Api::V1::AuthController' || self.class.name.start_with?('Api::V1::AuthController')
     
-    # Skip authentication for auth controller and OAuth callback actions only
+    # For OAuthController, only skip auth for callback actions
+    if self.class.name == 'Api::V1::OauthController' || self.class.name.start_with?('Api::V1::OauthController')
+      return params[:action]&.end_with?('_callback') || false
+    end
+    
+    # Also check params for route-based detection (fallback)
+    controller_path = params[:controller] || ''
+    action_name = params[:action] || ''
     controller_path.start_with?('api/v1/auth') || 
-    (controller_path.start_with?('api/v1/oauth') && action_name.end_with?('_callback'))
+     (controller_path.start_with?('api/v1/oauth') && action_name.end_with?('_callback'))
   end
   
   # Check if subscription check should be skipped
@@ -87,24 +95,22 @@ class ApplicationController < ActionController::API
     action_name = params[:action]
     
     # Skip subscription check for:
-    # - Auth and OAuth controllers (login actions and callbacks)
+    # - Auth and OAuth controllers (already handled by auth_or_oauth_controller?)
     # - Subscriptions controller (to allow viewing/managing subscriptions)
     # - User info controller (to allow viewing profile/subscription status)
     # - Plans controller (to allow viewing available plans)
-    # - Analytics controller (to allow viewing analytics data)
     auth_or_oauth_controller? ||
-    controller_path.start_with?('api/v1/oauth') || # Skip all OAuth actions (login and callbacks)
     controller_path.start_with?('api/v1/subscriptions') ||
     controller_path.start_with?('api/v1/user_info') ||
-    controller_path.start_with?('api/v1/plans') ||
-    controller_path.start_with?('api/v1/analytics')
+    controller_path.start_with?('api/v1/plans')
   end
   
   # Require active subscription for accessing the app
   # Returns 403 if account doesn't have an active subscription
   # Allows suspended accounts (past_due/canceled) to access subscription management
   def require_active_subscription!
-    return if @current_user.nil? # Already handled by authenticate_user!
+    # Skip if no current user (authentication failed or not required)
+    return if @current_user.nil?
     
     # Super admin accounts (account_id = 0) bypass subscription check
     # Note: account_id = 0 is the old format for personal accounts, should bypass check

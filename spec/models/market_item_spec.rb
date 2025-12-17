@@ -29,6 +29,17 @@ RSpec.describe MarketItem, type: :model do
     end
 
     describe '#get_front_image_url' do
+      before do
+        # Ensure test environment generates DigitalOcean URLs
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+        allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+        allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return(nil)
+        allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+        # Update image to have test/ prefix
+        image.update!(file_path: 'test/' + image.file_path) unless image.file_path.start_with?('test/')
+      end
+      
       it 'returns front image URL when front_image exists' do
         expect(market_item.get_front_image_url).to include('se1.sfo2.digitaloceanspaces.com')
       end

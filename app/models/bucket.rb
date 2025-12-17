@@ -119,14 +119,11 @@ class Bucket < ApplicationRecord
         last_sent_image ||= bucket_images.first
       end
       
-      return last_sent_image if temp_offset == 0
-      temp_offset -= 1 if temp_offset > 0
-      
-      # Find next image in sequence
+      # Find next image in sequence (skip the last sent one)
       current_index = all_bucket_images.index(last_sent_image)
       next_index = (current_index + 1) % all_bucket_images.count
       
-      # Apply offset
+      # Apply offset (offset of 0 means next image, offset of 1 means skip one more, etc.)
       temp_offset.times do
         next_index = (next_index + 1) % all_bucket_images.count
       end

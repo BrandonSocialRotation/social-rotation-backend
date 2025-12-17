@@ -52,7 +52,7 @@ class Api::V1::SchedulerController < ApplicationController
       image_count = bucket.bucket_images.count
       
       if image_count == 0
-        return render json: { error: 'No images available in bucket. Please add images to the bucket first.' }, status: :unprocessable_entity
+        return render json: { error: 'No images available in bucket' }, status: :unprocessable_entity
       else
         return render json: { error: "Unable to determine next image to post. Bucket has #{image_count} image(s) but rotation logic failed." }, status: :unprocessable_entity
       end

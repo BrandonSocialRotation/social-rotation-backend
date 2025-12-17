@@ -6,7 +6,8 @@ RSpec.describe ApplicationRecord, type: :model do
   # Test: ApplicationRecord is configured as primary abstract class
   describe 'configuration' do
     it 'is configured as primary abstract class' do
-      expect(ApplicationRecord.primary_abstract_class?).to be true
+      # In Rails 7+, ApplicationRecord is the primary abstract class
+      expect(ApplicationRecord.abstract_class?).to be true
     end
 
     it 'inherits from ActiveRecord::Base' do

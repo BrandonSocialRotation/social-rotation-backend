@@ -12,6 +12,15 @@ RSpec.describe Image, type: :model do
 
   describe 'methods' do
     let(:image) { create(:image, file_path: 'test/image.jpg') }
+    
+    before do
+      # Ensure test environment doesn't have ENV vars that would override
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+      allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return(nil)
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+    end
 
     describe '#get_source_url' do
       it 'generates source URL' do

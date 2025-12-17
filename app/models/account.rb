@@ -8,7 +8,7 @@ class Account < ApplicationRecord
   
   # Validations
   validates :name, presence: true
-  validates :subdomain, uniqueness: true, allow_nil: true
+  validates :subdomain, uniqueness: { case_sensitive: true }, allow_nil: true
   
   # Callbacks
   after_create :create_default_features

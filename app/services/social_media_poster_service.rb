@@ -13,20 +13,8 @@ class SocialMediaPosterService
     @post_to = post_to_flags
     @description = description
     @twitter_description = twitter_description || description
-    
-    # Safely get page IDs from bucket_image if columns exist
-    if facebook_page_id.nil? && bucket_image.class.column_names.include?('facebook_page_id')
-      @facebook_page_id = bucket_image.facebook_page_id
-    else
-      @facebook_page_id = facebook_page_id
-    end
-    
-    if linkedin_organization_urn.nil? && bucket_image.class.column_names.include?('linkedin_organization_urn')
-      @linkedin_organization_urn = bucket_image.linkedin_organization_urn
-    else
-      @linkedin_organization_urn = linkedin_organization_urn
-    end
-    
+    @facebook_page_id = facebook_page_id
+    @linkedin_organization_urn = linkedin_organization_urn
     @temp_files = [] # Track temp files for cleanup
   end
   
@@ -148,7 +136,7 @@ class SocialMediaPosterService
   def post_to_facebook(image_url)
     begin
       service = SocialMedia::FacebookService.new(@user)
-      response = service.post_photo(@description, image_url, page_id: @facebook_page_id)
+      response = service.post_photo(@description, image_url)
       
       { success: true, response: response }
     rescue => e
@@ -187,7 +175,7 @@ class SocialMediaPosterService
   def post_to_linkedin(image_path)
     begin
       service = SocialMedia::LinkedinService.new(@user)
-      response = service.post_with_image(@description, image_path, organization_id: @linkedin_organization_urn)
+      response = service.post_with_image(@description, image_path)
       
       { success: true, response: response }
     rescue => e

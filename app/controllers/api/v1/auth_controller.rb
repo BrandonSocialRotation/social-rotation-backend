@@ -5,7 +5,9 @@
 #   POST /api/v1/auth/login - Authenticate existing user
 class Api::V1::AuthController < ApplicationController
   # Skip authentication for auth endpoints (otherwise can't login!)
-  skip_before_action :authenticate_user!, only: [:register, :login]
+  # Must be called before ApplicationController's before_action callbacks
+  skip_before_action :authenticate_user!, only: [:register, :login], raise: false
+  skip_before_action :require_active_subscription!, only: [:register, :login], raise: false
 
   # POST /api/v1/auth/register
   # Create new user (but NOT account - account created after payment)
@@ -27,53 +29,37 @@ class Api::V1::AuthController < ApplicationController
       existing_user = User.find_by(email: params[:email])
       
       if existing_user
-        # If user exists but has no account (didn't complete payment), allow them to continue
-        if existing_user.account_id.nil?
-          # Prepare update params
-          update_params = user_params.merge(
-            account_id: nil, # Still no account until payment
-            is_account_admin: false,
-            role: params[:account_type] == 'agency' ? 'reseller' : nil
-          )
-          
-          # Update user info and allow them to proceed to payment
-          if existing_user.update(update_params)
-            token = JsonWebToken.encode(user_id: existing_user.id)
-            render json: {
-              user: user_json(existing_user),
-              token: token,
-              message: 'Please complete payment to activate your account.'
-            }, status: :ok
-            return
-          else
-            # Update failed, return errors
-            render json: {
-              error: 'Registration failed',
-              message: existing_user.errors.full_messages.join('. '),
-              details: existing_user.errors.full_messages,
-              errors: existing_user.errors.as_json
-            }, status: :unprocessable_entity
-            return
-          end
-        else
-          # User exists and has an account - email is taken
-          render json: {
-            error: 'Email already registered',
-            message: 'This email is already registered. Please login instead.',
-            field: 'email'
-          }, status: :unprocessable_entity
-          return
-        end
+        # User exists - email is taken
+        render json: {
+          error: 'Registration failed',
+          message: 'Email has already been taken',
+          details: ['Email has already been taken']
+        }, status: :unprocessable_entity
+        return
       end
       
-      # Create new user WITHOUT account (account_id = nil)
-      # Account will be created in Stripe webhook after payment succeeds
-      # Registration metadata (account_type, company_name) will be stored in Stripe checkout session metadata
-      user = User.new(user_params.merge(
-        account_id: nil, # No account until payment
-        is_account_admin: false, # Will be set to true when account is created in webhook
-        role: params[:account_type] == 'agency' ? 'reseller' : nil
-      ))
+      # Handle account creation based on account_type
+      if params[:account_type] == 'agency'
+        # Create agency account immediately
+        account = Account.create!(
+          name: params[:company_name],
+          is_reseller: true,
+          status: true
+        )
+        
+        user = User.new(user_params.merge(
+          account_id: account.id,
+          is_account_admin: true,
+          role: 'reseller'
+        ))
+      else
+        # Personal account - set account_id to 0
+        user = User.new(user_params.merge(
+          account_id: 0,
+          is_account_admin: false,
+          role: 'user'
+        ))
+      end
       
       if user.save
         token = JsonWebToken.encode(user_id: user.id)

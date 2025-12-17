@@ -65,7 +65,7 @@ RSpec.describe RssFeed, type: :model do
 
   describe '#health_status' do
     it 'returns "healthy" when failure count is low' do
-      feed = create(:rss_feed, fetch_failure_count: 1)
+      feed = create(:rss_feed, fetch_failure_count: 1, last_fetched_at: 1.hour.ago)
       expect(feed.health_status).to eq('healthy')
     end
 

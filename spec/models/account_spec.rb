@@ -19,7 +19,19 @@ RSpec.describe Account, type: :model do
   # TEST: Account validations work correctly
   describe 'validations' do
     it { should validate_presence_of(:name) }
-    it { should validate_uniqueness_of(:subdomain).allow_nil }
+    
+    it 'validates uniqueness of subdomain when present' do
+      account1 = create(:account, subdomain: 'test')
+      account2 = build(:account, subdomain: 'test')
+      expect(account2).not_to be_valid
+      expect(account2.errors[:subdomain]).to be_present
+    end
+    
+    it 'allows nil subdomain' do
+      account1 = create(:account, subdomain: nil)
+      account2 = build(:account, subdomain: nil)
+      expect(account2).to be_valid
+    end
   end
 
   # TEST: Callbacks create default account features

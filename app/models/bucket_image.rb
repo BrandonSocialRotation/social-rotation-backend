@@ -22,6 +22,7 @@ class BucketImage < ApplicationRecord
   end
   
   def should_display_twitter_warning?
-    description&.length > BucketSchedule::TWITTER_CHARACTER_LIMIT && twitter_description.blank?
+    return false if description.nil? || description.blank?
+    description.length > BucketSchedule::TWITTER_CHARACTER_LIMIT && twitter_description.blank?
   end
 end

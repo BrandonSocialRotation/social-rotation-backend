@@ -18,8 +18,13 @@ class Video < ApplicationRecord
     # Check if it's already a full URL
     return file_path if file_path.start_with?('http://') || file_path.start_with?('https://')
     
-    # For DigitalOcean Spaces
-    if Rails.env.production?
+    # Check if file_path starts with environment prefix (production/, development/, test/)
+    environments = %w[production development test]
+    if environments.any? { |env| file_path.start_with?("#{env}/") }
+      endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://se1.sfo2.digitaloceanspaces.com'
+      endpoint = endpoint.chomp('/')
+      "#{endpoint}/#{file_path}"
+    elsif Rails.env.production?
       bucket_name = ENV['DO_SPACES_BUCKET'] || ENV['DIGITAL_OCEAN_SPACES_NAME']
       endpoint = ENV['DO_SPACES_CDN_HOST'] || ENV['ACTIVE_STORAGE_URL'] || ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT']
       

@@ -13,7 +13,7 @@ class RssPost < ApplicationRecord
   # SCOPES
   scope :viewed, -> { where(is_viewed: true) }
   scope :unviewed, -> { where(is_viewed: false) }
-  scope :recent, -> { order(published_at: :desc) }
+  scope :recent, -> { where('published_at > ?', 1.day.ago).order(published_at: :desc) }
   scope :with_images, -> { where.not(image_url: [nil, '']) }
   
   # METHODS
@@ -21,13 +21,23 @@ class RssPost < ApplicationRecord
   # Get a truncated version of the description for previews
   def short_description(limit = 150)
     return '' if description.blank?
-    description.length > limit ? "#{description[0...limit]}..." : description
+    if description.length > limit
+      # Limit is the total length including "...", so take limit-3 chars
+      "#{description[0, limit - 3]}..."
+    else
+      description
+    end
   end
   
   # Get a truncated version of the title for previews
   def short_title(limit = 100)
     return '' if title.blank?
-    title.length > limit ? "#{title[0...limit]}..." : title
+    if title.length > limit
+      # Limit is the total length including "...", so take limit-3 chars
+      "#{title[0, limit - 3]}..."
+    else
+      title
+    end
   end
   
   # Check if this post has an image
