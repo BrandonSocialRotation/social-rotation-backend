@@ -579,4 +579,3 @@ module SocialMedia
     end
   end
 end
-

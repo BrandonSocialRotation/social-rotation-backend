@@ -14,5 +14,3 @@ class Api::V1::AnalyticsController < ApplicationController
     render json: { metric: metric, range: range, points: data }
   end
 end
-
-

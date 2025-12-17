@@ -311,4 +311,3 @@ class Api::V1::BucketSchedulesController < ApplicationController
     }
   end
 end
-

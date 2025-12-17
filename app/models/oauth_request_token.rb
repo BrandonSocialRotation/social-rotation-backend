@@ -35,4 +35,3 @@ class OauthRequestToken < ApplicationRecord
     nil
   end
 end
-

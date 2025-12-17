@@ -197,4 +197,3 @@ class SocialMediaPosterService
     end
   end
 end
-

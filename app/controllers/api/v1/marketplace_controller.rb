@@ -292,4 +292,3 @@ class Api::V1::MarketplaceController < ApplicationController
     user_ids.uniq
   end
 end
-

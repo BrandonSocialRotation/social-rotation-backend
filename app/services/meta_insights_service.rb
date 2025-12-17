@@ -91,4 +91,3 @@ class MetaInsightsService
     token.to_s.hash % 1_000_000
   end
 end
-

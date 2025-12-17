@@ -25,5 +25,3 @@ class BucketVideo < ApplicationRecord
     description&.length > BucketSchedule::TWITTER_CHARACTER_LIMIT && twitter_description.blank?
   end
 end
-
-

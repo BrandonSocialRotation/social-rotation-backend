@@ -1671,4 +1671,3 @@ class Api::V1::OauthController < ApplicationController
     nil
   end
 end
-

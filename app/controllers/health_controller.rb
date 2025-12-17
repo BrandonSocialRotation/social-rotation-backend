@@ -5,4 +5,3 @@ class HealthController < ApplicationController
     render json: { message: 'Social Rotation API', version: '1.0', status: 'online' }
   end
 end
-
