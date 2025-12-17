@@ -114,6 +114,7 @@ RSpec.describe ApplicationController, type: :controller do
     end
 
     it 'returns true for AuthController' do
+      stub_const('Api::V1::AuthController', Class.new)
       allow(controller).to receive(:class).and_return(Api::V1::AuthController)
       get :index
       json_response = JSON.parse(response.body)
@@ -121,6 +122,7 @@ RSpec.describe ApplicationController, type: :controller do
     end
 
     it 'returns true for OAuthController callback actions' do
+      stub_const('Api::V1::OauthController', Class.new)
       allow(controller).to receive(:class).and_return(Api::V1::OauthController)
       allow(controller).to receive(:params).and_return(ActionController::Parameters.new(action: 'facebook_callback'))
       get :index
@@ -129,6 +131,7 @@ RSpec.describe ApplicationController, type: :controller do
     end
 
     it 'returns false for OAuthController non-callback actions' do
+      stub_const('Api::V1::OauthController', Class.new)
       allow(controller).to receive(:class).and_return(Api::V1::OauthController)
       allow(controller).to receive(:params).and_return(ActionController::Parameters.new(action: 'connect'))
       get :index
@@ -137,11 +140,9 @@ RSpec.describe ApplicationController, type: :controller do
     end
 
     it 'uses params fallback for route-based detection' do
-      allow(controller).to receive(:class).and_return(Api::V1::BucketsController)
-      # Mock params to return the controller path and action
+      allow(controller).to receive(:class).and_return(ApplicationController)
       allow(controller).to receive(:params).and_return(ActionController::Parameters.new(controller: 'api/v1/auth', action: 'login'))
-      # The method uses params[:controller] and params[:action] directly
-      get :index, params: { controller: 'api/v1/auth', action: 'login' }
+      get :index
       json_response = JSON.parse(response.body)
       expect(json_response['result']).to be true
     end

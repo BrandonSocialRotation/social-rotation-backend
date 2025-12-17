@@ -22,11 +22,8 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       end
 
       it "returns success with Stripe connection info" do
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        # test_stripe doesn't require auth (skip_before_action)
+        get "/api/v1/subscriptions/test_stripe.json"
         
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
@@ -37,11 +34,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       end
 
       it "includes account information when available" do
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         json_response = JSON.parse(response.body)
         expect(json_response['account']).to be_present
@@ -51,11 +44,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "handles restricted API keys gracefully" do
         allow(Stripe::Account).to receive(:retrieve).and_raise(Stripe::PermissionError.new('Permission denied'))
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
@@ -66,11 +55,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "identifies restricted keys" do
         allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('rk_test_123')
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         json_response = JSON.parse(response.body)
         expect(json_response['api_key_type']).to eq('restricted')
@@ -79,11 +64,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "identifies secret keys" do
         allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         json_response = JSON.parse(response.body)
         expect(json_response['api_key_type']).to eq('secret')
@@ -94,11 +75,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "handles Stripe authentication errors" do
         allow(Stripe::Product).to receive(:list).and_raise(Stripe::AuthenticationError.new('Invalid API key'))
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         expect(response).to have_http_status(:unauthorized)
         json_response = JSON.parse(response.body)
@@ -111,11 +88,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "handles Stripe permission errors" do
         allow(Stripe::Product).to receive(:list).and_raise(Stripe::PermissionError.new('Permission denied'))
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
@@ -127,11 +100,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "handles generic Stripe errors" do
         allow(Stripe::Product).to receive(:list).and_raise(Stripe::StripeError.new('API error'))
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         expect(response).to have_http_status(:bad_request)
         json_response = JSON.parse(response.body)
@@ -144,11 +113,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "handles unexpected errors gracefully" do
         allow(Stripe::Product).to receive(:list).and_raise(StandardError.new('Unexpected error'))
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         expect(response).to have_http_status(:internal_server_error)
         json_response = JSON.parse(response.body)
@@ -160,11 +125,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
         allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new('development'))
         allow(Stripe::Product).to receive(:list).and_raise(StandardError.new('Unexpected error'))
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         json_response = JSON.parse(response.body)
         expect(json_response['backtrace']).to be_present
@@ -174,11 +135,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
         allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new('production'))
         allow(Stripe::Product).to receive(:list).and_raise(StandardError.new('Unexpected error'))
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         json_response = JSON.parse(response.body)
         expect(json_response['backtrace']).to be_nil
@@ -189,11 +146,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       it "returns service unavailable when STRIPE_SECRET_KEY is missing" do
         allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return(nil)
         
-        get "/api/v1/subscriptions/test_stripe.json",
-            headers: { 
-              'Authorization' => "Bearer #{token}",
-              'Content-Type' => 'application/json'
-            }
+        get "/api/v1/subscriptions/test_stripe.json"
         
         expect(response).to have_http_status(:service_unavailable)
         json_response = JSON.parse(response.body)
@@ -202,9 +155,14 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
     end
 
     it "does not require authentication" do
+      allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
+      allow(Stripe::Product).to receive(:list).and_return(double(data: []))
+      allow(Stripe::Price).to receive(:list).and_return(double(data: []))
+      allow(Stripe::Account).to receive(:retrieve).and_raise(Stripe::PermissionError.new('Permission denied'))
+      
       get "/api/v1/subscriptions/test_stripe.json"
       # Should work without auth since it's in skip_before_action
-      expect(response).to have_http_status(:service_unavailable).or have_http_status(:success)
+      expect(response).to have_http_status(:success)
     end
   end
 end
