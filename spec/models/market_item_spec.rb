@@ -125,11 +125,13 @@ RSpec.describe MarketItem, type: :model do
 
       it 'handles bucket_image without image association' do
         market_item.update!(front_image: nil)
-        # Create bucket_image then destroy its image to simulate missing association
+        # Create bucket_image, then update_column to set invalid image_id to simulate missing association
         bucket_image = create(:bucket_image, bucket: bucket, friendly_name: 'Test')
-        image_to_destroy = bucket_image.image
-        image_to_destroy.destroy
+        # Use update_column to bypass foreign key constraint for testing
+        bucket_image.update_column(:image_id, 99999) # Non-existent image ID
         
+        # Reload to clear association cache
+        bucket.reload
         expect(market_item.get_front_image_url).to eq('/img/no_image_available.gif')
       end
     end
@@ -137,11 +139,13 @@ RSpec.describe MarketItem, type: :model do
     describe '#get_front_image_friendly_name edge cases' do
       it 'handles bucket_image without image association' do
         market_item.update!(front_image: nil)
-        # Create bucket_image then destroy its image to simulate missing association
+        # Create bucket_image, then update_column to set invalid image_id to simulate missing association
         bucket_image = create(:bucket_image, bucket: bucket, friendly_name: 'Test')
-        image_to_destroy = bucket_image.image
-        image_to_destroy.destroy
+        # Use update_column to bypass foreign key constraint for testing
+        bucket_image.update_column(:image_id, 99999) # Non-existent image ID
         
+        # Reload to clear association cache
+        bucket.reload
         expect(market_item.get_front_image_friendly_name).to eq('N/A')
       end
 

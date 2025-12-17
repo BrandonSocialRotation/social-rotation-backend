@@ -94,7 +94,8 @@ RSpec.describe RssPost, type: :model do
   describe '#short_title' do
     it 'returns empty string when title is blank' do
       # Title has presence validation, so we need to bypass it
-      post = build(:rss_post, title: nil)
+      rss_feed = create(:rss_feed)
+      post = build(:rss_post, rss_feed: rss_feed, title: nil)
       post.save(validate: false)
       expect(post.short_title).to eq('')
     end
@@ -217,14 +218,16 @@ RSpec.describe RssPost, type: :model do
 
     it 'returns only description when title is blank' do
       # Title has presence validation, so bypass it to test edge case
-      post = build(:rss_post, title: '', description: 'Test Description')
+      rss_feed = create(:rss_feed)
+      post = build(:rss_post, rss_feed: rss_feed, title: '', description: 'Test Description')
       post.save(validate: false)
       expect(post.social_media_content).to eq('Test Description')
     end
 
     it 'returns empty string when both are blank' do
       # Title has presence validation, so bypass it to test edge case
-      post = build(:rss_post, title: '', description: '')
+      rss_feed = create(:rss_feed)
+      post = build(:rss_post, rss_feed: rss_feed, title: '', description: '')
       post.save(validate: false)
       expect(post.social_media_content).to eq('')
     end
