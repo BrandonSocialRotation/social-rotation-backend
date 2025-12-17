@@ -64,23 +64,34 @@ RSpec.describe RssFeed, type: :model do
   end
 
   describe '#health_status' do
-    it 'returns "healthy" when failure count is low' do
-      feed = create(:rss_feed, fetch_failure_count: 1, last_fetched_at: 1.hour.ago)
+    it 'returns "healthy" when failure count is 0 and has been fetched' do
+      feed = create(:rss_feed, fetch_failure_count: 0, last_fetched_at: 1.hour.ago)
       expect(feed.health_status).to eq('healthy')
     end
 
+    it 'returns "unhealthy" when failure count is 1-2' do
+      feed = create(:rss_feed, fetch_failure_count: 1, last_fetched_at: 1.hour.ago)
+      expect(feed.health_status).to eq('unhealthy')
+      
+      feed2 = create(:rss_feed, fetch_failure_count: 2, last_fetched_at: 1.hour.ago)
+      expect(feed2.health_status).to eq('unhealthy')
+    end
+
     it 'returns "degraded" when failure count is between 3-4' do
-      feed = create(:rss_feed, fetch_failure_count: 3)
+      feed = create(:rss_feed, fetch_failure_count: 3, last_fetched_at: 1.hour.ago)
       expect(feed.health_status).to eq('degraded')
+      
+      feed2 = create(:rss_feed, fetch_failure_count: 4, last_fetched_at: 1.hour.ago)
+      expect(feed2.health_status).to eq('degraded')
     end
 
     it 'returns "broken" when failure count is 5 or more' do
-      feed = create(:rss_feed, fetch_failure_count: 5)
+      feed = create(:rss_feed, fetch_failure_count: 5, last_fetched_at: 1.hour.ago)
       expect(feed.health_status).to eq('broken')
     end
 
     it 'returns "never_fetched" when last_fetched_at is nil' do
-      feed = create(:rss_feed, last_fetched_at: nil)
+      feed = create(:rss_feed, last_fetched_at: nil, fetch_failure_count: 0)
       expect(feed.health_status).to eq('never_fetched')
     end
   end
