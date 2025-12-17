@@ -161,7 +161,7 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
         expect(json_response['range']).to eq('7d')
-        expect(json_response['platforms']).to have_key(:instagram)
+        expect(json_response['platforms']).to have_key('instagram')
         expect(json_response['total_reach']).to eq(800)
         expect(json_response['total_impressions']).to eq(1000)
         expect(json_response['total_engagement']).to eq(50)
