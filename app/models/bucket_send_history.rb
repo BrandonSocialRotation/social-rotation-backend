@@ -9,6 +9,8 @@ class BucketSendHistory < ApplicationRecord
   
   # Methods from original PHP
   def get_sent_to_name
+    return 'Unknown' if sent_to.nil? || sent_to == 0
+    
     sent_to_platforms = []
     
     sent_to_platforms << 'Facebook' if (sent_to & BucketSchedule::BIT_FACEBOOK) > 0
