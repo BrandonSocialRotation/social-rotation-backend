@@ -7,6 +7,14 @@
 - **Failures**: 0 ✅
 - **Pending**: 2
 
+## Recent Additions
+- ✅ Comprehensive OauthRequestToken model tests
+- ✅ Expanded Image model tests (all get_source_url branches)
+- ✅ Expanded Video model tests (all get_source_url branches)
+- ✅ Comprehensive RssPost model tests (all methods)
+- ✅ Expanded MarketItem edge case tests
+- ✅ Expanded BucketImage edge case tests
+
 ## Test Files Created
 ✅ JsonWebToken service
 ✅ ComprehensiveAnalyticsService (with WebMock stubs)

@@ -93,10 +93,9 @@ RSpec.describe RssPost, type: :model do
 
   describe '#short_title' do
     it 'returns empty string when title is blank' do
-      # Title has presence validation, so we need to bypass it
-      rss_feed = create(:rss_feed)
-      post = build(:rss_post, rss_feed: rss_feed, title: nil)
-      post.save(validate: false)
+      # Title has presence validation and NOT NULL constraint, so create then update_column
+      post = create(:rss_post)
+      post.update_column(:title, nil)
       expect(post.short_title).to eq('')
     end
 
