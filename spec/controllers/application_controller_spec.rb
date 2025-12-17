@@ -138,8 +138,10 @@ RSpec.describe ApplicationController, type: :controller do
 
     it 'uses params fallback for route-based detection' do
       allow(controller).to receive(:class).and_return(Api::V1::BucketsController)
+      # Mock params to return the controller path and action
       allow(controller).to receive(:params).and_return(ActionController::Parameters.new(controller: 'api/v1/auth', action: 'login'))
-      get :index
+      # The method uses params[:controller] and params[:action] directly
+      get :index, params: { controller: 'api/v1/auth', action: 'login' }
       json_response = JSON.parse(response.body)
       expect(json_response['result']).to be true
     end
