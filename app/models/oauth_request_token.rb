@@ -1,4 +1,6 @@
 class OauthRequestToken < ApplicationRecord
+  belongs_to :user
+  
   validates :oauth_token, presence: true, uniqueness: true
   validates :request_secret, presence: true
   validates :user_id, presence: true

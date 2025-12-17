@@ -13,18 +13,150 @@ RSpec.describe Video, type: :model do
 
   describe 'methods' do
     let(:user) { create(:user) }
-    let(:video) { create(:video, user: user, file_path: 'test/video.mp4') }
     
-    before do
-      # Ensure test environment uses correct default endpoint
-      allow(ENV).to receive(:[]).and_call_original
-      allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
-      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
-    end
-
     describe '#get_source_url' do
-      it 'generates source URL' do
-        expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/test/video.mp4')
+      context 'with http/https URLs' do
+        it 'returns https URL as-is' do
+          video = create(:video, user: user, file_path: 'https://example.com/video.mp4')
+          expect(video.get_source_url).to eq('https://example.com/video.mp4')
+        end
+
+        it 'returns http URL as-is' do
+          video = create(:video, user: user, file_path: 'http://example.com/video.mp4')
+          expect(video.get_source_url).to eq('http://example.com/video.mp4')
+        end
+      end
+
+      context 'with environment-prefixed file paths' do
+        before do
+          allow(ENV).to receive(:[]).and_call_original
+        end
+
+        it 'uses DO_SPACES_ENDPOINT when set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return('https://nyc3.digitaloceanspaces.com')
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'production/test/video.mp4')
+          expect(video.get_source_url).to eq('https://nyc3.digitaloceanspaces.com/production/test/video.mp4')
+        end
+
+        it 'uses DIGITAL_OCEAN_SPACES_ENDPOINT when set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return('https://ams3.digitaloceanspaces.com')
+          video = create(:video, user: user, file_path: 'production/test/video.mp4')
+          expect(video.get_source_url).to eq('https://ams3.digitaloceanspaces.com/production/test/video.mp4')
+        end
+
+        it 'defaults to se1.sfo2.digitaloceanspaces.com when no ENV vars set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'production/test/video.mp4')
+          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/production/test/video.mp4')
+        end
+
+        it 'removes trailing slashes from endpoint' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return('https://se1.sfo2.digitaloceanspaces.com/')
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'production/test/video.mp4')
+          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/production/test/video.mp4')
+        end
+
+        it 'handles development environment prefix' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'development/test/video.mp4')
+          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/development/test/video.mp4')
+        end
+
+        it 'handles test environment prefix' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'test/video.mp4')
+          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/test/video.mp4')
+        end
+      end
+
+      context 'in production environment' do
+        before do
+          allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new('production'))
+          allow(ENV).to receive(:[]).and_call_original
+        end
+
+        it 'uses DO_SPACES_BUCKET when set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('my-bucket')
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_CDN_HOST').and_return('cdn.example.com')
+          allow(ENV).to receive(:[]).with('ACTIVE_STORAGE_URL').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'local/video.mp4')
+          expect(video.get_source_url).to eq('https://cdn.example.com/my-bucket/local/video.mp4')
+        end
+
+        it 'uses DIGITAL_OCEAN_SPACES_NAME when set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return('my-bucket')
+          allow(ENV).to receive(:[]).with('DO_SPACES_CDN_HOST').and_return('cdn.example.com')
+          allow(ENV).to receive(:[]).with('ACTIVE_STORAGE_URL').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'local/video.mp4')
+          expect(video.get_source_url).to eq('https://cdn.example.com/my-bucket/local/video.mp4')
+        end
+
+        it 'uses DO_SPACES_CDN_HOST when set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_CDN_HOST').and_return('cdn.example.com')
+          allow(ENV).to receive(:[]).with('ACTIVE_STORAGE_URL').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'local/video.mp4')
+          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/local/video.mp4')
+        end
+
+        it 'uses ACTIVE_STORAGE_URL when set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_CDN_HOST').and_return(nil)
+          allow(ENV).to receive(:[]).with('ACTIVE_STORAGE_URL').and_return('https://storage.example.com')
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'local/video.mp4')
+          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/local/video.mp4')
+        end
+
+        it 'defaults to se1.sfo2.digitaloceanspaces.com when no ENV vars set' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_CDN_HOST').and_return(nil)
+          allow(ENV).to receive(:[]).with('ACTIVE_STORAGE_URL').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'local/video.mp4')
+          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/local/video.mp4')
+        end
+
+        it 'removes protocol and path from endpoint' do
+          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('my-bucket')
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_CDN_HOST').and_return('https://cdn.example.com/path')
+          allow(ENV).to receive(:[]).with('ACTIVE_STORAGE_URL').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+          allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+          video = create(:video, user: user, file_path: 'local/video.mp4')
+          expect(video.get_source_url).to eq('https://cdn.example.com/my-bucket/local/video.mp4')
+        end
+      end
+
+      context 'in development environment' do
+        before do
+          allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new('development'))
+        end
+
+        it 'returns localhost URL for local files' do
+          video = create(:video, user: user, file_path: 'local/video.mp4')
+          expect(video.get_source_url).to eq('http://localhost:3000/local/video.mp4')
+        end
       end
     end
   end
