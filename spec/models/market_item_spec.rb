@@ -125,8 +125,10 @@ RSpec.describe MarketItem, type: :model do
 
       it 'handles bucket_image without image association' do
         market_item.update!(front_image: nil)
+        # Create bucket_image then destroy its image to simulate missing association
         bucket_image = create(:bucket_image, bucket: bucket, friendly_name: 'Test')
-        bucket_image.update_column(:image_id, 99999) # Non-existent image
+        image_to_destroy = bucket_image.image
+        image_to_destroy.destroy
         
         expect(market_item.get_front_image_url).to eq('/img/no_image_available.gif')
       end
@@ -135,14 +137,20 @@ RSpec.describe MarketItem, type: :model do
     describe '#get_front_image_friendly_name edge cases' do
       it 'handles bucket_image without image association' do
         market_item.update!(front_image: nil)
+        # Create bucket_image then destroy its image to simulate missing association
         bucket_image = create(:bucket_image, bucket: bucket, friendly_name: 'Test')
-        bucket_image.update_column(:image_id, 99999) # Non-existent image
+        image_to_destroy = bucket_image.image
+        image_to_destroy.destroy
         
         expect(market_item.get_front_image_friendly_name).to eq('N/A')
       end
 
       it 'handles nil bucket gracefully' do
-        market_item.update!(front_image: nil, bucket: nil)
+        # Can't set bucket to nil due to belongs_to constraint, so test with bucket that has no images
+        market_item.update!(front_image: nil)
+        bucket.bucket_images.destroy_all
+        # Mock bucket to return nil for bucket_images
+        allow(market_item).to receive(:bucket).and_return(nil)
         expect(market_item.get_front_image_friendly_name).to eq('N/A')
       end
     end
