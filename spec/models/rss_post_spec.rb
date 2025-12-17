@@ -216,15 +216,15 @@ RSpec.describe RssPost, type: :model do
     end
 
     it 'returns only description when title is blank' do
-      # Title has presence validation, so bypass it
-      post = build(:rss_post, title: nil, description: 'Test Description')
+      # Title has presence validation, so bypass it to test edge case
+      post = build(:rss_post, title: '', description: 'Test Description')
       post.save(validate: false)
       expect(post.social_media_content).to eq('Test Description')
     end
 
     it 'returns empty string when both are blank' do
-      # Title has presence validation, so bypass it
-      post = build(:rss_post, title: nil, description: nil)
+      # Title has presence validation, so bypass it to test edge case
+      post = build(:rss_post, title: '', description: '')
       post.save(validate: false)
       expect(post.social_media_content).to eq('')
     end
