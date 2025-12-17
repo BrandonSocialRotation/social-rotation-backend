@@ -11,9 +11,11 @@ Rails.application.routes.draw do
       # Legacy GET routes removed - using POST routes in resources block below
       get 'plans/index'
       get 'plans/show'
-      # Analytics (Instagram / Meta)
+      # Analytics routes
       get 'analytics/instagram/summary', to: 'analytics#instagram_summary'
       get 'analytics/instagram/timeseries', to: 'analytics#instagram_timeseries'
+      get 'analytics/platform/:platform', to: 'analytics#platform_analytics'
+      get 'analytics/overall', to: 'analytics#overall'
       get 'sub_accounts/index'
       get 'sub_accounts/create'
       get 'sub_accounts/show'
@@ -62,6 +64,7 @@ Rails.application.routes.draw do
       delete 'user_info/delete_test_account', to: 'user_info#delete_test_account'
       get 'user_info/watermark_preview', to: 'user_info#watermark_preview'
       get 'user_info/standard_preview', to: 'user_info#standard_preview'
+      get 'user_info/facebook_pages', to: 'user_info#facebook_pages'
 
       # Bucket routes
       resources :buckets do

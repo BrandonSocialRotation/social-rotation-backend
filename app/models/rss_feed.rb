@@ -69,20 +69,23 @@ class RssFeed < ApplicationRecord
     update!(
       fetch_failure_count: 0,
       last_fetch_error: nil,
-      last_successful_fetch_at: Time.current
+      last_successful_fetch_at: Time.current,
+      last_fetched_at: Time.current
     )
   end
   
   def record_failure!(error_message)
     update!(
       fetch_failure_count: fetch_failure_count.to_i + 1,
-      last_fetch_error: error_message
+      last_fetch_error: error_message,
+      last_fetched_at: Time.current
     )
   end
   
   def health_status
     return 'broken' if fetch_failure_count.to_i >= 5
     return 'degraded' if fetch_failure_count.to_i >= 3
+    return 'unhealthy' if fetch_failure_count.to_i > 0
     return 'never_fetched' if last_fetched_at.nil?
     'healthy'
   end

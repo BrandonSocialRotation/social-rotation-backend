@@ -11,7 +11,7 @@ class Subscription < ApplicationRecord
   validates :stripe_customer_id, presence: true
   
   # Scopes
-  scope :active, -> { where(status: 'active') }
+  scope :active, -> { where(status: [STATUS_ACTIVE, STATUS_TRIALING]) }
   scope :trialing, -> { where(status: 'trialing') }
   scope :canceled, -> { where(status: 'canceled') }
   scope :past_due, -> { where(status: 'past_due') }

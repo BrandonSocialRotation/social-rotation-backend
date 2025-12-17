@@ -64,6 +64,22 @@ class Api::V1::UserInfoController < ApplicationController
     }
   end
 
+  # GET /api/v1/user_info/facebook_pages
+  def facebook_pages
+    unless current_user.fb_user_access_key.present?
+      return render json: { error: 'Facebook not connected' }, status: :unauthorized
+    end
+
+    begin
+      facebook_service = SocialMedia::FacebookService.new(current_user)
+      pages = facebook_service.get_pages
+      render json: { pages: pages }
+    rescue => e
+      Rails.logger.error "Facebook pages error: #{e.message}"
+      render json: { error: 'Failed to fetch Facebook pages', message: e.message }, status: :internal_server_error
+    end
+  end
+
   # GET /api/v1/user_info/debug
   # Debug endpoint to check what account info is stored
   def debug
