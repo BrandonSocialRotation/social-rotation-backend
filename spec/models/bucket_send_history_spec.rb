@@ -19,6 +19,34 @@ RSpec.describe BucketSendHistory, type: :model do
         expect(history.get_sent_to_name).to include('Facebook')
         expect(history.get_sent_to_name).to include('Twitter')
       end
+
+      it 'includes all selected platforms' do
+        history.update!(sent_to: BucketSchedule::BIT_FACEBOOK | BucketSchedule::BIT_TWITTER | BucketSchedule::BIT_LINKEDIN)
+        result = history.get_sent_to_name
+        expect(result).to include('Facebook')
+        expect(result).to include('Twitter')
+        expect(result).to include('LinkedIn')
+      end
+
+      it 'includes Instagram when selected' do
+        history.update!(sent_to: BucketSchedule::BIT_INSTAGRAM)
+        expect(history.get_sent_to_name).to include('Instagram')
+      end
+
+      it 'includes Google My Business when selected' do
+        history.update!(sent_to: BucketSchedule::BIT_GMB)
+        expect(history.get_sent_to_name).to include('Google My Business')
+      end
+
+      it 'returns "Unknown" when sent_to is 0' do
+        history.update!(sent_to: 0)
+        expect(history.get_sent_to_name).to eq('Unknown')
+      end
+
+      it 'returns "Unknown" when sent_to is nil' do
+        history.update_column(:sent_to, nil)
+        expect(history.get_sent_to_name).to eq('Unknown')
+      end
     end
   end
 end

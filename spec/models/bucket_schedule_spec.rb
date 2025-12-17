@@ -65,6 +65,37 @@ RSpec.describe BucketSchedule, type: :model do
       it 'returns true for schedules without history' do
         expect(bucket_schedule.can_send?).to be true
       end
+
+      it 'returns true for rotation schedules regardless of history' do
+        bucket_schedule.update!(schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION)
+        create(:bucket_send_history, bucket_schedule: bucket_schedule, sent_at: 1.minute.ago)
+        expect(bucket_schedule.can_send?).to be true
+      end
+
+      it 'returns true for once schedules without history' do
+        bucket_schedule.update!(schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE)
+        expect(bucket_schedule.can_send?).to be true
+      end
+
+      context 'for annually schedules' do
+        before do
+          bucket_schedule.update!(schedule_type: BucketSchedule::SCHEDULE_TYPE_ANNUALLY)
+        end
+
+        it 'returns true when no history exists' do
+          expect(bucket_schedule.can_send?).to be true
+        end
+
+        it 'returns true when last sent was over a year ago' do
+          create(:bucket_send_history, bucket_schedule: bucket_schedule, sent_at: 1.year.ago - 1.day)
+          expect(bucket_schedule.can_send?).to be true
+        end
+
+        it 'returns false when last sent was less than a year ago' do
+          create(:bucket_send_history, bucket_schedule: bucket_schedule, sent_at: 6.months.ago)
+          expect(bucket_schedule.can_send?).to be false
+        end
+      end
     end
 
     describe '#is_network_selected?' do
@@ -243,6 +274,131 @@ RSpec.describe BucketSchedule, type: :model do
         expect(hash[5]).to eq('Friday')
         expect(hash[6]).to eq('Saturday')
         expect(hash[7]).to eq('Sunday')
+      end
+    end
+
+    describe '#should_display_twitter_warning?' do
+      context 'for once/annually schedules' do
+        before do
+          bucket_schedule.update!(
+            schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE,
+            description: 'A' * 300,
+            twitter_description: nil
+          )
+        end
+
+        it 'returns true when description is too long and no twitter_description' do
+          bucket_image.update!(twitter_description: nil)
+          expect(bucket_schedule.should_display_twitter_warning?).to be true
+        end
+
+        it 'returns false when twitter_description is present' do
+          bucket_schedule.update!(twitter_description: 'Short Twitter text')
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+
+        it 'returns false when bucket_image has twitter_description' do
+          bucket_image.update!(twitter_description: 'Image Twitter text')
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+
+        it 'returns false when Twitter is not selected' do
+          bucket_schedule.update!(post_to: BucketSchedule::BIT_FACEBOOK)
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+      end
+
+      context 'for rotation schedules' do
+        before do
+          bucket_schedule.update!(
+            schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION,
+            post_to: BucketSchedule::BIT_TWITTER
+          )
+        end
+
+        it 'returns true when any bucket image has long description without twitter_description' do
+          bucket_image.update!(description: 'A' * 300, twitter_description: nil)
+          expect(bucket_schedule.should_display_twitter_warning?).to be true
+        end
+
+        it 'returns false when all images have twitter_description' do
+          bucket_image.update!(description: 'A' * 300, twitter_description: 'Twitter text')
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+
+        it 'returns false when Twitter is not selected' do
+          bucket_schedule.update!(post_to: BucketSchedule::BIT_FACEBOOK)
+          bucket_image.update!(description: 'A' * 300, twitter_description: nil)
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+      end
+    end
+
+    describe '#get_next_bucket_image_due' do
+      context 'with once/annually schedule' do
+        it 'returns bucket_image when present' do
+          once_schedule = create(:bucket_schedule, 
+            bucket: bucket, 
+            bucket_image: bucket_image, 
+            schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE
+          )
+          expect(once_schedule.get_next_bucket_image_due).to eq(bucket_image)
+        end
+
+        it 'falls back to rotation logic when bucket_image is nil' do
+          rotation_image = create(:bucket_image, bucket: bucket, friendly_name: 'A')
+          once_schedule = create(:bucket_schedule,
+            bucket: bucket,
+            bucket_image: nil,
+            schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE
+          )
+          result = once_schedule.get_next_bucket_image_due
+          expect(result).to eq(rotation_image)
+        end
+      end
+
+      context 'with rotation schedule' do
+        let!(:rotation_schedule) { create(:bucket_schedule, bucket: bucket, schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION) }
+        let!(:image1) { create(:bucket_image, bucket: bucket, friendly_name: 'A') }
+        let!(:image2) { create(:bucket_image, bucket: bucket, friendly_name: 'B') }
+
+        it 'returns next image from rotation' do
+          result = rotation_schedule.get_next_bucket_image_due
+          expect(result).to eq(image1)
+        end
+
+        it 'falls back to first image if rotation returns nil' do
+          bucket.bucket_images.destroy_all
+          image = create(:bucket_image, bucket: bucket, friendly_name: 'Fallback')
+          result = rotation_schedule.get_next_bucket_image_due
+          expect(result).to eq(image)
+        end
+      end
+    end
+
+    describe '#get_next_schedule' do
+      it 'returns "Already sent" for once schedule that has been sent' do
+        bucket_schedule.update!(
+          schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE,
+          times_sent: 1,
+          schedule: '0 9 * * *'
+        )
+        expect(bucket_schedule.get_next_schedule).to eq('Already sent')
+      end
+
+      it 'returns "Next run calculated" for valid cron schedule' do
+        bucket_schedule.update!(schedule: '0 9 * * *')
+        expect(bucket_schedule.get_next_schedule).to eq('Next run calculated')
+      end
+
+      it 'returns "Invalid Schedule" for invalid cron format' do
+        bucket_schedule.update_column(:schedule, 'invalid')
+        expect(bucket_schedule.get_next_schedule).to eq('Invalid Schedule')
+      end
+
+      it 'handles errors gracefully' do
+        allow(bucket_schedule).to receive(:valid_cron_format?).and_raise(StandardError.new('Error'))
+        expect(bucket_schedule.get_next_schedule).to eq('Invalid Schedule')
       end
     end
   end

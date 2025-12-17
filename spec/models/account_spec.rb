@@ -137,5 +137,134 @@ RSpec.describe Account, type: :model do
         expect(account.can_add_bucket?(user)).to be true
       end
     end
+
+    context 'when account has plan with limits' do
+      let(:plan) { create(:plan, max_buckets: 5) }
+      
+      before do
+        account.update!(plan: plan)
+      end
+
+      it 'uses plan max_buckets limit' do
+        4.times { create(:bucket, user: user) }
+        expect(account.can_add_bucket?(user)).to be true
+        
+        create(:bucket, user: user)
+        expect(account.can_add_bucket?(user)).to be false
+      end
+    end
+
+    context 'when account is super admin' do
+      before do
+        account.update!(id: 0)
+      end
+
+      it 'always returns true' do
+        100.times { create(:bucket, user: user) }
+        expect(account.can_add_bucket?(user)).to be true
+      end
+    end
+  end
+
+  describe '#has_active_subscription?' do
+    let(:account) { create(:account) }
+    let(:plan) { create(:plan) }
+
+    it 'returns false when no subscription exists' do
+      expect(account.has_active_subscription?).to be false
+    end
+
+    it 'returns true when subscription is active' do
+      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_ACTIVE)
+      account.update!(subscription: subscription)
+      expect(account.has_active_subscription?).to be true
+    end
+
+    it 'returns true when subscription is trialing' do
+      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_TRIALING)
+      account.update!(subscription: subscription)
+      expect(account.has_active_subscription?).to be true
+    end
+
+    it 'returns false when subscription is canceled' do
+      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_CANCELED)
+      account.update!(subscription: subscription)
+      expect(account.has_active_subscription?).to be false
+    end
+
+    it 'handles subscription errors gracefully' do
+      subscription = create(:subscription, account: account, plan: plan)
+      account.update!(subscription: subscription)
+      allow(subscription).to receive(:active?).and_raise(StandardError.new('Error'))
+      expect(account.has_active_subscription?).to be false
+    end
+  end
+
+  describe '#current_subscription' do
+    let(:account) { create(:account) }
+    let(:plan) { create(:plan) }
+
+    it 'returns nil when no subscription exists' do
+      expect(account.current_subscription).to be_nil
+    end
+
+    it 'returns subscription when active' do
+      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_ACTIVE)
+      account.update!(subscription: subscription)
+      expect(account.current_subscription).to eq(subscription)
+    end
+
+    it 'returns nil when subscription is not active' do
+      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_CANCELED)
+      account.update!(subscription: subscription)
+      expect(account.current_subscription).to be_nil
+    end
+  end
+
+  describe '#super_admin_account?' do
+    it 'returns true when id is 0' do
+      account = create(:account)
+      account.update_column(:id, 0)
+      expect(account.super_admin_account?).to be true
+    end
+
+    it 'returns false when id is not 0' do
+      account = create(:account)
+      expect(account.super_admin_account?).to be false
+    end
+  end
+
+  describe '#can_add_user? with plan limits' do
+    let(:account) { create(:account) }
+    let(:plan) { create(:plan, plan_type: 'agency', max_users: 10) }
+
+    before do
+      account.update!(plan: plan)
+    end
+
+    it 'uses plan max_users when available' do
+      9.times { create(:user, account: account, status: 1) }
+      expect(account.can_add_user?).to be true
+      
+      create(:user, account: account, status: 1)
+      expect(account.can_add_user?).to be false
+    end
+
+    it 'falls back to account_feature when plan has no max_users' do
+      plan.update_column(:max_users, nil)
+      account.account_feature.update!(max_users: 5)
+      
+      4.times { create(:user, account: account, status: 1) }
+      expect(account.can_add_user?).to be true
+      
+      create(:user, account: account, status: 1)
+      expect(account.can_add_user?).to be false
+    end
+
+    it 'allows super admin account to add unlimited users' do
+      account.update_column(:id, 0)
+      100.times { create(:user, account: account, status: 1) }
+      expect(account.can_add_user?).to be true
+    end
   end
 end

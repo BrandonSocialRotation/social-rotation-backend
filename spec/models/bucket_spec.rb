@@ -47,6 +47,29 @@ RSpec.describe Bucket, type: :model do
         create(:bucket_schedule, bucket: bucket, schedule: '0 0 0 0 0')
         expect(bucket.is_due(Time.current)).to be_nil
       end
+
+      it 'returns nil when user has no timezone' do
+        user.update!(timezone: nil)
+        create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
+        expect(bucket.is_due(Time.current)).to be false
+      end
+
+      it 'returns schedule when valid cron format exists' do
+        schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
+        result = bucket.is_due(Time.current)
+        expect(result).to eq(schedule)
+      end
+
+      it 'skips schedules with invalid cron format' do
+        create(:bucket_schedule, bucket: bucket, schedule: 'invalid cron')
+        expect(bucket.is_due(Time.current)).to be_nil
+      end
+
+      it 'handles cron parsing errors gracefully' do
+        schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
+        allow(schedule).to receive(:valid_cron_format?).and_raise(StandardError.new('Error'))
+        expect(bucket.is_due(Time.current)).to be_nil
+      end
     end
 
     describe '#get_next_rotation_image' do
@@ -115,6 +138,30 @@ RSpec.describe Bucket, type: :model do
         it 'handles skip_offset parameter' do
           result = bucket.get_next_rotation_image(0, 1)
           expect(result).to eq(bucket_image3)
+        end
+
+        it 'handles case when last_sent_image is not found by id' do
+          # Create history with friendly_name but image doesn't exist
+          create(:bucket_send_history,
+            bucket_schedule: rotation_schedule,
+            bucket_image: nil,
+            friendly_name: 'Z',
+            sent_at: 1.hour.ago
+          )
+          result = bucket.get_next_rotation_image
+          expect(result).to eq(bucket_image1)
+        end
+
+        it 'handles case when no image found with friendly_name > last sent' do
+          # Create history for last image in alphabetical order
+          create(:bucket_send_history,
+            bucket_schedule: rotation_schedule,
+            bucket_image: nil,
+            friendly_name: 'Z',
+            sent_at: 1.hour.ago
+          )
+          result = bucket.get_next_rotation_image
+          expect(result).to eq(bucket_image1)
         end
       end
 

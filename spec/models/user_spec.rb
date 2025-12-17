@@ -286,11 +286,56 @@ RSpec.describe User, type: :model do
           expect(user.get_absolute_watermark_logo_path).to eq(expected_path)
         end
 
-        it 'returns empty string when no watermark' do
-          user.update!(watermark_logo: nil)
-          expect(user.get_absolute_watermark_logo_path).to eq('')
-        end
+      it 'returns empty string when no watermark' do
+        user.update!(watermark_logo: nil)
+        expect(user.get_absolute_watermark_logo_path).to eq('')
+      end
+    end
+
+    describe '#can_manage_rss_feeds?' do
+      it 'returns true for super admin' do
+        user = create(:user, account_id: 0)
+        expect(user.can_manage_rss_feeds?).to be true
+      end
+
+      it 'returns true for reseller' do
+        account = create(:account, is_reseller: true)
+        user = create(:user, account: account, is_account_admin: true)
+        expect(user.can_manage_rss_feeds?).to be true
+      end
+
+      it 'returns false for regular user' do
+        account = create(:account, is_reseller: false)
+        user = create(:user, account: account, is_account_admin: false)
+        expect(user.can_manage_rss_feeds?).to be false
+      end
+    end
+
+    describe '#can_access_rss_feeds?' do
+      it 'returns true for super admin' do
+        user = create(:user, account_id: 0)
+        expect(user.can_access_rss_feeds?).to be true
+      end
+
+      it 'returns true when account feature allows RSS' do
+        account = create(:account)
+        account.account_feature.update!(allow_rss: true)
+        user = create(:user, account: account)
+        expect(user.can_access_rss_feeds?).to be true
+      end
+
+      it 'returns false when account feature disallows RSS' do
+        account = create(:account)
+        account.account_feature.update!(allow_rss: false)
+        user = create(:user, account: account)
+        expect(user.can_access_rss_feeds?).to be false
+      end
+
+      it 'returns true when account_id is nil' do
+        user = create(:user, account_id: nil)
+        expect(user.can_access_rss_feeds?).to be true
       end
     end
   end
+end
 end
