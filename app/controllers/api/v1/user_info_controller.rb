@@ -72,7 +72,7 @@ class Api::V1::UserInfoController < ApplicationController
 
     begin
       facebook_service = SocialMedia::FacebookService.new(current_user)
-      pages = facebook_service.get_pages
+      pages = facebook_service.fetch_pages
       render json: { pages: pages }
     rescue => e
       Rails.logger.error "Facebook pages error: #{e.message}"
