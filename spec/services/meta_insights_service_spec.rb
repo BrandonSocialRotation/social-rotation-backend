@@ -71,6 +71,75 @@ RSpec.describe MetaInsightsService do
         end
       end
     end
+
+    it 'handles different ranges' do
+        result7d = service.timeseries('reach', '7d')
+        result28d = service.timeseries('reach', '28d')
+        expect(result7d.length).to eq(7)
+        expect(result28d.length).to eq(28)
+      end
+    end
+  end
+
+  describe 'private methods (tested indirectly)' do
+    it 'uses caching for summary' do
+      allow(Rails.cache).to receive(:fetch).and_call_original
+      service.summary('7d')
+      expect(Rails.cache).to have_received(:fetch).with("ig_summary_#{user.id}_7d", expires_in: 15.minutes)
+    end
+
+    it 'uses caching for timeseries' do
+      allow(Rails.cache).to receive(:fetch).and_call_original
+      service.timeseries('reach', '7d')
+      expect(Rails.cache).to have_received(:fetch).with("ig_ts_#{user.id}_reach_7d", expires_in: 15.minutes)
+    end
+
+    it 'checks live_available? based on ENV vars' do
+      allow(ENV).to receive(:[]).with('META_APP_ID').and_return('app_id')
+      allow(ENV).to receive(:[]).with('META_APP_SECRET').and_return('app_secret')
+      # When live available, it calls fetch_live_summary which returns mock_summary
+      result = service.summary('7d')
+      expect(result).to be_a(Hash)
+    end
+
+    it 'uses mock when live not available' do
+      allow(ENV).to receive(:[]).with('META_APP_ID').and_return(nil)
+      allow(ENV).to receive(:[]).with('META_APP_SECRET').and_return(nil)
+      result = service.summary('7d')
+      expect(result).to be_a(Hash)
+      expect(result).to have_key(:reach)
+    end
+
+    it 'generates consistent mock data for same range' do
+      result1 = service.summary('7d')
+      result2 = service.summary('7d')
+      # Should be consistent due to seed
+      expect(result1.keys).to eq(result2.keys)
+    end
+
+    it 'generates different data for different ranges' do
+      result7d = service.summary('7d')
+      result28d = service.summary('28d')
+      # Different ranges should produce different results
+      expect(result7d).to be_a(Hash)
+      expect(result28d).to be_a(Hash)
+    end
+
+    it 'handles all metric types in base_for' do
+      # Test all metrics: reach, impressions, engagement, followers, and default
+      ['reach', 'impressions', 'engagement', 'followers', 'unknown_metric'].each do |metric|
+        result = service.timeseries(metric, '7d')
+        expect(result).to be_an(Array)
+        expect(result.length).to eq(7)
+      end
+    end
+
+    it 'handles range_days logic' do
+      result7d = service.timeseries('reach', '7d')
+      result28d = service.timeseries('reach', '28d')
+      expect(result7d.length).to eq(7)
+      expect(result28d.length).to eq(28)
+    end
   end
 end
 

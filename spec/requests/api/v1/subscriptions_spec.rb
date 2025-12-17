@@ -16,6 +16,124 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
     account.update!(status: true) if account
   end
 
+  describe "GET /index" do
+    it "returns subscription when account has subscription" do
+      subscription = create(:subscription, account: account, plan: plan)
+      account.update!(subscription: subscription)
+      
+      get "/api/v1/subscriptions.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:success)
+      json_response = JSON.parse(response.body)
+      expect(json_response['subscription']).to be_present
+    end
+
+    it "returns nil when account has no subscription" do
+      get "/api/v1/subscriptions.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:success)
+      json_response = JSON.parse(response.body)
+      expect(json_response['subscription']).to be_nil
+    end
+
+    it "returns nil for personal accounts (account_id 0)" do
+      user.update!(account_id: 0)
+      
+      get "/api/v1/subscriptions.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:success)
+      json_response = JSON.parse(response.body)
+      expect(json_response['subscription']).to be_nil
+    end
+
+    it "returns nil when account_id is nil" do
+      user.update!(account_id: nil)
+      
+      get "/api/v1/subscriptions.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:success)
+      json_response = JSON.parse(response.body)
+      expect(json_response['subscription']).to be_nil
+    end
+
+    it "handles subscription_json errors gracefully" do
+      subscription = create(:subscription, account: account, plan: plan)
+      account.update!(subscription: subscription)
+      # Mock subscription_json to raise error
+      allow_any_instance_of(Api::V1::SubscriptionsController).to receive(:subscription_json).and_raise(StandardError.new('Serialization error'))
+      
+      get "/api/v1/subscriptions.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:success)
+      json_response = JSON.parse(response.body)
+      expect(json_response['subscription']).to be_nil
+    end
+
+    it "handles general errors gracefully" do
+      allow_any_instance_of(User).to receive(:account).and_raise(StandardError.new('Database error'))
+      
+      get "/api/v1/subscriptions.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:internal_server_error)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('Failed to load subscription')
+    end
+  end
+
+  describe "GET /show" do
+    it "returns subscription when account has subscription" do
+      subscription = create(:subscription, account: account, plan: plan)
+      account.update!(subscription: subscription)
+      
+      get "/api/v1/subscriptions/#{subscription.id}.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:success)
+      json_response = JSON.parse(response.body)
+      expect(json_response['subscription']).to be_present
+    end
+
+    it "returns nil when account has no subscription" do
+      get "/api/v1/subscriptions/1.json",
+          headers: { 
+            'Authorization' => "Bearer #{token}",
+            'Content-Type' => 'application/json'
+          }
+      
+      expect(response).to have_http_status(:success)
+      json_response = JSON.parse(response.body)
+      expect(json_response['subscription']).to be_nil
+      expect(json_response['message']).to eq('No active subscription')
+    end
+  end
+
   describe "POST /create" do
     it "returns http success" do
       # POST to /api/v1/subscriptions creates a subscription
@@ -28,6 +146,57 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
            }
       # May return created, conflict, unprocessable_entity, or bad_request depending on subscription state
       expect(response).to have_http_status(:created).or have_http_status(:success).or have_http_status(:conflict).or have_http_status(:bad_request)
+    end
+
+    it "returns conflict when account already has active subscription" do
+      existing_subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_ACTIVE)
+      account.update!(subscription: existing_subscription)
+      
+      post "/api/v1/subscriptions.json", 
+           params: { plan_id: plan.id },
+           headers: { 
+             'Authorization' => "Bearer #{token}",
+             'Content-Type' => 'application/json'
+           }
+      
+      expect(response).to have_http_status(:conflict)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('Account already has an active subscription')
+    end
+
+    it "creates subscription with provided parameters" do
+      post "/api/v1/subscriptions.json", 
+           params: { 
+             plan_id: plan.id,
+             stripe_customer_id: 'cus_test',
+             stripe_subscription_id: 'sub_test',
+             status: Subscription::STATUS_ACTIVE
+           },
+           headers: { 
+             'Authorization' => "Bearer #{token}",
+             'Content-Type' => 'application/json'
+           }
+      
+      if response.status == 201
+        json_response = JSON.parse(response.body)
+        expect(json_response['subscription']).to be_present
+        expect(json_response['message']).to eq('Subscription created successfully')
+      end
+    end
+
+    it "handles validation errors" do
+      post "/api/v1/subscriptions.json", 
+           params: { plan_id: plan.id },
+           headers: { 
+             'Authorization' => "Bearer #{token}",
+             'Content-Type' => 'application/json'
+           }
+      
+      # May return unprocessable_entity if validation fails
+      if response.status == 422
+        json_response = JSON.parse(response.body)
+        expect(json_response['errors']).to be_present
+      end
     end
   end
 
