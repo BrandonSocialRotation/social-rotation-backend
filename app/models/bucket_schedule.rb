@@ -205,6 +205,13 @@ class BucketSchedule < ApplicationRecord
     }
   end
 
+  def valid_cron_format?
+    return false unless schedule.present?
+    
+    parts = schedule.split(' ')
+    parts.length == 5
+  end
+
   private
 
   def valid_cron_format
@@ -215,12 +222,5 @@ class BucketSchedule < ApplicationRecord
     if parts.length != 5
       errors.add(:schedule, "must have exactly 5 space-separated parts (minute hour day month weekday)")
     end
-  end
-
-  def valid_cron_format?
-    return false unless schedule.present?
-    
-    parts = schedule.split(' ')
-    parts.length == 5
   end
 end

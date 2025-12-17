@@ -59,8 +59,10 @@ RSpec.describe Bucket, type: :model do
         # Ensure user has timezone for is_due to work
         user.update!(timezone: 'America/New_York')
         schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
-        # Reload bucket to ensure schedules association is loaded
+        # Reload bucket to ensure fresh association
         bucket.reload
+        # Verify schedule is in the association
+        expect(bucket.bucket_schedules).to include(schedule)
         result = bucket.is_due(Time.current)
         # The method returns the first schedule with valid cron format (placeholder logic)
         # Note: This is placeholder logic - actual cron parsing would check if it's due
