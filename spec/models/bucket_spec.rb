@@ -57,18 +57,23 @@ RSpec.describe Bucket, type: :model do
       it 'returns schedule when valid cron format exists' do
         schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
         result = bucket.is_due(Time.current)
+        # The method returns the first schedule with valid cron format (placeholder logic)
         expect(result).to eq(schedule)
       end
 
       it 'skips schedules with invalid cron format' do
-        create(:bucket_schedule, bucket: bucket, schedule: 'invalid cron')
+        # Create with valid format first, then update to invalid to bypass validation
+        schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
+        schedule.update_column(:schedule, 'invalid cron')
         expect(bucket.is_due(Time.current)).to be_nil
       end
 
       it 'handles cron parsing errors gracefully' do
         schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
         allow(schedule).to receive(:valid_cron_format?).and_raise(StandardError.new('Error'))
-        expect(bucket.is_due(Time.current)).to be_nil
+        # Should return nil when error occurs
+        result = bucket.is_due(Time.current)
+        expect(result).to be_nil
       end
     end
 
@@ -141,27 +146,47 @@ RSpec.describe Bucket, type: :model do
         end
 
         it 'handles case when last_sent_image is not found by id' do
-          # Create history with friendly_name but image doesn't exist
-          create(:bucket_send_history,
+          # Create history with a bucket_image, then delete it to simulate not found
+          history = create(:bucket_send_history,
             bucket_schedule: rotation_schedule,
-            bucket_image: nil,
-            friendly_name: 'Z',
+            bucket_image: bucket_image2,
+            friendly_name: 'B',
             sent_at: 1.hour.ago
           )
+          # Delete the bucket_image to simulate it not being found by id
+          bucket_image2.destroy
+          # Should find next image by friendly_name
+          result = bucket.get_next_rotation_image
+          expect(result).to eq(bucket_image3)
+        end
+
+        it 'handles case when no image found with friendly_name > last sent' do
+          # Create history with last image, then delete it and set friendly_name after all
+          history = create(:bucket_send_history,
+            bucket_schedule: rotation_schedule,
+            bucket_image: bucket_image3,
+            friendly_name: 'C',
+            sent_at: 1.hour.ago
+          )
+          # Delete the bucket_image to simulate it not being found by id
+          bucket_image3.destroy
+          # Update history friendly_name to be after all existing images
+          history.update_column(:friendly_name, 'Z')
+          # Should wrap to first image since no image found with friendly_name > 'Z'
           result = bucket.get_next_rotation_image
           expect(result).to eq(bucket_image1)
         end
 
-        it 'handles case when no image found with friendly_name > last sent' do
-          # Create history for last image in alphabetical order
+        it 'handles case when last_sent_image is found by id' do
+          # Create history with actual bucket_image
           create(:bucket_send_history,
             bucket_schedule: rotation_schedule,
-            bucket_image: nil,
-            friendly_name: 'Z',
+            bucket_image: bucket_image2,
+            friendly_name: 'B',
             sent_at: 1.hour.ago
           )
           result = bucket.get_next_rotation_image
-          expect(result).to eq(bucket_image1)
+          expect(result).to eq(bucket_image3)
         end
       end
 

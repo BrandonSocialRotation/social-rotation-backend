@@ -289,5 +289,74 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
       expect(json_response['buckets'].length).to eq(1)
     end
   end
+
+  describe 'GET #single_image' do
+    it 'returns a specific bucket image' do
+      get :single_image, params: { id: bucket.id, image_id: bucket_image.id }
+
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['bucket_image']['id']).to eq(bucket_image.id)
+      expect(json_response['bucket_image']['friendly_name']).to eq(bucket_image.friendly_name)
+    end
+
+    it 'returns 404 for non-existent image' do
+      get :single_image, params: { id: bucket.id, image_id: 99999 }
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe 'GET #videos' do
+    let(:video) { create(:video) }
+    let!(:bucket_video) { create(:bucket_video, bucket: bucket, video: video, friendly_name: 'Test Video') }
+
+    it 'returns all bucket videos ordered by friendly name' do
+      get :videos, params: { id: bucket.id }
+
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['bucket_videos'].length).to eq(1)
+      expect(json_response['bucket_videos'].first['friendly_name']).to eq('Test Video')
+    end
+  end
+
+  describe 'POST #add_image' do
+    let(:existing_image) { create(:image, friendly_name: 'Existing Image') }
+
+    it 'adds an existing image to the bucket' do
+      expect {
+        post :add_image, params: { id: bucket.id, image_id: existing_image.id, friendly_name: 'New Name' }
+      }.to change(BucketImage, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      json_response = JSON.parse(response.body)
+      expect(json_response['bucket_image']['friendly_name']).to eq('New Name')
+    end
+
+    it 'uses image friendly_name when friendly_name not provided' do
+      post :add_image, params: { id: bucket.id, image_id: existing_image.id }
+
+      expect(response).to have_http_status(:created)
+      json_response = JSON.parse(response.body)
+      expect(json_response['bucket_image']['friendly_name']).to eq('Existing Image')
+    end
+
+    it 'returns error when image_id is missing' do
+      post :add_image, params: { id: bucket.id }
+
+      expect(response).to have_http_status(:bad_request)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('image_id is required')
+    end
+
+    it 'returns 404 when image does not exist' do
+      post :add_image, params: { id: bucket.id, image_id: 99999 }
+
+      expect(response).to have_http_status(:not_found)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('Image not found')
+    end
+  end
 end
 
