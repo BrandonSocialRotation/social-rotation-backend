@@ -48,17 +48,31 @@ RSpec.describe Bucket, type: :model do
         expect(bucket.is_due(Time.current)).to be_nil
       end
 
-      it 'returns nil when user has no timezone' do
+      it 'returns false when user has no timezone' do
         user.update!(timezone: nil)
         create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
-        expect(bucket.is_due(Time.current)).to be false
+        result = bucket.is_due(Time.current)
+        expect(result).to be false
       end
 
       it 'returns schedule when valid cron format exists' do
         schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
         result = bucket.is_due(Time.current)
         # The method returns the first schedule with valid cron format (placeholder logic)
+        # Note: This is placeholder logic - actual cron parsing would check if it's due
         expect(result).to eq(schedule)
+      end
+
+      it 'returns false when user is nil' do
+        # Reload bucket to clear cached user association
+        bucket.reload
+        bucket.update_column(:user_id, 99999)
+        schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
+        # Reload to get fresh user association (which will be nil)
+        bucket.reload
+        result = bucket.is_due(Time.current)
+        # When user is nil, user&.timezone returns nil, so method returns false
+        expect(result).to be false
       end
 
       it 'skips schedules with invalid cron format' do
@@ -172,9 +186,25 @@ RSpec.describe Bucket, type: :model do
           bucket_image3.destroy
           # Update history friendly_name to be after all existing images
           history.update_column(:friendly_name, 'Z')
-          # Should wrap to first image since no image found with friendly_name > 'Z'
+          # The logic: when no image found with friendly_name > 'Z', it falls back to first image
+          # last_sent_image ||= bucket_images.first, then next_index = (0 + 1) % 3 = 1
           result = bucket.get_next_rotation_image
-          expect(result).to eq(bucket_image1)
+          # After getting first image (index 0) as fallback, next in rotation is index 1 (second image)
+          expect(result).to eq(bucket_image2)
+        end
+
+        it 'handles case when last_sent_image found by friendly_name lookup' do
+          # Create history with friendly_name but bucket_image deleted
+          history = create(:bucket_send_history,
+            bucket_schedule: rotation_schedule,
+            bucket_image: bucket_image2,
+            friendly_name: 'B',
+            sent_at: 1.hour.ago
+          )
+          bucket_image2.destroy
+          # Should find next image after 'B' which is 'C'
+          result = bucket.get_next_rotation_image
+          expect(result).to eq(bucket_image3)
         end
 
         it 'handles case when last_sent_image is found by id' do

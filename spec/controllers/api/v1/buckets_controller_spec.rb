@@ -308,8 +308,13 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
   end
 
   describe 'GET #videos' do
-    let(:video) { create(:video) }
+    let(:video) { create(:video, friendly_name: 'Test Video') }
     let!(:bucket_video) { create(:bucket_video, bucket: bucket, video: video, friendly_name: 'Test Video') }
+
+    before do
+      # Mock video get_source_url to avoid DigitalOcean URL issues
+      allow_any_instance_of(Video).to receive(:get_source_url).and_return('https://example.com/video.mp4')
+    end
 
     it 'returns all bucket videos ordered by friendly name' do
       get :videos, params: { id: bucket.id }

@@ -187,11 +187,60 @@ RSpec.describe Api::V1::SchedulerController, type: :controller do
     end
 
     it 'returns error when no images available' do
-      bucket_image.destroy
+      bucket.bucket_images.destroy_all
       post :post_now, params: { id: bucket_schedule.id }
-      expect(response).to have_http_status(:unprocessable_content)
+      expect(response).to have_http_status(:unprocessable_entity)
       json_response = JSON.parse(response.body)
       expect(json_response['error']).to eq('No images available in bucket')
+    end
+
+    it 'creates send history record' do
+      expect {
+        post :post_now, params: { id: bucket_schedule.id }
+      }.to change(BucketSendHistory, :count).by(1)
+
+      history = BucketSendHistory.last
+      expect(history.bucket_schedule).to eq(bucket_schedule)
+      expect(history.bucket_image).to eq(bucket_image)
+    end
+
+    it 'handles posting errors gracefully' do
+      allow(poster_double).to receive(:post_to_all).and_raise(StandardError.new('API Error'))
+      
+      post :post_now, params: { id: bucket_schedule.id }
+      
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('Failed to post to social media')
+    end
+
+    it 'uses bucket_image description when available' do
+      bucket_image.update!(description: 'Image description', twitter_description: 'Image Twitter')
+      post :post_now, params: { id: bucket_schedule.id }
+      
+      expect(poster_double).to have_received(:post_to_all)
+      expect(SocialMediaPosterService).to have_received(:new).with(
+        user,
+        bucket_image,
+        anything,
+        'Image description',
+        'Image Twitter'
+      )
+    end
+
+    it 'falls back to schedule description when bucket_image description is empty' do
+      bucket_image.update!(description: '', twitter_description: '')
+      bucket_schedule.update!(description: 'Schedule description', twitter_description: 'Schedule Twitter')
+      
+      post :post_now, params: { id: bucket_schedule.id }
+      
+      expect(SocialMediaPosterService).to have_received(:new).with(
+        user,
+        bucket_image,
+        anything,
+        'Schedule description',
+        'Schedule Twitter'
+      )
     end
   end
 
