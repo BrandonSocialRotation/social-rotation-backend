@@ -104,5 +104,47 @@ RSpec.describe MarketItem, type: :model do
         expect(market_item.has_hidden_user_market_item?(user.id)).to be true
       end
     end
+
+    describe 'scope :all_reseller' do
+      it 'returns only visible market items' do
+        visible_item = create(:market_item, visible: true)
+        hidden_item = create(:market_item, visible: false)
+        
+        expect(MarketItem.all_reseller).to include(visible_item)
+        expect(MarketItem.all_reseller).not_to include(hidden_item)
+      end
+    end
+
+    describe '#get_front_image_url edge cases' do
+      it 'handles bucket with no images gracefully' do
+        market_item.update!(front_image: nil)
+        bucket.bucket_images.destroy_all
+        
+        expect(market_item.get_front_image_url).to eq('/img/no_image_available.gif')
+      end
+
+      it 'handles bucket_image without image association' do
+        market_item.update!(front_image: nil)
+        bucket_image = create(:bucket_image, bucket: bucket, friendly_name: 'Test')
+        bucket_image.update_column(:image_id, 99999) # Non-existent image
+        
+        expect(market_item.get_front_image_url).to eq('/img/no_image_available.gif')
+      end
+    end
+
+    describe '#get_front_image_friendly_name edge cases' do
+      it 'handles bucket_image without image association' do
+        market_item.update!(front_image: nil)
+        bucket_image = create(:bucket_image, bucket: bucket, friendly_name: 'Test')
+        bucket_image.update_column(:image_id, 99999) # Non-existent image
+        
+        expect(market_item.get_front_image_friendly_name).to eq('N/A')
+      end
+
+      it 'handles nil bucket gracefully' do
+        market_item.update!(front_image: nil, bucket: nil)
+        expect(market_item.get_front_image_friendly_name).to eq('N/A')
+      end
+    end
   end
 end

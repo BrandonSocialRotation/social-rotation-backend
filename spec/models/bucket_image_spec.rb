@@ -88,6 +88,25 @@ RSpec.describe BucketImage, type: :model do
         bucket_image.update!(force_send_date: now.change(sec: 30))
         expect(bucket_image.forced_is_due?).to be true
       end
+
+      it 'returns false when bucket has no user' do
+        bucket.update_column(:user_id, 99999) # Non-existent user
+        bucket_image.update!(force_send_date: Time.current)
+        expect(bucket_image.forced_is_due?).to be false
+      end
+    end
+
+    describe '#should_display_twitter_warning? edge cases' do
+      it 'returns false when description is empty string' do
+        bucket_image.update!(description: '', twitter_description: nil)
+        expect(bucket_image.should_display_twitter_warning?).to be false
+      end
+
+      it 'handles description exactly one character over limit' do
+        long_desc = 'A' * (BucketSchedule::TWITTER_CHARACTER_LIMIT + 1)
+        bucket_image.update!(description: long_desc, twitter_description: nil)
+        expect(bucket_image.should_display_twitter_warning?).to be true
+      end
     end
   end
 end
