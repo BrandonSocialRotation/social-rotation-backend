@@ -32,11 +32,15 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
   end
 
   describe "POST /checkout_session" do
+    let(:mock_customer) { double(id: 'cus_test') }
+    let(:mock_session) { double(id: 'cs_test', url: 'https://checkout.stripe.com') }
+
+    before do
+      allow(Stripe::Customer).to receive(:create).and_return(mock_customer)
+      allow(Stripe::Checkout::Session).to receive(:create).and_return(mock_session)
+    end
+
     it "returns http success" do
-      # Mock Stripe
-      allow(Stripe::Customer).to receive(:create).and_return(double(id: 'cus_test'))
-      allow(Stripe::Checkout::Session).to receive(:create).and_return(double(id: 'cs_test', url: 'https://checkout.stripe.com'))
-      
       post "/api/v1/subscriptions/checkout_session.json",
            params: { plan_id: plan.id },
            headers: { 
@@ -45,6 +49,41 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
            }
       # May return success or bad_request depending on validation
       expect(response).to have_http_status(:success).or have_http_status(:bad_request)
+    end
+
+    it "creates Stripe checkout session without require_cvc parameter" do
+      expect(Stripe::Checkout::Session).to receive(:create) do |params|
+        # Verify that payment_method_options.card.require_cvc is NOT present
+        expect(params[:payment_method_options]).to be_nil
+        mock_session
+      end
+
+      post "/api/v1/subscriptions/checkout_session.json",
+           params: { plan_id: plan.id },
+           headers: { 
+             'Authorization' => "Bearer #{token}",
+             'Content-Type' => 'application/json'
+           }
+    end
+
+    it "creates checkout session with correct parameters" do
+      expect(Stripe::Checkout::Session).to receive(:create) do |params|
+        expect(params[:customer]).to eq('cus_test')
+        expect(params[:payment_method_types]).to eq(['card'])
+        expect(params[:mode]).to eq('subscription')
+        expect(params[:line_items]).to be_present
+        expect(params[:metadata]).to be_present
+        expect(params[:metadata][:user_id]).to eq(user.id.to_s)
+        expect(params[:metadata][:plan_id]).to eq(plan.id.to_s)
+        mock_session
+      end
+
+      post "/api/v1/subscriptions/checkout_session.json",
+           params: { plan_id: plan.id, billing_period: 'monthly' },
+           headers: { 
+             'Authorization' => "Bearer #{token}",
+             'Content-Type' => 'application/json'
+           }
     end
   end
 

@@ -447,5 +447,69 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
       expect(user_data['youtube_connected']).to be false
     end
   end
+
+  describe 'GET #facebook_pages' do
+    let(:mock_facebook_service) { instance_double(SocialMedia::FacebookService) }
+
+    before do
+      allow(SocialMedia::FacebookService).to receive(:new).with(user).and_return(mock_facebook_service)
+    end
+
+    context 'when Facebook is connected' do
+      it 'returns Facebook pages' do
+        pages_data = [
+          { id: 'page_1', name: 'Page 1', access_token: 'token_1' },
+          { id: 'page_2', name: 'Page 2', access_token: 'token_2' }
+        ]
+        allow(mock_facebook_service).to receive(:fetch_pages).and_return(pages_data)
+
+        get :facebook_pages
+
+        expect(response).to have_http_status(:success)
+        json_response = JSON.parse(response.body)
+        expect(json_response['pages']).to be_an(Array)
+        expect(json_response['pages'].length).to eq(2)
+        expect(json_response['pages'].first['id']).to eq('page_1')
+        expect(json_response['pages'].first['name']).to eq('Page 1')
+      end
+
+      it 'returns empty array when user has no pages' do
+        allow(mock_facebook_service).to receive(:fetch_pages).and_return([])
+
+        get :facebook_pages
+
+        expect(response).to have_http_status(:success)
+        json_response = JSON.parse(response.body)
+        expect(json_response['pages']).to eq([])
+      end
+    end
+
+    context 'when Facebook is not connected' do
+      before do
+        user.update!(fb_user_access_key: nil)
+      end
+
+      it 'returns unauthorized error' do
+        get :facebook_pages
+
+        expect(response).to have_http_status(:unauthorized)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Facebook not connected')
+      end
+    end
+
+    context 'when Facebook API error occurs' do
+      it 'handles errors gracefully' do
+        allow(mock_facebook_service).to receive(:fetch_pages).and_raise(StandardError.new('API error'))
+
+        get :facebook_pages
+
+        expect(response).to have_http_status(:internal_server_error)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Failed to fetch Facebook pages')
+        expect(json_response['message']).to eq('API error')
+      end
+    end
+  end
 end
 
