@@ -115,14 +115,14 @@ RSpec.describe Video, type: :model do
         end
 
         it 'uses ACTIVE_STORAGE_URL when set' do
-          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return(nil)
+          allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('my-bucket')
           allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
           allow(ENV).to receive(:[]).with('DO_SPACES_CDN_HOST').and_return(nil)
           allow(ENV).to receive(:[]).with('ACTIVE_STORAGE_URL').and_return('https://storage.example.com')
           allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
           allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
           video = create(:video, user: user, file_path: 'local/video.mp4')
-          expect(video.get_source_url).to eq('https://se1.sfo2.digitaloceanspaces.com/local/video.mp4')
+          expect(video.get_source_url).to eq('https://storage.example.com/my-bucket/local/video.mp4')
         end
 
         it 'defaults to se1.sfo2.digitaloceanspaces.com when no ENV vars set' do

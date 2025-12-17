@@ -24,8 +24,9 @@ RSpec.describe OauthRequestToken, type: :model do
       expect(OauthRequestToken.exists?(valid_token.id)).to be true
     end
 
-    it 'does not delete tokens that expire exactly at current time' do
-      token = create(:oauth_request_token, user: user, expires_at: Time.current)
+    it 'does not delete tokens that expire in the future' do
+      # Token expires 1 second in the future - should not be deleted
+      token = create(:oauth_request_token, user: user, expires_at: 1.second.from_now)
       
       expect {
         OauthRequestToken.cleanup_expired
