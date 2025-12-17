@@ -16,6 +16,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       let(:mock_account) { double(id: 'acct_123', email: 'test@example.com', country: 'US', default_currency: 'usd') }
 
       before do
+        allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
         allow(Stripe::Product).to receive(:list).and_return(mock_products)
         allow(Stripe::Price).to receive(:list).and_return(mock_prices)
         allow(Stripe::Account).to receive(:retrieve).and_return(mock_account)
@@ -42,6 +43,7 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       end
 
       it "handles restricted API keys gracefully" do
+        allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
         allow(Stripe::Account).to receive(:retrieve).and_raise(Stripe::PermissionError.new('Permission denied'))
         
         get "/api/v1/subscriptions/test_stripe.json"
@@ -54,6 +56,9 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
 
       it "identifies restricted keys" do
         allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('rk_test_123')
+        allow(Stripe::Product).to receive(:list).and_return(mock_products)
+        allow(Stripe::Price).to receive(:list).and_return(mock_prices)
+        allow(Stripe::Account).to receive(:retrieve).and_raise(Stripe::PermissionError.new('Permission denied'))
         
         get "/api/v1/subscriptions/test_stripe.json"
         
@@ -63,6 +68,9 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
 
       it "identifies secret keys" do
         allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
+        allow(Stripe::Product).to receive(:list).and_return(mock_products)
+        allow(Stripe::Price).to receive(:list).and_return(mock_prices)
+        allow(Stripe::Account).to receive(:retrieve).and_return(mock_account)
         
         get "/api/v1/subscriptions/test_stripe.json"
         
@@ -72,6 +80,10 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
     end
 
     context "with authentication errors" do
+      before do
+        allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
+      end
+
       it "handles Stripe authentication errors" do
         allow(Stripe::Product).to receive(:list).and_raise(Stripe::AuthenticationError.new('Invalid API key'))
         
@@ -85,6 +97,10 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
     end
 
     context "with permission errors" do
+      before do
+        allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
+      end
+
       it "handles Stripe permission errors" do
         allow(Stripe::Product).to receive(:list).and_raise(Stripe::PermissionError.new('Permission denied'))
         
@@ -97,6 +113,10 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
     end
 
     context "with other Stripe errors" do
+      before do
+        allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
+      end
+
       it "handles generic Stripe errors" do
         allow(Stripe::Product).to receive(:list).and_raise(Stripe::StripeError.new('API error'))
         
@@ -110,6 +130,10 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
     end
 
     context "with unexpected errors" do
+      before do
+        allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
+      end
+
       it "handles unexpected errors gracefully" do
         allow(Stripe::Product).to receive(:list).and_raise(StandardError.new('Unexpected error'))
         
