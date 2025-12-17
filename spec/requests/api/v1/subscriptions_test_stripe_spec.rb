@@ -16,6 +16,8 @@ RSpec.describe "Api::V1::Subscriptions#test_stripe", type: :request do
       let(:mock_account) { double(id: 'acct_123', email: 'test@example.com', country: 'US', default_currency: 'usd') }
 
       before do
+        # test_stripe calls check_stripe_configured! which requires STRIPE_SECRET_KEY
+        allow(ENV).to receive(:[]).and_call_original
         allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_123')
         allow(Stripe::Product).to receive(:list).and_return(mock_products)
         allow(Stripe::Price).to receive(:list).and_return(mock_prices)
