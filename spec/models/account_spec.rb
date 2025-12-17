@@ -155,13 +155,18 @@ RSpec.describe Account, type: :model do
     end
 
     context 'when account is super admin' do
+      let(:super_admin_account) { create(:account) }
+      
       before do
-        account.update!(id: 0)
+        # Can't update id to 0 due to foreign key constraints, so test the method directly
+        allow(super_admin_account).to receive(:id).and_return(0)
+        allow(super_admin_account).to receive(:super_admin_account?).and_return(true)
       end
 
       it 'always returns true' do
-        100.times { create(:bucket, user: user) }
-        expect(account.can_add_bucket?(user)).to be true
+        super_user = create(:user, account: super_admin_account)
+        100.times { create(:bucket, user: super_user) }
+        expect(super_admin_account.can_add_bucket?(super_user)).to be true
       end
     end
   end
@@ -224,7 +229,8 @@ RSpec.describe Account, type: :model do
   describe '#super_admin_account?' do
     it 'returns true when id is 0' do
       account = create(:account)
-      account.update_column(:id, 0)
+      # Can't actually set id to 0 due to foreign keys, so test the method logic
+      allow(account).to receive(:id).and_return(0)
       expect(account.super_admin_account?).to be true
     end
 
@@ -262,7 +268,8 @@ RSpec.describe Account, type: :model do
     end
 
     it 'allows super admin account to add unlimited users' do
-      account.update_column(:id, 0)
+      # Test super_admin_account? method directly since we can't update id to 0
+      allow(account).to receive(:super_admin_account?).and_return(true)
       100.times { create(:user, account: account, status: 1) }
       expect(account.can_add_user?).to be true
     end
