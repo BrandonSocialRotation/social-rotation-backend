@@ -78,9 +78,12 @@ RSpec.describe Bucket, type: :model do
       end
 
       it 'handles cron parsing errors gracefully' do
+        user.update!(timezone: 'America/New_York')
         schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
-        allow(schedule).to receive(:valid_cron_format?).and_raise(StandardError.new('Error'))
-        # Should return nil when error occurs
+        bucket.reload
+        # Mock valid_cron_format? to raise an error when called
+        allow_any_instance_of(BucketSchedule).to receive(:valid_cron_format?).and_raise(StandardError.new('Cron parsing error'))
+        # Should return nil when error occurs (caught by rescue block, continues to next, then returns nil)
         result = bucket.is_due(Time.current)
         expect(result).to be_nil
       end
