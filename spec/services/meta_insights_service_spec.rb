@@ -73,11 +73,10 @@ RSpec.describe MetaInsightsService do
     end
 
     it 'handles different ranges' do
-        result7d = service.timeseries('reach', '7d')
-        result28d = service.timeseries('reach', '28d')
-        expect(result7d.length).to eq(7)
-        expect(result28d.length).to eq(28)
-      end
+      result7d = service.timeseries('reach', '7d')
+      result28d = service.timeseries('reach', '28d')
+      expect(result7d.length).to eq(7)
+      expect(result28d.length).to eq(28)
     end
   end
 

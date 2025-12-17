@@ -150,7 +150,9 @@ RSpec.describe "Api::V1::Subscriptions", type: :request do
 
     it "returns conflict when account already has active subscription" do
       existing_subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_ACTIVE)
-      account.update!(subscription: existing_subscription)
+      account.reload
+      # Ensure account has the subscription association
+      expect(account.subscription).to eq(existing_subscription)
       
       post "/api/v1/subscriptions.json", 
            params: { plan_id: plan.id },
