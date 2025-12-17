@@ -10,15 +10,8 @@ class BucketVideo < ApplicationRecord
   
   # Methods similar to BucketImage
   def forced_is_due?
-    return false unless force_send_date
-    
-    user = bucket.user
-    return false unless user&.timezone
-    
-    current_date = Time.current.in_time_zone(user.timezone)
-    run_date = force_send_date.in_time_zone(user.timezone)
-    
-    current_date.strftime('%Y-%m-%d %H:%M') == run_date.strftime('%Y-%m-%d %H:%M')
+    # BucketVideo doesn't have force_send_date column - always return false
+    false
   end
   
   def should_display_twitter_warning?
