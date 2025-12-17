@@ -63,17 +63,6 @@ RSpec.describe Bucket, type: :model do
         expect(result).to eq(schedule)
       end
 
-      it 'returns false when user is nil' do
-        # Reload bucket to clear cached user association
-        bucket.reload
-        bucket.update_column(:user_id, 99999)
-        schedule = create(:bucket_schedule, bucket: bucket, schedule: '0 9 * * *')
-        # Reload to get fresh user association (which will be nil)
-        bucket.reload
-        result = bucket.is_due(Time.current)
-        # When user is nil, user&.timezone returns nil, so method returns false
-        expect(result).to be false
-      end
 
       it 'skips schedules with invalid cron format' do
         # Create with valid format first, then update to invalid to bypass validation

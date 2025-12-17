@@ -308,7 +308,7 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
   end
 
   describe 'GET #videos' do
-    let(:video) { create(:video, friendly_name: 'Test Video') }
+    let(:video) { create(:video) }
     let!(:bucket_video) { create(:bucket_video, bucket: bucket, video: video, friendly_name: 'Test Video') }
 
     before do
