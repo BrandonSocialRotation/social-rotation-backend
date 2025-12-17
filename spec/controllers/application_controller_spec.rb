@@ -100,5 +100,91 @@ RSpec.describe ApplicationController, type: :controller do
       end
     end
   end
+
+  describe '#auth_or_oauth_controller?' do
+    controller do
+      def index
+        render json: { result: auth_or_oauth_controller? }
+      end
+    end
+
+    before do
+      allow(controller).to receive(:authenticate_user!).and_return(true)
+      allow(controller).to receive(:current_user).and_return(create(:user))
+    end
+
+    it 'returns true for AuthController' do
+      allow(controller).to receive(:class).and_return(Api::V1::AuthController)
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be true
+    end
+
+    it 'returns true for OAuthController callback actions' do
+      allow(controller).to receive(:class).and_return(Api::V1::OauthController)
+      allow(controller).to receive(:params).and_return(ActionController::Parameters.new(action: 'facebook_callback'))
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be true
+    end
+
+    it 'returns false for OAuthController non-callback actions' do
+      allow(controller).to receive(:class).and_return(Api::V1::OauthController)
+      allow(controller).to receive(:params).and_return(ActionController::Parameters.new(action: 'connect'))
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be false
+    end
+
+    it 'uses params fallback for route-based detection' do
+      allow(controller).to receive(:class).and_return(Api::V1::BucketsController)
+      allow(controller).to receive(:params).and_return(ActionController::Parameters.new(controller: 'api/v1/auth', action: 'login'))
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be true
+    end
+  end
+
+  describe '#skip_subscription_check?' do
+    controller do
+      def index
+        render json: { result: skip_subscription_check? }
+      end
+    end
+
+    before do
+      allow(controller).to receive(:authenticate_user!).and_return(true)
+      allow(controller).to receive(:current_user).and_return(create(:user))
+    end
+
+    it 'returns true for subscriptions controller' do
+      allow(controller).to receive(:params).and_return(ActionController::Parameters.new(controller: 'api/v1/subscriptions', action: 'index'))
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be true
+    end
+
+    it 'returns true for user_info controller' do
+      allow(controller).to receive(:params).and_return(ActionController::Parameters.new(controller: 'api/v1/user_info', action: 'show'))
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be true
+    end
+
+    it 'returns true for plans controller' do
+      allow(controller).to receive(:params).and_return(ActionController::Parameters.new(controller: 'api/v1/plans', action: 'index'))
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be true
+    end
+
+    it 'returns false for other controllers' do
+      allow(controller).to receive(:params).and_return(ActionController::Parameters.new(controller: 'api/v1/buckets', action: 'index'))
+      allow(controller).to receive(:auth_or_oauth_controller?).and_return(false)
+      get :index
+      json_response = JSON.parse(response.body)
+      expect(json_response['result']).to be false
+    end
+  end
 end
 
