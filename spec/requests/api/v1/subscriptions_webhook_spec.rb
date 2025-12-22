@@ -48,7 +48,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
         )
         allow(Stripe::Subscription).to receive(:list).and_return(double(data: [mock_subscription]))
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -72,7 +72,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
         allow(mock_event).to receive(:type).and_return('customer.subscription.updated')
         allow(mock_event.data).to receive(:object).and_return(subscription_object)
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -91,7 +91,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
         allow(mock_event).to receive(:type).and_return('customer.subscription.deleted')
         allow(mock_event.data).to receive(:object).and_return(subscription_object)
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -116,7 +116,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
         allow(mock_event.data).to receive(:object).and_return(invoice_object)
         allow(Stripe::Subscription).to receive(:retrieve).and_return(stripe_subscription)
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -133,7 +133,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
         allow(mock_event).to receive(:type).and_return('invoice.payment_failed')
         allow(mock_event.data).to receive(:object).and_return(invoice_object)
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -148,7 +148,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
       it "handles unhandled event types" do
         allow(mock_event).to receive(:type).and_return('unknown.event.type')
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -163,7 +163,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
       it "returns bad_request when STRIPE_WEBHOOK_SECRET is missing" do
         allow(ENV).to receive(:[]).with('STRIPE_WEBHOOK_SECRET').and_return(nil)
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -178,7 +178,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
       it "returns bad_request for JSON parse errors" do
         allow(Stripe::Webhook).to receive(:construct_event).and_raise(JSON::ParserError.new('Invalid JSON'))
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: 'invalid json',
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -189,9 +189,9 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
       end
 
       it "returns bad_request for signature verification errors" do
-        allow(Stripe::Webhook).to receive(:construct_event).and_raise(Stripe::SignatureVerificationError.new('Invalid signature'))
+        allow(Stripe::Webhook).to receive(:construct_event).and_raise(Stripe::SignatureVerificationError.new('Invalid signature', sig_header))
         
-        post webhook_api_v1_subscriptions_path(format: :json),
+        post "/api/v1/subscriptions/webhook.json",
              params: payload,
              headers: { 
                'HTTP_STRIPE_SIGNATURE' => sig_header,
@@ -205,7 +205,7 @@ RSpec.describe "Api::V1::Subscriptions#webhook", type: :request do
     it "does not require authentication" do
       allow(Stripe::Webhook).to receive(:construct_event).and_return(double(type: 'unknown.event', data: double(object: double)))
       
-      post webhook_api_v1_subscriptions_path(format: :json),
+      post "/api/v1/subscriptions/webhook.json",
            params: payload,
            headers: { 
              'HTTP_STRIPE_SIGNATURE' => sig_header,

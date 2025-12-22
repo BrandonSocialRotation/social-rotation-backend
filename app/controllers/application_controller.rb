@@ -143,39 +143,42 @@ class ApplicationController < ActionController::API
     end
     
     # Check if account has active subscription
-    if account.subscription
-      # If subscription exists but is not active (suspended), allow access to subscription management
-      # but block other features
-      unless account.has_active_subscription?
-        # Check if this is a subscription management route (already handled by skip_subscription_check?)
-        # If we get here, it's not a subscription route, so block access
+    begin
+      subscription = account.subscription
+      if subscription
+        # If subscription exists but is not active (suspended), allow access to subscription management
+        # but block other features
+        unless account.has_active_subscription?
+          # Check if this is a subscription management route (already handled by skip_subscription_check?)
+          # If we get here, it's not a subscription route, so block access
+          render json: {
+            error: 'Subscription suspended',
+            message: 'Your subscription is not active. Please update your payment method to continue using the app.',
+            subscription_required: true,
+            subscription_suspended: true,
+            redirect_to: '/profile' # Frontend should show subscription management
+          }, status: :forbidden
+          return
+        end
+      else
+        # No subscription at all - need to subscribe
         render json: {
-          error: 'Subscription suspended',
-          message: 'Your subscription is not active. Please update your payment method to continue using the app.',
+          error: 'Subscription required',
+          message: 'You need an active subscription to access this feature. Please subscribe to continue.',
           subscription_required: true,
-          subscription_suspended: true,
-          redirect_to: '/profile' # Frontend should show subscription management
+          redirect_to: '/register'
         }, status: :forbidden
         return
       end
-    else
-      # No subscription at all - need to subscribe
+    rescue => e
+      Rails.logger.error "Subscription check error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      # If there's an error checking subscription, block access (fail closed for security)
       render json: {
-        error: 'Subscription required',
-        message: 'You need an active subscription to access this feature. Please subscribe to continue.',
-        subscription_required: true,
-        redirect_to: '/register'
+        error: 'Subscription verification failed',
+        message: 'Unable to verify subscription status. Please contact support.',
+        subscription_required: true
       }, status: :forbidden
-      return
     end
-  rescue => e
-    Rails.logger.error "Subscription check error: #{e.message}"
-    Rails.logger.error e.backtrace.join("\n")
-    # If there's an error checking subscription, block access (fail closed for security)
-    render json: {
-      error: 'Subscription verification failed',
-      message: 'Unable to verify subscription status. Please contact support.',
-      subscription_required: true
-    }, status: :forbidden
   end
 end

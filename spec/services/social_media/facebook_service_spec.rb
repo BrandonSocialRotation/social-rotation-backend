@@ -114,6 +114,110 @@ RSpec.describe SocialMedia::FacebookService do
         }.to raise_error(/does not have Instagram connected/)
       end
     end
+
+    context 'with video media' do
+      before do
+        user.update(instagram_business_id: 'ig_id')
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_return(status: 200, body: { data: [{ id: 'page123', access_token: 'page_token' }] }.to_json)
+        stub_request(:post, /graph\.facebook\.com\/v18\.0\/ig_id\/media/)
+          .to_return(status: 200, body: { id: 'container123' }.to_json)
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/container123/)
+          .to_return(status: 200, body: { status_code: 'FINISHED' }.to_json)
+        stub_request(:post, /graph\.facebook\.com\/v18\.0\/ig_id\/media_publish/)
+          .to_return(status: 200, body: { id: 'post123' }.to_json)
+      end
+      
+      it 'posts video to Instagram' do
+        result = service.post_to_instagram('Test video', 'https://example.com/video.mp4', is_video: true)
+        expect(result).to have_key('id')
+      end
+    end
+
+    context 'when media container creation fails' do
+      before do
+        user.update(instagram_business_id: 'ig_id')
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_return(status: 200, body: { data: [{ id: 'page123', access_token: 'page_token' }] }.to_json)
+        stub_request(:post, /graph\.facebook\.com\/v18\.0\/ig_id\/media/)
+          .to_return(status: 400, body: { error: { message: 'Invalid media' } }.to_json)
+      end
+      
+      it 'raises an error' do
+        expect {
+          service.post_to_instagram('Test', 'https://example.com/image.jpg')
+        }.to raise_error(/Failed to create Instagram media container/)
+      end
+    end
+  end
+
+  describe '#post_photo with video extension' do
+    before do
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+        .to_return(status: 200, body: { data: [{ id: 'page123', access_token: 'page_token' }] }.to_json)
+      stub_request(:post, /graph\.facebook\.com\/v18\.0\/me\/videos/)
+        .to_return(status: 200, body: { id: 'video123' }.to_json)
+    end
+    
+    it 'posts video when URL has .mp4 extension' do
+      result = service.post_photo('Test video', 'https://example.com/video.mp4')
+      expect(result).to have_key('id')
+    end
+
+    it 'posts video when URL has .gif extension' do
+      result = service.post_photo('Test gif', 'https://example.com/animation.gif')
+      expect(result).to have_key('id')
+    end
+  end
+
+  describe '#get_page_access_token' do
+    it 'returns first page token when pages exist' do
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+        .to_return(status: 200, body: { data: [{ id: 'page1', access_token: 'token1' }, { id: 'page2', access_token: 'token2' }] }.to_json)
+      
+      token = service.send(:get_page_access_token)
+      expect(token).to eq('token1')
+    end
+
+    it 'returns nil when no pages exist' do
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+        .to_return(status: 200, body: { data: [] }.to_json)
+      
+      token = service.send(:get_page_access_token)
+      expect(token).to be_nil
+    end
+  end
+
+  describe '#wait_for_video_processing' do
+    before do
+      user.update(instagram_business_id: 'ig_id')
+    end
+
+    it 'waits for video to finish processing' do
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/container123/)
+        .to_return(status: 200, body: { status_code: 'FINISHED' }.to_json)
+      
+      result = service.send(:wait_for_video_processing, 'container123', 'page_token', 10)
+      expect(result).to be true
+    end
+
+    it 'raises error when video processing fails' do
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/container123/)
+        .to_return(status: 200, body: { status_code: 'ERROR', error: { message: 'Processing failed' } }.to_json)
+      
+      expect {
+        service.send(:wait_for_video_processing, 'container123', 'page_token', 10)
+      }.to raise_error(/Instagram video processing failed/)
+    end
+
+    it 'raises timeout error when processing takes too long' do
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/container123/)
+        .to_return(status: 200, body: { status_code: 'IN_PROGRESS' }.to_json)
+      
+      expect {
+        service.send(:wait_for_video_processing, 'container123', 'page_token', 1)
+      }.to raise_error(/timeout/)
+    end
   end
 end
 

@@ -97,6 +97,18 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
       expect(bucket_schedule.schedule).to eq('0 10 * * 1-5')
       expect(bucket_schedule.post_to).to eq(BucketSchedule::BIT_INSTAGRAM)
     end
+
+    it 'returns error when update fails' do
+      bucket_schedule.update_column(:schedule, 'invalid cron')
+      # Make it invalid so update fails
+      invalid_params = update_params.merge(bucket_schedule: { schedule: 'invalid' })
+      
+      patch :update, params: invalid_params
+      
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['errors']).to be_present
+    end
   end
 
   describe 'DELETE #destroy' do
@@ -146,6 +158,16 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
 
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    it 'skips non-existent schedule IDs' do
+      params = bulk_params.merge(bucket_schedule_ids: "#{schedule1.id},99999")
+      
+      post :bulk_update, params: params
+      
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['message']).to include('1 schedules successfully updated')
+    end
   end
 
   describe 'DELETE #bulk_delete' do
@@ -168,6 +190,29 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
       expect(response).to have_http_status(:ok)
       json_response = JSON.parse(response.body)
       expect(json_response['message']).to eq('2 schedules successfully deleted')
+    end
+
+    it 'skips non-existent schedule IDs' do
+      id1 = schedule1.id
+      params = { bucket_schedule_ids: "#{id1},99999" }
+      
+      expect {
+        post :bulk_delete, params: params
+      }.to change(BucketSchedule, :count).by(-1)
+      
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['message']).to include('1 schedules successfully deleted')
+    end
+
+    it 'handles empty schedule IDs' do
+      params = { bucket_schedule_ids: '' }
+      
+      post :bulk_delete, params: params
+      
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['message']).to include('0 schedules successfully deleted')
     end
   end
 
@@ -199,6 +244,24 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
       post :rotation_create, params: invalid_params
 
       expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'handles time with leading zeros' do
+      params = rotation_params.merge(time: '09:05')
+      post :rotation_create, params: params
+      
+      expect(response).to have_http_status(:ok)
+      schedule = BucketSchedule.last
+      expect(schedule.schedule).to include('5 9')
+    end
+
+    it 'returns error for missing days' do
+      params = { bucket_id: bucket.id, networks: ['facebook'], time: '09:00', days: [] }
+      post :rotation_create, params: params
+      
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('Invalid parameters')
     end
   end
 
@@ -288,6 +351,20 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
         expect(response).to have_http_status(:ok)
       end
     end
+
+    context 'with rotation schedule' do
+      let(:rotation_schedule) { create(:bucket_schedule, bucket: bucket, schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION) }
+
+      it 'does not modify rotation schedule' do
+        initial_skip = rotation_schedule.skip_image
+        
+        post :skip_image_single, params: { id: rotation_schedule.id }
+        
+        expect(response).to have_http_status(:ok)
+        rotation_schedule.reload
+        expect(rotation_schedule.skip_image).to eq(initial_skip)
+      end
+    end
   end
 
   describe 'GET #history' do
@@ -326,6 +403,83 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
 
       schedule = BucketSchedule.last
       expect(schedule.post_to).to eq(expected_flags)
+    end
+  end
+
+  describe 'JSON serializer methods' do
+    describe '#bucket_schedule_json' do
+      it 'returns correct JSON structure' do
+        json = controller.send(:bucket_schedule_json, bucket_schedule)
+        expect(json).to have_key(:id)
+        expect(json).to have_key(:schedule)
+        expect(json).to have_key(:schedule_type)
+        expect(json).to have_key(:post_to)
+        expect(json).to have_key(:description)
+        expect(json).to have_key(:twitter_description)
+        expect(json).to have_key(:times_sent)
+        expect(json).to have_key(:skip_image)
+        expect(json).to have_key(:bucket_id)
+        expect(json).to have_key(:bucket_image_id)
+        expect(json).to have_key(:bucket)
+        expect(json).to have_key(:bucket_image)
+        expect(json).to have_key(:created_at)
+        expect(json).to have_key(:updated_at)
+      end
+
+      it 'includes bucket info when present' do
+        json = controller.send(:bucket_schedule_json, bucket_schedule)
+        expect(json[:bucket]).to be_a(Hash)
+        expect(json[:bucket][:id]).to eq(bucket.id)
+        expect(json[:bucket][:name]).to eq(bucket.name)
+      end
+
+      it 'handles nil bucket gracefully' do
+        schedule = create(:bucket_schedule, bucket: bucket)
+        allow(schedule).to receive(:bucket).and_return(nil)
+        json = controller.send(:bucket_schedule_json, schedule)
+        expect(json[:bucket]).to be_nil
+      end
+
+      it 'includes bucket_image info when present' do
+        json = controller.send(:bucket_schedule_json, bucket_schedule)
+        expect(json[:bucket_image]).to be_a(Hash)
+        expect(json[:bucket_image][:id]).to eq(bucket_image.id)
+        expect(json[:bucket_image][:friendly_name]).to eq(bucket_image.friendly_name)
+      end
+
+      it 'handles nil bucket_image gracefully' do
+        schedule = create(:bucket_schedule, bucket: bucket, bucket_image: nil)
+        json = controller.send(:bucket_schedule_json, schedule)
+        expect(json[:bucket_image]).to be_nil
+      end
+    end
+
+    describe '#send_history_json' do
+      let(:send_history) { create(:bucket_send_history, bucket: bucket, bucket_schedule: bucket_schedule, bucket_image: bucket_image) }
+
+      it 'returns correct JSON structure' do
+        json = controller.send(:send_history_json, send_history)
+        expect(json).to have_key(:id)
+        expect(json).to have_key(:sent_at)
+        expect(json).to have_key(:sent_to)
+        expect(json).to have_key(:sent_to_name)
+        expect(json).to have_key(:bucket_image)
+        expect(json).to have_key(:created_at)
+      end
+
+      it 'includes bucket_image info when present' do
+        json = controller.send(:send_history_json, send_history)
+        expect(json[:bucket_image]).to be_a(Hash)
+        expect(json[:bucket_image][:id]).to eq(bucket_image.id)
+        expect(json[:bucket_image][:friendly_name]).to eq(bucket_image.friendly_name)
+      end
+
+      it 'handles nil bucket_image gracefully' do
+        history = create(:bucket_send_history, bucket: bucket, bucket_schedule: bucket_schedule, bucket_image: bucket_image)
+        allow(history).to receive(:bucket_image).and_return(nil)
+        json = controller.send(:send_history_json, history)
+        expect(json[:bucket_image]).to be_nil
+      end
     end
   end
 end

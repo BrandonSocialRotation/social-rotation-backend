@@ -401,5 +401,166 @@ RSpec.describe BucketSchedule, type: :model do
         expect(bucket_schedule.get_next_schedule).to eq('Invalid Schedule')
       end
     end
+
+    describe '#get_next_bucket_image_due with offsets' do
+      let!(:rotation_schedule) { create(:bucket_schedule, bucket: bucket, schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION) }
+      let!(:image1) { create(:bucket_image, bucket: bucket, friendly_name: 'A') }
+      let!(:image2) { create(:bucket_image, bucket: bucket, friendly_name: 'B') }
+      let!(:image3) { create(:bucket_image, bucket: bucket, friendly_name: 'C') }
+
+      it 'applies offset correctly' do
+        result = rotation_schedule.get_next_bucket_image_due(1)
+        expect(result).to eq(image2)
+      end
+
+      it 'applies skip_offset correctly' do
+        result = rotation_schedule.get_next_bucket_image_due(0, 2)
+        expect(result).to eq(image3)
+      end
+
+      it 'applies both offset and skip_offset' do
+        result = rotation_schedule.get_next_bucket_image_due(1, 1)
+        expect(result).to eq(image3)
+      end
+    end
+
+    describe '#get_next_description_due with offsets' do
+      let!(:rotation_schedule) { create(:bucket_schedule, bucket: bucket, schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION) }
+      let!(:image1) { create(:bucket_image, bucket: bucket, friendly_name: 'A', description: 'Desc 1', twitter_description: 'Twitter 1') }
+      let!(:image2) { create(:bucket_image, bucket: bucket, friendly_name: 'B', description: 'Desc 2', twitter_description: 'Twitter 2') }
+
+      it 'applies offset for regular description' do
+        result = rotation_schedule.get_next_description_due(1)
+        expect(result).to eq('Desc 2')
+      end
+
+      it 'applies offset for twitter description' do
+        result = rotation_schedule.get_next_description_due(1, 0, true)
+        expect(result).to eq('Twitter 2')
+      end
+
+      it 'returns empty string when bucket_image has no description' do
+        image1.update!(description: nil, twitter_description: nil)
+        result = rotation_schedule.get_next_description_due(0, 0, true)
+        expect(result).to eq('')
+      end
+    end
+
+    describe '#get_days_selected edge cases' do
+      it 'handles schedule with less than 5 parts' do
+        bucket_schedule.update_column(:schedule, '0 9 * *')
+        expect(bucket_schedule.get_days_selected).to eq([])
+      end
+
+      it 'handles schedule with more than 5 parts' do
+        bucket_schedule.update_column(:schedule, '0 9 * * 1,2,3 extra')
+        expect(bucket_schedule.get_days_selected).to eq(['1', '2', '3'])
+      end
+    end
+
+    describe '#get_time_format edge cases' do
+      it 'handles nil schedule' do
+        bucket_schedule.update_column(:schedule, nil)
+        expect(bucket_schedule.get_time_format).to eq(BucketSchedule::DEFAULT_TIME)
+      end
+
+      it 'handles schedule with only minute wildcard' do
+        bucket_schedule.update_column(:schedule, '* 14 * * *')
+        expect(bucket_schedule.get_time_format).to eq(BucketSchedule::DEFAULT_TIME)
+      end
+
+      it 'handles schedule with only hour wildcard' do
+        bucket_schedule.update_column(:schedule, '30 * * * *')
+        expect(bucket_schedule.get_time_format).to eq(BucketSchedule::DEFAULT_TIME)
+      end
+    end
+
+    describe '#get_scheduled_date_format edge cases' do
+      it 'handles nil schedule' do
+        bucket_schedule.update_column(:schedule, nil)
+        expected_date = Date.current.strftime('%Y-%m-%d')
+        expect(bucket_schedule.get_scheduled_date_format).to eq(expected_date)
+      end
+
+      it 'handles schedule with only day wildcard' do
+        bucket_schedule.update_column(:schedule, '0 9 * 12 *')
+        expected_date = Date.current.strftime('%Y-%m-%d')
+        expect(bucket_schedule.get_scheduled_date_format).to eq(expected_date)
+      end
+
+      it 'handles schedule with only month wildcard' do
+        bucket_schedule.update_column(:schedule, '0 9 15 * *')
+        expected_date = Date.current.strftime('%Y-%m-%d')
+        expect(bucket_schedule.get_scheduled_date_format).to eq(expected_date)
+      end
+    end
+
+    describe '#should_display_twitter_warning? edge cases' do
+      context 'for once/annually schedule without bucket_image' do
+        before do
+          bucket_schedule.update!(
+            schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE,
+            bucket_image: nil,
+            description: 'A' * 300,
+            post_to: BucketSchedule::BIT_TWITTER
+          )
+        end
+
+        it 'returns false when bucket_image is nil' do
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+      end
+
+      context 'for rotation schedule' do
+        before do
+          bucket_schedule.update!(
+            schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION,
+            post_to: BucketSchedule::BIT_TWITTER
+          )
+        end
+
+        it 'returns false when no bucket images' do
+          bucket.bucket_images.destroy_all
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+
+        it 'returns false when description is nil' do
+          bucket.bucket_images.update_all(description: nil, twitter_description: nil)
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+
+        it 'returns false when description is blank' do
+          bucket.bucket_images.update_all(description: '', twitter_description: nil)
+          expect(bucket_schedule.should_display_twitter_warning?).to be false
+        end
+      end
+    end
+
+    describe '#get_next_bucket_image_due fallback behavior' do
+      let!(:image1) { create(:bucket_image, bucket: bucket, friendly_name: 'A') }
+      let!(:image2) { create(:bucket_image, bucket: bucket, friendly_name: 'B') }
+
+      context 'when rotation returns nil but bucket has images' do
+        let!(:rotation_schedule) { create(:bucket_schedule, bucket: bucket, schedule_type: BucketSchedule::SCHEDULE_TYPE_ROTATION) }
+
+        it 'falls back to first image when get_next_rotation_image returns nil' do
+          # Mock get_next_rotation_image to return nil to test fallback
+          allow(bucket).to receive(:get_next_rotation_image).and_return(nil)
+          result = rotation_schedule.get_next_bucket_image_due
+          expect(result).to eq(image1)
+        end
+      end
+
+      context 'when schedule_type is ONCE/ANNUALLY without bucket_image' do
+        let!(:once_schedule) { create(:bucket_schedule, bucket: bucket, schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE, bucket_image: nil) }
+
+        it 'falls through to rotation logic when no bucket_image' do
+          # Should use rotation logic when bucket_image is nil
+          allow(bucket).to receive(:get_next_rotation_image).and_return(image2)
+          result = once_schedule.get_next_bucket_image_due
+          expect(result).to eq(image2)
+        end
+      end
+    end
   end
 end

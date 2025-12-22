@@ -363,5 +363,207 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
       expect(json_response['error']).to eq('Image not found')
     end
   end
+
+  describe 'POST #upload_image' do
+    let(:file) { fixture_file_upload('test_image.jpg', 'image/jpeg') }
+
+    before do
+      # Create test image file if it doesn't exist
+      unless File.exist?(Rails.root.join('spec', 'fixtures', 'test_image.jpg'))
+        FileUtils.mkdir_p(Rails.root.join('spec', 'fixtures'))
+        FileUtils.touch(Rails.root.join('spec', 'fixtures', 'test_image.jpg'))
+      end
+    end
+
+    it 'uploads image successfully' do
+      expect {
+        post :upload_image, params: { id: bucket.id, file: file }
+      }.to change(Image, :count).by(1).and change(BucketImage, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      json_response = JSON.parse(response.body)
+      expect(json_response['message']).to eq('Image uploaded successfully')
+    end
+
+    it 'returns error when no file provided' do
+      post :upload_image, params: { id: bucket.id }
+
+      expect(response).to have_http_status(:bad_request)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('No file provided')
+    end
+
+    it 'handles upload errors gracefully' do
+      allow(controller).to receive(:upload_locally).and_raise(StandardError.new('Upload error'))
+      
+      post :upload_image, params: { id: bucket.id, file: file }
+      
+      expect(response).to have_http_status(:internal_server_error)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to include('Upload failed')
+    end
+
+    it 'cleans up image when bucket_image save fails' do
+      # Track if we've failed a save yet
+      save_failed = false
+      
+      # Stub save to fail for the first new BucketImage instance
+      allow_any_instance_of(BucketImage).to receive(:save) do |instance|
+        if instance.new_record? && !save_failed
+          save_failed = true
+          # Manually add an error to simulate validation failure
+          instance.errors.add(:friendly_name, "can't be blank")
+          false
+        else
+          # For any other saves, just return true
+          true
+        end
+      end
+      
+      # The image should be created, but bucket_image save fails, so image gets cleaned up  
+      image_count_before = Image.count
+      post :upload_image, params: { id: bucket.id, file: file }
+      
+      # Check response status first to verify save failed
+      expect(response).to have_http_status(:unprocessable_entity)
+      # Then verify image was cleaned up
+      expect(Image.count).to eq(image_count_before)
+    end
+  end
+
+  describe 'POST #upload_video' do
+    let(:video_file) { fixture_file_upload(Rails.root.join('spec', 'fixtures', 'test_video.mp4'), 'video/mp4') }
+
+    before do
+      # Create test video file if it doesn't exist
+      video_path = Rails.root.join('spec', 'fixtures', 'test_video.mp4')
+      unless File.exist?(video_path)
+        FileUtils.mkdir_p(File.dirname(video_path))
+        File.write(video_path, 'fake video data')
+      end
+    end
+
+    it 'uploads video successfully' do
+      expect {
+        post :upload_video, params: { id: bucket.id, file: video_file }
+      }.to change(Video, :count).by(1).and change(BucketVideo, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      json_response = JSON.parse(response.body)
+      expect(json_response['message']).to eq('Video uploaded successfully')
+    end
+
+    it 'returns error when no file provided' do
+      post :upload_video, params: { id: bucket.id }
+
+      expect(response).to have_http_status(:bad_request)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('No file provided')
+    end
+
+    it 'returns error for invalid video file type' do
+      invalid_file = fixture_file_upload('test_image.jpg', 'image/jpeg')
+      
+      post :upload_video, params: { id: bucket.id, file: invalid_file }
+
+      expect(response).to have_http_status(:bad_request)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to include('Invalid video file type')
+    end
+
+    it 'handles upload errors gracefully' do
+      allow(controller).to receive(:upload_locally).and_raise(StandardError.new('Upload error'))
+      
+      post :upload_video, params: { id: bucket.id, file: video_file }
+      
+      expect(response).to have_http_status(:internal_server_error)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to include('Video upload failed')
+    end
+  end
+
+  describe 'JSON serializer methods' do
+    describe '#bucket_json' do
+      it 'returns correct JSON structure' do
+        create(:bucket_image, bucket: bucket)
+        create(:bucket_schedule, bucket: bucket)
+        json = controller.send(:bucket_json, bucket)
+        expect(json).to have_key(:id)
+        expect(json).to have_key(:user_id)
+        expect(json).to have_key(:name)
+        expect(json).to have_key(:description)
+        expect(json).to have_key(:use_watermark)
+        expect(json).to have_key(:post_once_bucket)
+        expect(json).to have_key(:created_at)
+        expect(json).to have_key(:updated_at)
+        expect(json).to have_key(:images_count)
+        expect(json).to have_key(:schedules_count)
+        expect(json[:images_count]).to eq(1)
+        expect(json[:schedules_count]).to eq(1)
+      end
+    end
+
+    describe '#bucket_image_json' do
+      it 'returns correct JSON structure' do
+        json = controller.send(:bucket_image_json, bucket_image)
+        expect(json).to have_key(:id)
+        expect(json).to have_key(:friendly_name)
+        expect(json).to have_key(:description)
+        expect(json).to have_key(:twitter_description)
+        expect(json).to have_key(:force_send_date)
+        expect(json).to have_key(:repeat)
+        expect(json).to have_key(:post_to)
+        expect(json).to have_key(:use_watermark)
+        expect(json).to have_key(:image)
+        expect(json).to have_key(:created_at)
+        expect(json).to have_key(:updated_at)
+        expect(json[:image]).to have_key(:id)
+        expect(json[:image]).to have_key(:file_path)
+        expect(json[:image]).to have_key(:source_url)
+      end
+    end
+
+    describe '#bucket_video_json' do
+      let(:video) { create(:video, user: user) }
+      let(:bucket_video) { create(:bucket_video, bucket: bucket, video: video) }
+
+      it 'returns correct JSON structure' do
+        json = controller.send(:bucket_video_json, bucket_video)
+        expect(json).to have_key(:id)
+        expect(json).to have_key(:friendly_name)
+        expect(json).to have_key(:description)
+        expect(json).to have_key(:twitter_description)
+        expect(json).to have_key(:post_to)
+        expect(json).to have_key(:use_watermark)
+        expect(json).to have_key(:video)
+        expect(json).to have_key(:created_at)
+        expect(json).to have_key(:updated_at)
+        expect(json[:video]).to have_key(:id)
+        expect(json[:video]).to have_key(:file_path)
+        expect(json[:video]).to have_key(:source_url)
+        expect(json[:video]).to have_key(:friendly_name)
+        expect(json[:video]).to have_key(:status)
+      end
+    end
+
+    describe '#bucket_schedule_json' do
+      let(:bucket_schedule) { create(:bucket_schedule, bucket: bucket) }
+
+      it 'returns correct JSON structure' do
+        json = controller.send(:bucket_schedule_json, bucket_schedule)
+        expect(json).to have_key(:id)
+        expect(json).to have_key(:schedule)
+        expect(json).to have_key(:schedule_type)
+        expect(json).to have_key(:post_to)
+        expect(json).to have_key(:description)
+        expect(json).to have_key(:twitter_description)
+        expect(json).to have_key(:times_sent)
+        expect(json).to have_key(:skip_image)
+        expect(json).to have_key(:bucket_image_id)
+        expect(json).to have_key(:created_at)
+        expect(json).to have_key(:updated_at)
+      end
+    end
+  end
 end
 

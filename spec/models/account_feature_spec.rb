@@ -80,4 +80,105 @@ RSpec.describe AccountFeature, type: :model do
       expect(account_feature.errors[:max_images_per_bucket]).to be_present
     end
   end
+
+  describe '#effective_max_users' do
+    let(:account) { create(:account) }
+    let(:plan) { create(:plan, max_users: 20) }
+
+    it 'returns plan max_users when plan exists' do
+      account.update!(plan: plan)
+      expect(account.account_feature.effective_max_users).to eq(20)
+    end
+
+    it 'returns account_feature max_users when no plan' do
+      account.account_feature.update!(max_users: 50)
+      expect(account.account_feature.effective_max_users).to eq(50)
+    end
+  end
+
+  describe '#effective_max_buckets' do
+    let(:account) { create(:account) }
+    let(:plan) { create(:plan, max_buckets: 30) }
+
+    it 'returns plan max_buckets when plan exists' do
+      account.update!(plan: plan)
+      expect(account.account_feature.effective_max_buckets).to eq(30)
+    end
+
+    it 'returns account_feature max_buckets when no plan' do
+      account.account_feature.update!(max_buckets: 100)
+      expect(account.account_feature.effective_max_buckets).to eq(100)
+    end
+  end
+
+  describe '#effective_max_images_per_bucket' do
+    let(:account) { create(:account) }
+    let(:plan) { create(:plan, max_images_per_bucket: 500) }
+
+    it 'returns plan max_images_per_bucket when plan exists' do
+      account.update!(plan: plan)
+      expect(account.account_feature.effective_max_images_per_bucket).to eq(500)
+    end
+
+    it 'returns account_feature max_images_per_bucket when no plan' do
+      account.account_feature.update!(max_images_per_bucket: 1000)
+      expect(account.account_feature.effective_max_images_per_bucket).to eq(1000)
+    end
+  end
+
+  describe 'apply_plan_limits callback' do
+    let(:plan) { create(:plan, max_users: 25, max_buckets: 50, max_images_per_bucket: 500, features: '{"marketplace": true, "rss": false}') }
+    let(:account) { create(:account, plan: plan) }
+
+    it 'applies plan limits to new account_feature' do
+      feature = account.account_feature
+      expect(feature.max_users).to eq(25)
+      expect(feature.max_buckets).to eq(50)
+      expect(feature.max_images_per_bucket).to eq(500)
+    end
+
+    it 'applies plan features to new account_feature' do
+      feature = account.account_feature
+      expect(feature.allow_marketplace).to be true
+      expect(feature.allow_rss).to be false
+    end
+
+    it 'defaults RSS to true when not in plan features' do
+      plan.update!(features: '{"marketplace": true}')
+      account = create(:account, plan: plan)
+      expect(account.account_feature.allow_rss).to be true
+    end
+
+    it 'handles plan with nil max_users' do
+      plan.update!(max_users: nil)
+      account.update!(plan: plan)
+      new_feature = AccountFeature.new(account: account)
+      # Should use default from set_defaults (50)
+      expect(new_feature.max_users).to eq(50)
+    end
+
+    it 'handles plan with nil max_buckets' do
+      # Use update_column to bypass validations
+      plan.update_column(:max_buckets, nil)
+      account.update!(plan: plan)
+      new_feature = AccountFeature.new(account: account)
+      # Should use default from set_defaults (100)
+      expect(new_feature.max_buckets).to eq(100)
+    end
+
+    it 'handles plan features without marketplace key' do
+      plan.update!(features: '{"rss": true}')
+      account.update!(plan: plan)
+      new_feature = AccountFeature.new(account: account)
+      # Should use default (true) since marketplace key is not present
+      expect(new_feature.allow_marketplace).to be true
+    end
+
+    it 'handles plan features with marketplace explicitly false' do
+      plan.update!(features: '{"marketplace": false}')
+      account.update!(plan: plan)
+      new_feature = AccountFeature.new(account: account)
+      expect(new_feature.allow_marketplace).to be false
+    end
+  end
 end

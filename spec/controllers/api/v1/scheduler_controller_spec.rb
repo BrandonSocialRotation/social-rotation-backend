@@ -106,6 +106,29 @@ RSpec.describe Api::V1::SchedulerController, type: :controller do
         expect(Image.count).to eq(image_count_before)
         expect(BucketImage.count).to eq(bucket_image_count_before)
       end
+
+      it 'schedules existing image when scheduled_at provided' do
+        scheduled_params = existing_image_params.merge(scheduled_at: '2024-12-25 10:00 AM')
+        
+        expect {
+          post :single_post, params: scheduled_params
+        }.to change(BucketSchedule, :count).by(1)
+        
+        schedule = BucketSchedule.last
+        expect(schedule.schedule_type).to eq(BucketSchedule::SCHEDULE_TYPE_ONCE)
+        expect(schedule.bucket_image_id).to eq(bucket_image.id)
+      end
+
+      it 'posts existing image immediately when scheduled_at not provided' do
+        # Schedule is created then destroyed, so net change is 0
+        expect {
+          post :single_post, params: existing_image_params
+        }.to change(BucketSchedule, :count).by(0)
+        
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to eq('Post sent immediately')
+      end
     end
 
     context 'with link attachment' do
@@ -133,6 +156,36 @@ RSpec.describe Api::V1::SchedulerController, type: :controller do
         expect(response).to have_http_status(:unprocessable_entity)
         json_response = JSON.parse(response.body)
         expect(json_response['error']).to eq('No content provided')
+      end
+    end
+
+    context 'with video file' do
+      let(:video_params) do
+        video_path = Rails.root.join('spec', 'fixtures', 'test_video.mp4')
+        {
+          networks: valid_networks,
+          file: fixture_file_upload(video_path, 'video/mp4')
+        }
+      end
+
+      before do
+        # Create a test video file if it doesn't exist
+        video_path = Rails.root.join('spec', 'fixtures', 'test_video.mp4')
+        unless File.exist?(video_path)
+          FileUtils.mkdir_p(File.dirname(video_path))
+          File.write(video_path, 'fake video data')
+        end
+      end
+
+      it 'handles video file upload' do
+        expect {
+          post :single_post, params: video_params
+        }.to change(Video, :count).by(1)
+
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to eq('Video uploaded successfully')
+        expect(json_response['video']).to be_present
       end
     end
   end
@@ -192,6 +245,17 @@ RSpec.describe Api::V1::SchedulerController, type: :controller do
       expect(response).to have_http_status(:unprocessable_entity)
       json_response = JSON.parse(response.body)
       expect(json_response['error']).to eq('No images available in bucket')
+    end
+
+    it 'returns detailed error when images exist but rotation logic fails' do
+      # Create images but make get_next_bucket_image_due return nil
+      create(:bucket_image, bucket: bucket)
+      allow_any_instance_of(BucketSchedule).to receive(:get_next_bucket_image_due).and_return(nil)
+      
+      post :post_now, params: { id: bucket_schedule.id }
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to include('Unable to determine next image')
     end
 
     it 'creates send history record' do
@@ -324,6 +388,136 @@ RSpec.describe Api::V1::SchedulerController, type: :controller do
 
       bucket_image = BucketImage.last
       expect(bucket_image.post_to).to eq(expected_flags)
+    end
+  end
+
+  describe 'POST #single_post with link attachment' do
+    let(:link_params) do
+      {
+        networks: ['facebook', 'twitter'],
+        link_attachment: 'https://example.com/article'
+      }
+    end
+
+    it 'handles link post' do
+      post :single_post, params: link_params
+      
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['message']).to eq('Link post scheduled')
+      expect(json_response['post_to']).to be_present
+    end
+  end
+
+  describe 'POST #single_post with no content' do
+    it 'returns error when no content provided' do
+      post :single_post, params: { networks: ['facebook'] }
+      
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('No content provided')
+    end
+  end
+
+  describe 'private helper methods' do
+    describe '#build_cron_string' do
+      it 'builds correct cron string from time' do
+        scheduled_at = Time.parse('2024-12-25 14:30:00')
+        cron_string = controller.send(:build_cron_string, scheduled_at)
+        expect(cron_string).to eq('30 14 25 12 *')
+      end
+
+      it 'handles single digit values correctly' do
+        scheduled_at = Time.parse('2024-01-05 09:05:00')
+        cron_string = controller.send(:build_cron_string, scheduled_at)
+        expect(cron_string).to eq('5 9 5 1 *')
+      end
+    end
+
+    describe '#video_file?' do
+      it 'returns true for .mp4 files' do
+        file = double(original_filename: 'test.mp4')
+        result = controller.send(:video_file?, file)
+        expect(result).to be true
+      end
+
+      it 'returns false for non-video files' do
+        file = double(original_filename: 'test.jpg')
+        result = controller.send(:video_file?, file)
+        expect(result).to be false
+      end
+
+      it 'handles uppercase extensions' do
+        file = double(original_filename: 'test.MP4')
+        result = controller.send(:video_file?, file)
+        expect(result).to be true
+      end
+
+      it 'handles files without extension' do
+        file = double(original_filename: 'test')
+        result = controller.send(:video_file?, file)
+        expect(result).to be false
+      end
+    end
+
+    describe '#extract_filename_without_extension' do
+      it 'extracts filename without extension' do
+        result = controller.send(:extract_filename_without_extension, 'test_image.jpg')
+        expect(result).to eq('test_image')
+      end
+
+      it 'handles multiple dots in filename' do
+        result = controller.send(:extract_filename_without_extension, 'test.image.file.jpg')
+        expect(result).to eq('test')
+      end
+
+      it 'handles filename without extension' do
+        result = controller.send(:extract_filename_without_extension, 'testfile')
+        expect(result).to eq('testfile')
+      end
+    end
+
+    describe '#upload_file' do
+      it 'generates unique file path' do
+        file = double(original_filename: 'test.jpg')
+        path1 = controller.send(:upload_file, file, 'images')
+        path2 = controller.send(:upload_file, file, 'images')
+        expect(path1).not_to eq(path2)
+        expect(path1).to include('images/')
+        expect(path1).to include('test.jpg')
+      end
+
+      it 'includes folder in path' do
+        file = double(original_filename: 'test.jpg')
+        path = controller.send(:upload_file, file, 'videos')
+        expect(path).to include('videos/')
+      end
+    end
+
+    describe '#bucket_schedule_json' do
+      it 'returns correct JSON structure' do
+        schedule = create(:bucket_schedule, bucket: bucket)
+        json = controller.send(:bucket_schedule_json, schedule)
+        expect(json).to have_key(:id)
+        expect(json).to have_key(:schedule)
+        expect(json).to have_key(:schedule_type)
+        expect(json).to have_key(:post_to)
+        expect(json).to have_key(:description)
+        expect(json).to have_key(:twitter_description)
+        expect(json).to have_key(:times_sent)
+        expect(json).to have_key(:skip_image)
+        expect(json).to have_key(:bucket_image_id)
+        expect(json).to have_key(:created_at)
+        expect(json).to have_key(:updated_at)
+      end
+
+      it 'includes all schedule attributes' do
+        schedule = create(:bucket_schedule, bucket: bucket, description: 'Test', twitter_description: 'Twitter Test')
+        json = controller.send(:bucket_schedule_json, schedule)
+        expect(json[:description]).to eq('Test')
+        expect(json[:twitter_description]).to eq('Twitter Test')
+        expect(json[:id]).to eq(schedule.id)
+      end
     end
   end
 end

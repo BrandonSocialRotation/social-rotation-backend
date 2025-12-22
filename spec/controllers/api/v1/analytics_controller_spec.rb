@@ -202,5 +202,18 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
         expect(json_response['range']).to eq('7d')
       end
     end
+
+    context 'with error in instagram analytics' do
+      it 'handles errors gracefully and continues' do
+        allow(MetaInsightsService).to receive(:new).and_raise(StandardError.new('Service error'))
+
+        get :overall, params: { range: '7d' }
+
+        expect(response).to have_http_status(:success)
+        json_response = JSON.parse(response.body)
+        expect(json_response['platforms']).to eq({})
+        expect(json_response['total_reach']).to eq(0)
+      end
+    end
   end
 end

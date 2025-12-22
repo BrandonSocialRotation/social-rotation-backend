@@ -1,4 +1,6 @@
 class Api::V1::PlansController < ApplicationController
+  include JsonSerializers
+  
   before_action :authenticate_user!, only: [:show]
   
   # GET /api/v1/plans
@@ -61,28 +63,4 @@ class Api::V1::PlansController < ApplicationController
   end
   
   private
-  
-  def plan_json(plan)
-    {
-      id: plan.id,
-      name: plan.name,
-      plan_type: plan.plan_type,
-      price_cents: plan.price_cents,
-      price_dollars: plan.price_dollars,
-      formatted_price: plan.formatted_price,
-      max_locations: plan.max_locations,
-      max_users: plan.max_users,
-      max_buckets: plan.max_buckets,
-      max_images_per_bucket: plan.max_images_per_bucket,
-      features: plan.features_hash,
-      stripe_price_id: plan.stripe_price_id,
-      stripe_product_id: plan.stripe_product_id,
-      display_name: plan.display_name,
-      supports_per_user_pricing: plan.has_attribute?(:supports_per_user_pricing) ? (plan.supports_per_user_pricing || false) : false,
-      base_price_cents: plan.has_attribute?(:base_price_cents) ? (plan.base_price_cents || 0) : 0,
-      per_user_price_cents: plan.has_attribute?(:per_user_price_cents) ? (plan.per_user_price_cents || 0) : 0,
-      per_user_price_after_10_cents: plan.has_attribute?(:per_user_price_after_10_cents) ? (plan.per_user_price_after_10_cents || 0) : 0,
-      billing_period: plan.has_attribute?(:billing_period) ? (plan.billing_period || 'monthly') : 'monthly'
-    }
-  end
 end

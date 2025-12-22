@@ -273,5 +273,35 @@ RSpec.describe Account, type: :model do
       100.times { create(:user, account: account, status: 1) }
       expect(account.can_add_user?).to be true
     end
+
+    it 'handles plan.max_users error gracefully and falls back to account_feature' do
+      account.account_feature.update!(max_users: 3)
+      allow(account.plan).to receive(:max_users).and_raise(StandardError.new('Database error'))
+      2.times { create(:user, account: account, status: 1) }
+      expect(account.can_add_user?).to be true
+      
+      create(:user, account: account, status: 1)
+      expect(account.can_add_user?).to be false
+    end
+  end
+
+  describe '#can_add_bucket? with plan error handling' do
+    let(:account) { create(:account) }
+    let(:user) { create(:user, account: account) }
+    let(:plan) { create(:plan, max_buckets: 5) }
+
+    before do
+      account.update!(plan: plan)
+    end
+
+    it 'handles plan.max_buckets error gracefully and falls back to account_feature' do
+      account.account_feature.update!(max_buckets: 3)
+      allow(account.plan).to receive(:max_buckets).and_raise(StandardError.new('Database error'))
+      2.times { create(:bucket, user: user) }
+      expect(account.can_add_bucket?(user)).to be true
+      
+      create(:bucket, user: user)
+      expect(account.can_add_bucket?(user)).to be false
+    end
   end
 end

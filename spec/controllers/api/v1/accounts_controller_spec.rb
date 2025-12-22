@@ -61,6 +61,42 @@ RSpec.describe Api::V1::AccountsController, type: :controller do
         expect(json['features']).to be_present
       end
     end
+
+    context 'when user is super admin' do
+      let(:super_admin) { create(:user) }
+
+      before do
+        allow(super_admin).to receive(:super_admin?).and_return(true)
+        request.headers['Authorization'] = "Bearer #{generate_token(super_admin)}"
+        allow(controller).to receive(:current_user).and_return(super_admin)
+      end
+
+      it 'returns unlimited features for super admin' do
+        get :features
+        expect(response).to have_http_status(:success)
+        json = JSON.parse(response.body)
+        expect(json['features']['max_users']).to eq(999999)
+        expect(json['features']['max_buckets']).to eq(999999)
+        expect(json['features']['allow_marketplace']).to be true
+      end
+    end
+
+    context 'when account has no account_feature' do
+      let(:account) { create(:account) }
+      let(:admin) { create(:user, account: account, is_account_admin: true) }
+
+      before do
+        account.account_feature&.destroy
+        request.headers['Authorization'] = "Bearer #{generate_token(admin)}"
+      end
+
+      it 'returns empty hash when account_feature is nil' do
+        get :features
+        expect(response).to have_http_status(:success)
+        json = JSON.parse(response.body)
+        expect(json['features']).to eq({})
+      end
+    end
   end
 
   # Test: PUT #update_features - Update account features
@@ -112,6 +148,22 @@ RSpec.describe Api::V1::AccountsController, type: :controller do
       it 'returns forbidden' do
         put :update_features, params: { features: { max_users: 100 } }
         expect(response).to have_http_status(:forbidden)
+      end
+    end
+
+    context 'when update fails validation' do
+      let(:account) { create(:account, is_reseller: true) }
+      let(:reseller) { create(:user, account: account, is_account_admin: true) }
+
+      before do
+        request.headers['Authorization'] = "Bearer #{generate_token(reseller)}"
+      end
+
+      it 'returns validation errors' do
+        put :update_features, params: { features: { max_users: -1 } }
+        expect(response).to have_http_status(:unprocessable_entity)
+        json = JSON.parse(response.body)
+        expect(json['errors']).to be_present
       end
     end
   end

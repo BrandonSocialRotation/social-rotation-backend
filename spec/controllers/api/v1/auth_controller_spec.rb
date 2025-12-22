@@ -111,6 +111,34 @@ RSpec.describe Api::V1::AuthController, type: :controller do
         json_response = JSON.parse(response.body)
         expect(json_response['details']).to include('Email has already been taken')
       end
+
+      it 'returns error for agency account without company_name' do
+        agency_params = valid_user_params.merge(account_type: 'agency', company_name: '')
+        post :register, params: agency_params
+        expect(response).to have_http_status(:unprocessable_entity)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Company name is required for agency accounts')
+        expect(json_response['field']).to eq('company_name')
+      end
+    end
+
+    context 'with registration errors' do
+      it 'handles database errors gracefully' do
+        allow(User).to receive(:find_by).and_raise(StandardError.new('Database error'))
+        post :register, params: valid_user_params
+        expect(response).to have_http_status(:internal_server_error)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Registration failed')
+      end
+
+      it 'handles account creation errors for agency' do
+        allow(Account).to receive(:create!).and_raise(StandardError.new('Account creation failed'))
+        agency_params = valid_user_params.merge(account_type: 'agency', company_name: 'Test Agency')
+        post :register, params: agency_params
+        expect(response).to have_http_status(:internal_server_error)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Registration failed')
+      end
     end
   end
 

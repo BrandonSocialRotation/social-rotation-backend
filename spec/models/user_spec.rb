@@ -286,9 +286,10 @@ RSpec.describe User, type: :model do
           expect(user.get_absolute_watermark_logo_path).to eq(expected_path)
         end
 
-      it 'returns empty string when no watermark' do
-        user.update!(watermark_logo: nil)
-        expect(user.get_absolute_watermark_logo_path).to eq('')
+        it 'returns empty string when no watermark' do
+          user.update!(watermark_logo: nil)
+          expect(user.get_absolute_watermark_logo_path).to eq('')
+        end
       end
     end
 
@@ -335,7 +336,21 @@ RSpec.describe User, type: :model do
         user = create(:user, account_id: nil)
         expect(user.can_access_rss_feeds?).to be true
       end
+
+      it 'returns false when account exists but account_feature is nil' do
+        account = create(:account)
+        account.account_feature.destroy
+        # Ensure account_id is not 0 (super admin) and not nil
+        user = create(:user, account: account)
+        user.update_column(:account_id, account.id) # Use update_column to bypass callbacks
+        user.reload
+        # Ensure user is not a super admin
+        expect(user.account_id).not_to eq(0)
+        expect(user.account_id).not_to be_nil
+        # When account_feature is nil, the safe navigation returns nil, so it falls back to account_id.nil? check
+        # But account exists, so it should return false
+        expect(user.can_access_rss_feeds?).to be false
+      end
     end
   end
-end
 end

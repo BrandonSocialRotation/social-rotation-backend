@@ -204,6 +204,26 @@ RSpec.describe Plan, type: :model do
         annual = plan.calculate_price_for_users(5, 'annual')
         expect(annual).to eq((monthly * 10.0 / 12.0).round)
       end
+
+      it 'handles nil base_price_cents' do
+        plan.update!(base_price_cents: nil)
+        expect(plan.calculate_price_for_users(1)).to eq(0)
+      end
+
+      it 'handles nil per_user_price_cents' do
+        plan.update!(per_user_price_cents: nil)
+        expect(plan.calculate_price_for_users(5)).to eq(2000) # Only base price
+      end
+
+      it 'handles nil per_user_price_after_10_cents' do
+        plan.update!(per_user_price_after_10_cents: nil)
+        # For 15 users: base + 10 at regular + 4 at nil (treated as 0)
+        expect(plan.calculate_price_for_users(15)).to eq(7000) # 2000 + (10 * 500) + (4 * 0)
+      end
+
+      it 'handles zero user count' do
+        expect(plan.calculate_price_for_users(0)).to eq(2000) # Base price only
+      end
     end
   end
 
@@ -262,6 +282,27 @@ RSpec.describe Plan, type: :model do
         
         it 'returns name with starting price for year' do
           expect(plan.display_name).to match(/Pro - Starting at \$[\d.]+\/year/)
+        end
+      end
+
+      context 'when billing_period column does not exist' do
+        let(:plan) do
+          create(:plan,
+            name: 'Pro',
+            supports_per_user_pricing: true,
+            base_price_cents: 2000
+          )
+        end
+
+        before do
+          # Simulate column not existing by stubbing has_attribute?
+          allow(plan).to receive(:has_attribute?) do |attr|
+            attr == :billing_period ? false : plan.class.column_names.include?(attr.to_s)
+          end
+        end
+
+        it 'defaults to monthly when billing_period column does not exist' do
+          expect(plan.display_name).to match(/Pro - Starting at \$[\d.]+\/month/)
         end
       end
     end

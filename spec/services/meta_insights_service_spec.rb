@@ -139,6 +139,34 @@ RSpec.describe MetaInsightsService do
       expect(result7d.length).to eq(7)
       expect(result28d.length).to eq(28)
     end
+
+    it 'calls fetch_live_summary when live available' do
+      allow(ENV).to receive(:[]).with('META_APP_ID').and_return('app_id')
+      allow(ENV).to receive(:[]).with('META_APP_SECRET').and_return('app_secret')
+      allow(service).to receive(:live_available?).and_return(true)
+      allow(service).to receive(:fetch_live_summary).and_call_original
+      
+      result = service.summary('7d')
+      expect(result).to be_a(Hash)
+    end
+
+    it 'calls fetch_live_timeseries when live available' do
+      allow(ENV).to receive(:[]).with('META_APP_ID').and_return('app_id')
+      allow(ENV).to receive(:[]).with('META_APP_SECRET').and_return('app_secret')
+      allow(service).to receive(:live_available?).and_return(true)
+      allow(service).to receive(:fetch_live_timeseries).and_call_original
+      
+      result = service.timeseries('reach', '7d')
+      expect(result).to be_an(Array)
+    end
+
+    it 'handles range_days with non-28d ranges' do
+      result = service.timeseries('reach', '7d')
+      expect(result.length).to eq(7)
+      
+      result = service.timeseries('reach', '14d')
+      expect(result.length).to eq(7) # Defaults to 7 for non-28d
+    end
   end
 end
 

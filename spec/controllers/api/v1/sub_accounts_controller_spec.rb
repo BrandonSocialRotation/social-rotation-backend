@@ -197,6 +197,41 @@ RSpec.describe Api::V1::SubAccountsController, type: :controller do
       post :switch, params: { id: other_user.id }
       expect(response).to have_http_status(:forbidden)
     end
+
+    context 'when user is super admin' do
+      let(:super_admin) { create(:user) }
+      let(:other_account) { create(:account) }
+      let(:other_user) { create(:user, account: other_account) }
+
+      before do
+        allow(super_admin).to receive(:super_admin?).and_return(true)
+        request.headers['Authorization'] = "Bearer #{generate_token(super_admin)}"
+        allow(controller).to receive(:current_user).and_return(super_admin)
+      end
+
+      it 'allows super admin to switch to any user' do
+        post :switch, params: { id: other_user.id }
+        expect(response).to have_http_status(:success)
+        json = JSON.parse(response.body)
+        expect(json['user']['id']).to eq(other_user.id)
+      end
+    end
+  end
+
+  describe 'set_sub_account error handling' do
+    let(:account) { create(:account, is_reseller: true) }
+    let(:reseller) { create(:user, account: account, is_account_admin: true) }
+
+    before do
+      request.headers['Authorization'] = "Bearer #{generate_token(reseller)}"
+    end
+
+    it 'returns not_found when sub-account does not exist' do
+      get :show, params: { id: 99999 }
+      expect(response).to have_http_status(:not_found)
+      json = JSON.parse(response.body)
+      expect(json['error']).to eq('Sub-account not found')
+    end
   end
 end
 

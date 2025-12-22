@@ -2,7 +2,7 @@ class Image < ApplicationRecord
   # Associations
   has_many :bucket_images, dependent: :destroy
   has_many :buckets, through: :bucket_images
-  has_many :market_items, dependent: :destroy
+  has_many :market_items, foreign_key: 'front_image_id', dependent: :destroy
   
   # Validations
   validates :file_path, presence: true

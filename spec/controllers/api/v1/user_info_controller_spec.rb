@@ -52,6 +52,16 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
       expect(user_data['google_connected']).to be true
       expect(user_data['instagram_connected']).to be false # No instagram_business_id
     end
+
+    it 'handles errors gracefully' do
+      allow(controller).to receive(:user_json).and_raise(StandardError.new('Database error'))
+      
+      get :show
+      
+      expect(response).to have_http_status(:internal_server_error)
+      json_response = JSON.parse(response.body)
+      expect(json_response['error']).to eq('Failed to load user info')
+    end
   end
 
   describe 'PATCH #update' do
@@ -508,6 +518,146 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
         json_response = JSON.parse(response.body)
         expect(json_response['error']).to eq('Failed to fetch Facebook pages')
         expect(json_response['message']).to eq('API error')
+      end
+    end
+  end
+
+  describe 'POST #convert_to_agency' do
+    context 'when user has account_id = 0' do
+      before do
+        user.update!(account_id: 0, is_account_admin: false)
+      end
+
+      it 'creates new agency account' do
+        expect {
+          post :convert_to_agency, params: { company_name: 'Test Agency' }
+        }.to change(Account, :count).by(1)
+
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to include('converted to agency')
+        expect(user.reload.account_id).not_to eq(0)
+        expect(user.reload.is_account_admin).to be true
+      end
+    end
+
+    context 'when user already has an account' do
+      let(:account) { create(:account) }
+      
+      before do
+        user.update!(account_id: account.id, is_account_admin: true)
+      end
+
+      it 'converts existing account to agency' do
+        post :convert_to_agency
+        
+        expect(response).to have_http_status(:ok)
+        expect(account.reload.is_reseller).to be true
+      end
+    end
+
+    context 'when user is not account admin and account_id != 0' do
+      let(:account) { create(:account) }
+      
+      before do
+        user.update!(account_id: account.id, is_account_admin: false)
+      end
+
+      it 'returns forbidden' do
+        post :convert_to_agency
+        
+        expect(response).to have_http_status(:forbidden)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to include('Only account admins')
+      end
+    end
+
+    context 'when an error occurs' do
+      before do
+        user.update!(account_id: 0)
+        allow(Account).to receive(:create!).and_raise(StandardError.new('Database error'))
+      end
+
+      it 'handles errors gracefully' do
+        post :convert_to_agency
+        
+        expect(response).to have_http_status(:internal_server_error)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to include('Failed to convert')
+      end
+    end
+  end
+
+  describe 'DELETE #delete_test_account' do
+    let(:other_user) { create(:user, email: 'other@example.com') }
+
+    context 'with valid email' do
+      it 'deletes user successfully' do
+        # Ensure user is not an account admin to avoid account deletion
+        other_user.update!(is_account_admin: false, account_id: nil)
+        
+        expect {
+          delete :delete_test_account, params: { email: other_user.email }
+        }.to change(User, :count).by(-1)
+
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to include('deleted successfully')
+      end
+
+      it 'deletes account when user is account admin' do
+        account = create(:account)
+        other_user.update!(account_id: account.id, is_account_admin: true)
+        subscription = create(:subscription, account: account)
+        
+        expect {
+          delete :delete_test_account, params: { email: other_user.email }
+        }.to change(Account, :count).by(-1).and change(Subscription, :count).by(-1)
+      end
+    end
+
+    context 'with missing email' do
+      it 'returns bad_request' do
+        delete :delete_test_account
+        
+        expect(response).to have_http_status(:bad_request)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to include('Email is required')
+      end
+    end
+
+    context 'when user not found' do
+      it 'returns not_found' do
+        delete :delete_test_account, params: { email: 'nonexistent@example.com' }
+        
+        expect(response).to have_http_status(:not_found)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to include('User not found')
+      end
+    end
+
+    context 'when trying to delete own account' do
+      it 'returns bad_request' do
+        delete :delete_test_account, params: { email: user.email }
+        
+        expect(response).to have_http_status(:bad_request)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to include('Cannot delete your own account')
+      end
+    end
+
+    context 'when an error occurs' do
+      before do
+        allow(User).to receive(:find_by).and_return(other_user)
+        allow(other_user).to receive(:destroy).and_raise(StandardError.new('Database error'))
+      end
+
+      it 'handles errors gracefully' do
+        delete :delete_test_account, params: { email: other_user.email }
+        
+        expect(response).to have_http_status(:internal_server_error)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to include('Failed to delete')
       end
     end
   end

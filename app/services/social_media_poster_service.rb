@@ -90,15 +90,21 @@ class SocialMediaPosterService
   
   # Get local file path for the image
   # Downloads the image if it's a URL, otherwise returns local path
-  # @return [String] Local file path
+  # @return [String] Local file path or nil if download fails
   def get_local_image_path
     file_path = @bucket_image.image.file_path
+    return nil if file_path.nil?
     
     # If it's a URL (http:// or https://), download it to a temp file
     if file_path.start_with?('http://') || file_path.start_with?('https://')
-      download_image_to_temp(file_path)
+      begin
+        download_image_to_temp(file_path)
+      rescue => e
+        Rails.logger.error "Failed to get local image path: #{e.message}"
+        nil
+      end
     else
-      # Local file path
+      # Local file path (even if empty string, return the path)
       Rails.root.join('public', file_path).to_s
     end
   end
@@ -148,9 +154,11 @@ class SocialMediaPosterService
   # Post to Twitter
   def post_to_twitter(image_path)
     begin
+      return { success: false, error: 'Image path is required' } if image_path.nil?
+      
       service = SocialMedia::TwitterService.new(@user)
       response = service.post_tweet(@twitter_description, image_path)
-      
+
       { success: true, response: response }
     rescue => e
       Rails.logger.error "Twitter posting error: #{e.message}"
@@ -174,6 +182,8 @@ class SocialMediaPosterService
   # Post to LinkedIn
   def post_to_linkedin(image_path)
     begin
+      return { success: false, error: 'Image path is required' } if image_path.nil?
+      
       service = SocialMedia::LinkedinService.new(@user)
       response = service.post_with_image(@description, image_path)
       

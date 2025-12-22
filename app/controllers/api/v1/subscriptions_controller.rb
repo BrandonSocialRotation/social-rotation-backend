@@ -1,14 +1,16 @@
 class Api::V1::SubscriptionsController < ApplicationController
-  skip_before_action :authenticate_user!, only: [:webhook, :test_stripe, :run_migrations]
-  before_action :authenticate_user!, except: [:webhook, :test_stripe, :run_migrations]
+  include JsonSerializers
+  
+  skip_before_action :authenticate_user!, only: [:webhook, :test_stripe]
   before_action :require_account_admin!, only: [:create, :cancel]
-  # Note: checkout_session doesn't require account_admin check - allows new users during registration
   before_action :check_stripe_configured!, only: [:checkout_session, :cancel, :webhook]
+  skip_before_action :require_active_subscription!, only: [:index, :show, :create, :checkout_session, :cancel, :webhook, :test_stripe]
   
   # GET /api/v1/subscriptions/test_stripe
   # Test Stripe connection and configuration
   def test_stripe
     check_stripe_configured!
+    return if performed?
     
     Stripe.api_key = ENV['STRIPE_SECRET_KEY']
     
@@ -114,14 +116,27 @@ class Api::V1::SubscriptionsController < ApplicationController
     Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || ''
     
     begin
-      # Create Stripe customer (no account needed yet - account created in webhook)
-      customer = Stripe::Customer.create({
-        email: current_user.email,
-        name: current_user.name,
-        metadata: {
-          user_id: current_user.id.to_s
-        }
-      })
+      # Get or create Stripe customer
+      # For existing accounts, try to reuse customer ID from subscription
+      customer = nil
+      if current_user.account_id && current_user.account_id > 0 && current_user.account&.subscription&.stripe_customer_id.present?
+        begin
+          customer = Stripe::Customer.retrieve(current_user.account.subscription.stripe_customer_id)
+        rescue Stripe::StripeError
+          # Customer doesn't exist, create new one
+        end
+      end
+      
+      # Create new customer if we don't have one
+      unless customer
+        customer = Stripe::Customer.create({
+          email: current_user.email,
+          name: current_user.name,
+          metadata: {
+            user_id: current_user.id.to_s
+          }
+        })
+      end
       
       # Calculate price based on plan type
       if plan.supports_per_user_pricing
@@ -422,10 +437,12 @@ class Api::V1::SubscriptionsController < ApplicationController
   def check_stripe_configured!
     unless ENV['STRIPE_SECRET_KEY'].present?
       render json: { error: 'Stripe is not configured. Please set STRIPE_SECRET_KEY environment variable.' }, status: :service_unavailable
+      return
     end
   rescue => e
     Rails.logger.error "Stripe configuration check failed: #{e.message}"
     render json: { error: 'Stripe service unavailable' }, status: :service_unavailable
+    return
   end
   
   def frontend_url
@@ -581,36 +598,4 @@ class Api::V1::SubscriptionsController < ApplicationController
     subscription.update!(status: Subscription::STATUS_PAST_DUE)
   end
   
-  def subscription_json(subscription)
-    plan_data = if subscription.plan
-      {
-        id: subscription.plan.id,
-        name: subscription.plan.name,
-        plan_type: subscription.plan.plan_type
-      }
-    else
-      nil
-    end
-    
-    {
-      id: subscription.id,
-      plan: plan_data,
-      status: subscription.status,
-      current_period_start: subscription.current_period_start,
-      current_period_end: subscription.current_period_end,
-      cancel_at_period_end: subscription.cancel_at_period_end,
-      days_remaining: subscription.days_remaining,
-      active: subscription.active?,
-      will_cancel: subscription.will_cancel?
-    }
-  rescue => e
-    Rails.logger.error "Error in subscription_json: #{e.message}"
-    # Return minimal subscription data if serialization fails
-    {
-      id: subscription.id,
-      plan: nil,
-      status: subscription.status || 'unknown',
-      error: 'Failed to load subscription details'
-    }
-  end
 end

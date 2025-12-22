@@ -1,12 +1,10 @@
-# RSS Feeds Controller
-# Handles RSS feed management for reseller accounts
-# Only account admins (resellers) can create/manage RSS feeds
 class Api::V1::RssFeedsController < ApplicationController
+  include JsonSerializers
+  
   before_action :authenticate_user!
   before_action :require_rss_access!
   before_action :set_rss_feed, only: [:show, :update, :destroy, :fetch_posts, :posts]
   
-  # POST /api/v1/rss_feeds/fetch_all
   def fetch_all
     # Trigger background job to fetch all active RSS feeds
     RssFeedFetchJob.perform_later
@@ -27,7 +25,8 @@ class Api::V1::RssFeedsController < ApplicationController
     
     begin
       # Try to fetch and parse the feed
-      service = RssFetchService.new(OpenStruct.new(url: url))
+      feed_obj = OpenStruct.new(url: url)
+      service = RssFetchService.new(feed_obj)
       content = service.send(:fetch_rss_content)
       
       if content.blank?
@@ -195,55 +194,4 @@ class Api::V1::RssFeedsController < ApplicationController
     params.require(:rss_feed).permit(:url, :name, :description, :is_active)
   end
 
-  def rss_feed_json(feed)
-    {
-      id: feed.id,
-      url: feed.url,
-      name: feed.name,
-      description: feed.description,
-      is_active: feed.is_active,
-      status: feed.status,
-      health_status: feed.health_status,
-      last_fetched_at: feed.last_fetched_at,
-      last_successful_fetch_at: feed.last_successful_fetch_at,
-      fetch_failure_count: feed.fetch_failure_count,
-      last_fetch_error: feed.last_fetch_error,
-      posts_count: feed.rss_posts.count,
-      unviewed_posts_count: feed.unviewed_posts.count,
-      created_at: feed.created_at,
-      updated_at: feed.updated_at,
-      account: feed.account ? {
-        id: feed.account.id,
-        name: feed.account.name
-      } : nil,
-      created_by: {
-        id: feed.user.id,
-        name: feed.user.name,
-        email: feed.user.email
-      }
-    }
-  end
-
-  def rss_post_json(post)
-    {
-      id: post.id,
-      title: post.title,
-      description: post.description,
-      content: post.content,
-      image_url: post.image_url,
-      original_url: post.original_url,
-      published_at: post.published_at,
-      is_viewed: post.is_viewed,
-      short_title: post.short_title,
-      short_description: post.short_description,
-      has_image: post.has_image?,
-      display_image_url: post.display_image_url,
-      social_media_content: post.social_media_content,
-      formatted_published_at: post.formatted_published_at,
-      relative_published_at: post.relative_published_at,
-      recent: post.recent?,
-      created_at: post.created_at,
-      updated_at: post.updated_at
-    }
-  end
 end

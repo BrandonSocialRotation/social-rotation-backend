@@ -106,7 +106,8 @@ class BucketSchedule < ApplicationRecord
     
     if schedule_type == SCHEDULE_TYPE_ROTATION && (post_to & BIT_TWITTER) > 0
       bucket.bucket_images.each do |bucket_image|
-        return true if bucket_image.description&.length > TWITTER_CHARACTER_LIMIT && bucket_image.twitter_description.blank?
+        desc_length = bucket_image.description&.length
+        return true if desc_length && desc_length > TWITTER_CHARACTER_LIMIT && bucket_image.twitter_description.blank?
       end
     end
     

@@ -1,7 +1,6 @@
-# RSS Posts Controller
-# Handles RSS post management and processing
-# Allows users to review, edit, and schedule RSS posts for social media
 class Api::V1::RssPostsController < ApplicationController
+  include JsonSerializers
+  
   before_action :authenticate_user!
   before_action :require_rss_access!
   before_action :set_rss_post, only: [:show, :update, :mark_viewed, :mark_unviewed, :schedule_post]
@@ -272,11 +271,26 @@ class Api::V1::RssPostsController < ApplicationController
 
     # Filter by date range
     if params[:start_date].present?
-      @posts = @posts.where('published_at >= ?', Date.parse(params[:start_date]))
+      begin
+        start_time = Time.parse(params[:start_date])
+      rescue
+        start_time = Date.parse(params[:start_date]).beginning_of_day
+      end
+      @posts = @posts.where('published_at >= ?', start_time)
     end
 
     if params[:end_date].present?
-      @posts = @posts.where('published_at <= ?', Date.parse(params[:end_date]).end_of_day)
+      begin
+        end_time = Time.parse(params[:end_date])
+        # If the parsed time is at the start of day (00:00:00), it might be from beginning_of_day
+        # In that case, use end_of_day for that date to include the entire day
+        if end_time.hour == 0 && end_time.min == 0 && end_time.sec == 0
+          end_time = end_time.end_of_day
+        end
+      rescue
+        end_time = Date.parse(params[:end_date]).end_of_day
+      end
+      @posts = @posts.where('published_at <= ?', end_time)
     end
 
     # Filter by search term
@@ -296,30 +310,10 @@ class Api::V1::RssPostsController < ApplicationController
   end
 
   def rss_post_json(post)
-    {
-      id: post.id,
-      title: post.title,
-      description: post.description,
-      content: post.content,
-      image_url: post.image_url,
-      original_url: post.original_url,
-      published_at: post.published_at,
-      is_viewed: post.is_viewed,
-      short_title: post.short_title,
-      short_description: post.short_description,
-      has_image: post.has_image?,
-      display_image_url: post.display_image_url,
-      social_media_content: post.social_media_content,
-      formatted_published_at: post.formatted_published_at,
-      relative_published_at: post.relative_published_at,
-      recent: post.recent?,
-      created_at: post.created_at,
-      updated_at: post.updated_at,
-      rss_feed: {
-        id: post.rss_feed.id,
-        name: post.rss_feed.name,
-        url: post.rss_feed.url
-      }
-    }
+    super(post).merge(rss_feed: {
+      id: post.rss_feed.id,
+      name: post.rss_feed.name,
+      url: post.rss_feed.url
+    })
   end
 end

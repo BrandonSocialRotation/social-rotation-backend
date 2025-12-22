@@ -145,5 +145,74 @@ RSpec.describe RssFeed, type: :model do
       expect(feed.last_fetched_at).to be_present
     end
   end
+
+  describe '#can_be_managed_by?' do
+    let(:feed) { create(:rss_feed) }
+    let(:admin_user) { create(:user, is_account_admin: true, account_id: feed.account_id) }
+    let(:other_admin) { create(:user, is_account_admin: true, account_id: 999) }
+    let(:regular_user) { create(:user, is_account_admin: false) }
+    let(:super_admin) { create(:user) }
+
+    before do
+      allow(super_admin).to receive(:super_admin?).and_return(true)
+    end
+
+    it 'returns true for super admin' do
+      expect(feed.can_be_managed_by?(super_admin)).to be true
+    end
+
+    it 'returns true for account admin of same account' do
+      expect(feed.can_be_managed_by?(admin_user)).to be true
+    end
+
+    it 'returns false for account admin of different account' do
+      expect(feed.can_be_managed_by?(other_admin)).to be false
+    end
+
+    it 'returns false for regular user' do
+      # Ensure feed has an account_id and regular user is from different account
+      feed.update!(account_id: 100) if feed.account_id.nil?
+      regular_user.update!(is_account_admin: false, account_id: feed.account_id + 1)
+      expect(feed.can_be_managed_by?(regular_user)).to be false
+    end
+
+    it 'returns false for nil user' do
+      expect(feed.can_be_managed_by?(nil)).to be false
+    end
+  end
+
+  describe '#status' do
+    it 'returns inactive when feed is not active' do
+      feed = create(:rss_feed, is_active: false)
+      expect(feed.status).to eq('inactive')
+    end
+
+    it 'returns never_fetched when never fetched' do
+      feed = create(:rss_feed, is_active: true, last_fetched_at: nil)
+      expect(feed.status).to eq('never_fetched')
+    end
+
+    it 'returns needs_fetch when last fetched more than an hour ago' do
+      feed = create(:rss_feed, is_active: true, last_fetched_at: 2.hours.ago)
+      expect(feed.status).to eq('needs_fetch')
+    end
+
+    it 'returns active when recently fetched' do
+      feed = create(:rss_feed, is_active: true, last_fetched_at: 30.minutes.ago)
+      expect(feed.status).to eq('active')
+    end
+  end
+
+  describe 'scope :for_account' do
+    let(:account1) { create(:account) }
+    let(:account2) { create(:account) }
+    let!(:feed1) { create(:rss_feed, account: account1) }
+    let!(:feed2) { create(:rss_feed, account: account2) }
+
+    it 'returns feeds for specific account' do
+      expect(RssFeed.for_account(account1.id)).to include(feed1)
+      expect(RssFeed.for_account(account1.id)).not_to include(feed2)
+    end
+  end
 end
 

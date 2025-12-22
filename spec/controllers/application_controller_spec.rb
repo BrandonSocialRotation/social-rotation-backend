@@ -45,6 +45,35 @@ RSpec.describe ApplicationController, type: :controller do
         expect(json_response['error']).to eq('Invalid or expired token')
       end
     end
+
+    context 'with token for non-existent user' do
+      let(:non_existent_user_token) { JsonWebToken.encode(user_id: 99999) }
+
+      before do
+        request.headers['Authorization'] = "Bearer #{non_existent_user_token}"
+      end
+
+      it 'denies access when user not found' do
+        get :index
+        expect(response).to have_http_status(:unauthorized)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('User not found')
+      end
+    end
+
+    context 'when authentication raises an exception' do
+      before do
+        request.headers['Authorization'] = 'Bearer test_token'
+        allow(JsonWebToken).to receive(:decode).and_raise(StandardError.new('Decode error'))
+      end
+
+      it 'handles authentication errors gracefully' do
+        get :index
+        expect(response).to have_http_status(:unauthorized)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Authentication failed')
+      end
+    end
   end
 
   describe 'error handling' do
@@ -116,27 +145,24 @@ RSpec.describe ApplicationController, type: :controller do
     it 'returns true for AuthController' do
       stub_const('Api::V1::AuthController', Class.new)
       allow(controller).to receive(:class).and_return(Api::V1::AuthController)
-      get :index
-      json_response = JSON.parse(response.body)
-      expect(json_response['result']).to be true
+      result = controller.send(:auth_or_oauth_controller?)
+      expect(result).to be true
     end
 
     it 'returns true for OAuthController callback actions' do
       stub_const('Api::V1::OauthController', Class.new)
       allow(controller).to receive(:class).and_return(Api::V1::OauthController)
       allow(controller).to receive(:params).and_return(ActionController::Parameters.new(action: 'facebook_callback'))
-      get :index
-      json_response = JSON.parse(response.body)
-      expect(json_response['result']).to be true
+      result = controller.send(:auth_or_oauth_controller?)
+      expect(result).to be true
     end
 
     it 'returns false for OAuthController non-callback actions' do
       stub_const('Api::V1::OauthController', Class.new)
       allow(controller).to receive(:class).and_return(Api::V1::OauthController)
       allow(controller).to receive(:params).and_return(ActionController::Parameters.new(action: 'connect'))
-      get :index
-      json_response = JSON.parse(response.body)
-      expect(json_response['result']).to be false
+      result = controller.send(:auth_or_oauth_controller?)
+      expect(result).to be false
     end
 
     it 'uses params fallback for route-based detection' do
@@ -146,9 +172,9 @@ RSpec.describe ApplicationController, type: :controller do
       # Use ActionController::Parameters which supports [] access
       mock_params = ActionController::Parameters.new(controller: 'api/v1/auth', action: 'login')
       allow(controller).to receive(:params).and_return(mock_params)
-      get :index
-      json_response = JSON.parse(response.body)
-      expect(json_response['result']).to be true
+      # Call the method directly instead of through a route
+      result = controller.send(:auth_or_oauth_controller?)
+      expect(result).to be true
     end
   end
 
@@ -191,6 +217,130 @@ RSpec.describe ApplicationController, type: :controller do
       get :index
       json_response = JSON.parse(response.body)
       expect(json_response['result']).to be false
+    end
+  end
+
+  describe '#require_active_subscription!' do
+    controller do
+      def index
+        require_active_subscription!
+        render json: { message: 'success' }
+      end
+    end
+
+    let(:user) { create(:user) }
+    let(:account) { create(:account) }
+    let(:token) { JsonWebToken.encode(user_id: user.id) }
+
+    before do
+      request.headers['Authorization'] = "Bearer #{token}"
+      allow(controller).to receive(:current_user).and_return(user)
+      allow(controller).to receive(:skip_subscription_check?).and_return(false)
+    end
+
+    context 'when user account_id is 0 (super admin)' do
+      before do
+        user.update!(account_id: 0)
+      end
+
+      it 'allows access without subscription check' do
+        get :index
+        expect(response).to have_http_status(:ok)
+      end
+    end
+
+    context 'when user account_id is nil (no account)' do
+      before do
+        user.update!(account_id: nil)
+      end
+
+      it 'blocks access and returns account not activated error' do
+        get :index
+        expect(response).to have_http_status(:forbidden)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Account not activated')
+        expect(json_response['subscription_required']).to be true
+      end
+    end
+
+    context 'when account does not exist' do
+      before do
+        user.update!(account_id: 99999)
+        allow(user).to receive(:account).and_return(nil)
+      end
+
+      it 'blocks access and returns account not found error' do
+        get :index
+        expect(response).to have_http_status(:forbidden)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Account not found')
+        expect(json_response['subscription_required']).to be true
+      end
+    end
+
+    context 'when subscription exists but is not active' do
+      let(:plan) { create(:plan) }
+      let(:subscription) { create(:subscription, account: account, plan: plan, status: Subscription::STATUS_CANCELED) }
+
+      before do
+        user.update!(account: account)
+        account.update!(subscription: subscription)
+        allow(account).to receive(:has_active_subscription?).and_return(false)
+      end
+
+      it 'blocks access and returns subscription suspended error' do
+        get :index
+        expect(response).to have_http_status(:forbidden)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Subscription suspended')
+        expect(json_response['subscription_suspended']).to be true
+      end
+    end
+
+    context 'when no subscription exists' do
+      before do
+        user.update!(account: account)
+        account.update!(subscription: nil)
+      end
+
+      it 'blocks access and returns subscription required error' do
+        get :index
+        expect(response).to have_http_status(:forbidden)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Subscription required')
+        expect(json_response['subscription_required']).to be true
+      end
+    end
+
+    context 'when subscription check raises an exception' do
+      before do
+        user.update!(account: account)
+      end
+
+      it 'handles errors gracefully and blocks access' do
+        # Ensure user has the account
+        user.update!(account: account)
+        # Make account.subscription raise an error when accessed
+        allow_any_instance_of(Account).to receive(:subscription).and_raise(StandardError.new('Database error'))
+        
+        get :index
+        
+        expect(response).to have_http_status(:forbidden)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Subscription verification failed')
+      end
+    end
+
+    context 'when current_user is nil' do
+      before do
+        allow(controller).to receive(:current_user).and_return(nil)
+        allow(controller).to receive(:authenticate_user!).and_return(true)
+      end
+
+      it 'skips subscription check' do
+        get :index
+        expect(response).to have_http_status(:ok)
+      end
     end
   end
 end
