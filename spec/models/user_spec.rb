@@ -24,6 +24,58 @@ RSpec.describe User, type: :model do
     it { should validate_presence_of(:name) }
     # Email must be unique across all users
     it { should validate_uniqueness_of(:email) }
+
+    # TEST: Email domain validation
+    describe 'email domain validation' do
+      it 'accepts valid email with proper domain and TLD' do
+        user = build(:user, email: 'test@example.com')
+        expect(user).to be_valid
+      end
+
+      it 'accepts email with subdomain' do
+        user = build(:user, email: 'test@mail.example.com')
+        expect(user).to be_valid
+      end
+
+      it 'accepts email with different TLDs' do
+        user = build(:user, email: 'test@example.org')
+        expect(user).to be_valid
+        user.email = 'test@example.io'
+        expect(user).to be_valid
+        user.email = 'test@example.co.uk'
+        expect(user).to be_valid
+      end
+
+      it 'rejects email without domain' do
+        user = build(:user, email: 'test@')
+        expect(user).not_to be_valid
+        expect(user.errors[:email]).to include('must have a valid domain with top-level domain (e.g., example.com)')
+      end
+
+      it 'rejects email without TLD' do
+        user = build(:user, email: 'test@example')
+        expect(user).not_to be_valid
+        expect(user.errors[:email]).to include('must have a valid domain with top-level domain (e.g., example.com)')
+      end
+
+      it 'rejects email with single character TLD' do
+        user = build(:user, email: 'test@example.c')
+        expect(user).not_to be_valid
+        expect(user.errors[:email]).to include('must have a valid top-level domain (e.g., .com, .org, .io)')
+      end
+
+      it 'rejects email with empty domain name' do
+        user = build(:user, email: 'test@.com')
+        expect(user).not_to be_valid
+        expect(user.errors[:email]).to include('must have a valid domain name')
+      end
+
+      it 'rejects email with multiple @ symbols' do
+        user = build(:user, email: 'test@@example.com')
+        # This is caught by URI::MailTo::EMAIL_REGEXP format validation first
+        expect(user).not_to be_valid
+      end
+    end
   end
 
   # TEST: Password authentication using bcrypt
