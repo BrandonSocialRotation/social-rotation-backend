@@ -83,6 +83,62 @@ RSpec.describe SocialMedia::FacebookService do
         }.to raise_error(/Facebook/)
       end
     end
+
+    context 'when API response is not successful' do
+      before do
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_return(status: 500, body: 'Internal Server Error')
+        allow(Rails.logger).to receive(:error)
+      end
+      
+      it 'returns empty array' do
+        pages = service.fetch_pages
+        expect(pages).to eq([])
+        expect(Rails.logger).to have_received(:error).with(match(/Facebook fetch_pages error/))
+      end
+    end
+
+    context 'when response data is empty' do
+      before do
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_return(status: 200, body: { data: [] }.to_json)
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/debug_token/)
+          .to_return(status: 200, body: { data: { is_valid: true } }.to_json)
+      end
+      
+      it 'returns empty array when no pages' do
+        pages = service.fetch_pages
+        expect(pages).to eq([])
+      end
+    end
+
+    context 'when exception is RuntimeError but not authentication error' do
+      before do
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_raise(RuntimeError.new('Some other error'))
+        allow(Rails.logger).to receive(:error)
+      end
+      
+      it 'raises User does not have Facebook connected error' do
+        expect {
+          service.fetch_pages
+        }.to raise_error(/User does not have Facebook connected/)
+      end
+    end
+
+    context 'when exception is not RuntimeError' do
+      before do
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_raise(StandardError.new('Network error'))
+        allow(Rails.logger).to receive(:error)
+      end
+      
+      it 'returns empty array' do
+        pages = service.fetch_pages
+        expect(pages).to eq([])
+        expect(Rails.logger).to have_received(:error).with(match(/Facebook fetch_pages error/))
+      end
+    end
   end
   
   describe '#post_to_instagram' do
@@ -112,6 +168,20 @@ RSpec.describe SocialMedia::FacebookService do
         expect {
           service.post_to_instagram('Test', 'https://example.com/image.jpg')
         }.to raise_error(/does not have Instagram connected/)
+      end
+    end
+
+    context 'when page access token cannot be retrieved' do
+      before do
+        user.update(instagram_business_id: 'ig_id')
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_return(status: 200, body: { data: [] }.to_json)
+      end
+      
+      it 'raises an error' do
+        expect {
+          service.post_to_instagram('Test', 'https://example.com/image.jpg')
+        }.to raise_error(/Could not get Facebook page access token for Instagram/)
       end
     end
 
@@ -217,6 +287,31 @@ RSpec.describe SocialMedia::FacebookService do
       expect {
         service.send(:wait_for_video_processing, 'container123', 'page_token', 1)
       }.to raise_error(/timeout/)
+    end
+
+    it 'handles IN_PROGRESS status and continues waiting' do
+      call_count = 0
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/container123/)
+        .to_return do |request|
+          call_count += 1
+          if call_count < 3
+            { status: 200, body: { status_code: 'IN_PROGRESS' }.to_json }
+          else
+            { status: 200, body: { status_code: 'FINISHED' }.to_json }
+          end
+        end
+      
+      result = service.send(:wait_for_video_processing, 'container123', 'page_token', 10)
+      expect(result).to be true
+    end
+
+    it 'handles API errors during status check' do
+      stub_request(:get, /graph\.facebook\.com\/v18\.0\/container123/)
+        .to_return(status: 400, body: { error: { message: 'API error' } }.to_json)
+      
+      expect {
+        service.send(:wait_for_video_processing, 'container123', 'page_token', 10)
+      }.to raise_error(/Instagram video processing/)
     end
   end
 end

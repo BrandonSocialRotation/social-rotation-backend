@@ -172,4 +172,107 @@ RSpec.describe SocialMedia::TwitterService do
       end
     end
   end
+
+  describe '#post_tweet error handling' do
+    context 'when upload_media returns nil' do
+      let(:image_path) { '/tmp/test_image.jpg' }
+      
+      before do
+        allow(File).to receive(:exist?).with(image_path).and_return(true)
+        allow(File).to receive(:binread).with(image_path).and_return('image data')
+        allow(service).to receive(:upload_media).and_return(nil)
+      end
+
+      it 'raises error when media upload fails' do
+        expect {
+          service.post_tweet('Test', image_path)
+        }.to raise_error(/Failed to upload media to Twitter/)
+      end
+    end
+  end
+
+  describe '#upload_media error handling' do
+    context 'when Twitter API credentials are not configured' do
+      before do
+        allow(ENV).to receive(:[]).with('TWITTER_API_KEY').and_return(nil)
+        allow(ENV).to receive(:[]).with('TWITTER_CONSUMER_KEY').and_return(nil)
+        allow(ENV).to receive(:[]).with('TWITTER_API_SECRET_KEY').and_return(nil)
+        allow(ENV).to receive(:[]).with('TWITTER_CONSUMER_SECRET').and_return(nil)
+      end
+
+      it 'raises error when credentials missing' do
+        expect {
+          service.send(:upload_media, '/tmp/image.jpg')
+        }.to raise_error(/Twitter API credentials not configured/)
+      end
+    end
+  end
+
+  describe '#download_image_to_temp' do
+    context 'when download succeeds' do
+      let(:image_url) { 'https://example.com/image.jpg' }
+      
+      before do
+        stub_request(:get, image_url)
+          .to_return(status: 200, body: 'fake image data')
+      end
+
+      it 'downloads and returns temp file' do
+        temp_file = service.send(:download_image_to_temp, image_url)
+        expect(temp_file).to be_a(Tempfile)
+        expect(temp_file.read).to eq('fake image data')
+        temp_file.close
+        temp_file.unlink
+      end
+    end
+
+    context 'when download fails' do
+      let(:image_url) { 'https://example.com/image.jpg' }
+      
+      before do
+        stub_request(:get, image_url)
+          .to_raise(StandardError.new('Download failed'))
+        allow(Rails.logger).to receive(:error)
+      end
+
+      it 'handles error and raises exception' do
+        expect {
+          service.send(:download_image_to_temp, image_url)
+        }.to raise_error(/Failed to download image/)
+        expect(Rails.logger).to have_received(:error).with(match(/Failed to download image from/))
+      end
+    end
+
+    context 'when URL has no extension' do
+      let(:image_url) { 'https://example.com/image' }
+      
+      before do
+        stub_request(:get, image_url)
+          .to_return(status: 200, body: 'fake image data')
+      end
+
+      it 'defaults to .jpg extension' do
+        temp_file = service.send(:download_image_to_temp, image_url)
+        expect(temp_file.path).to include('.jpg')
+        temp_file.close
+        temp_file.unlink
+      end
+    end
+
+    context 'when URL has unsupported extension' do
+      let(:image_url) { 'https://example.com/image.bmp' }
+      
+      before do
+        stub_request(:get, image_url)
+          .to_return(status: 200, body: 'fake image data')
+      end
+
+      it 'defaults to .jpg extension' do
+        temp_file = service.send(:download_image_to_temp, image_url)
+        expect(temp_file.path).to include('.jpg')
+        temp_file.close
+        temp_file.unlink
+      end
+    end
+  end
 end

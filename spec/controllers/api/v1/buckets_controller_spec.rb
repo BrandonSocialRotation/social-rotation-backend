@@ -1,4 +1,5 @@
 require 'rails_helper'
+require 'aws-sdk-s3'
 
 RSpec.describe Api::V1::BucketsController, type: :controller do
   let(:user) { create(:user) }
@@ -64,6 +65,20 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
       get :show, params: { id: other_bucket.id }
 
       expect(response).to have_http_status(:not_found)
+    end
+
+    it 'includes bucket_videos in response' do
+      video = create(:video, user: user)
+      bucket_video = create(:bucket_video, bucket: bucket, video: video, friendly_name: 'Test Video')
+      allow_any_instance_of(Video).to receive(:get_source_url).and_return('https://example.com/video.mp4')
+
+      get :show, params: { id: bucket.id }
+
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['bucket_videos']).to be_an(Array)
+      expect(json_response['bucket_videos'].length).to eq(1)
+      expect(json_response['bucket_videos'].first['friendly_name']).to eq('Test Video')
     end
   end
 
@@ -221,6 +236,78 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
       expect(bucket_image.twitter_description).to eq('Updated Twitter Description')
       expect(bucket_image.use_watermark).to be false
     end
+
+    context 'when uploading a new file' do
+      let(:file) { fixture_file_upload('test_image.jpg', 'image/jpeg') }
+      let(:update_params_with_file) do
+        {
+          id: bucket.id,
+          image_id: bucket_image.id,
+          file: file
+        }
+      end
+
+      before do
+        # Set up the image with an existing file path
+        bucket_image.image.update!(file_path: 'uploads/test/old_image.jpg')
+        # Create the upload directory
+        upload_dir = Rails.root.join('public', 'uploads', Rails.env.to_s)
+        FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
+      end
+
+      it 'uploads new file and updates image path' do
+        patch :update_image, params: update_params_with_file
+
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to eq('Image updated successfully')
+      end
+
+      it 'deletes old file when updating' do
+        old_path = Rails.root.join('public', bucket_image.image.file_path)
+        # Create the old file so it can be deleted
+        FileUtils.mkdir_p(File.dirname(old_path))
+        File.write(old_path, 'old file content')
+        
+        patch :update_image, params: update_params_with_file
+
+        expect(File.exist?(old_path)).to be false
+      end
+    end
+
+    context 'when update fails' do
+      before do
+        # Stub the update to fail
+        errors_double = double('errors')
+        allow(errors_double).to receive(:full_messages).and_return(['Validation error'])
+        allow(errors_double).to receive(:clear).and_return(nil)
+        allow_any_instance_of(BucketImage).to receive(:update).and_return(false)
+        allow_any_instance_of(BucketImage).to receive(:errors).and_return(errors_double)
+      end
+
+      it 'returns errors when update fails' do
+        patch :update_image, params: update_params
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        json_response = JSON.parse(response.body)
+        expect(json_response['errors']).to be_present
+      end
+    end
+
+    context 'when no data is provided' do
+      it 'returns bad request error' do
+        # Stub bucket_image_params to return empty params (simulating no data provided)
+        # This happens when bucket_image: {} is passed but all permitted params are empty/nil
+        empty_params = ActionController::Parameters.new({})
+        allow(controller).to receive(:bucket_image_params).and_return(empty_params)
+        
+        patch :update_image, params: { id: bucket.id, image_id: bucket_image.id, bucket_image: {} }
+
+        expect(response).to have_http_status(:bad_request)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('No data provided')
+      end
+    end
   end
 
   describe 'DELETE #delete_image' do
@@ -362,6 +449,19 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
       json_response = JSON.parse(response.body)
       expect(json_response['error']).to eq('Image not found')
     end
+
+    it 'returns errors when bucket_image save fails' do
+      allow_any_instance_of(BucketImage).to receive(:save).and_return(false)
+      allow_any_instance_of(BucketImage).to receive(:errors).and_return(
+        double(full_messages: ['Validation error'])
+      )
+
+      post :add_image, params: { id: bucket.id, image_id: existing_image.id, friendly_name: 'Test Image' }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['errors']).to be_present
+    end
   end
 
   describe 'POST #upload_image' do
@@ -391,6 +491,49 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
       expect(response).to have_http_status(:bad_request)
       json_response = JSON.parse(response.body)
       expect(json_response['error']).to eq('No file provided')
+    end
+
+    it 'returns error when image save fails' do
+      allow_any_instance_of(Image).to receive(:save).and_return(false)
+      allow_any_instance_of(Image).to receive_message_chain(:errors, :full_messages).and_return(['Validation error'])
+      
+      post :upload_image, params: { id: bucket.id, file: file }
+      
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['errors']).to be_present
+    end
+
+    context 'in production environment' do
+      before do
+        allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new('production'))
+        allow(ENV).to receive(:[]).and_call_original
+      end
+
+      it 'uploads to DigitalOcean Spaces when configured' do
+        allow(ENV).to receive(:[]).with('DO_SPACES_KEY').and_return('test_key')
+        allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_KEY').and_return(nil)
+        allow(ENV).to receive(:[]).with('DO_SPACES_SECRET').and_return('test_secret')
+        allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return('https://test.endpoint.com')
+        allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('test-bucket')
+        allow(controller).to receive(:upload_to_spaces).and_return('production/images/test.jpg')
+        
+        post :upload_image, params: { id: bucket.id, file: file }
+        
+        expect(response).to have_http_status(:created)
+        expect(controller).to have_received(:upload_to_spaces)
+      end
+
+      it 'uses placeholder when DigitalOcean Spaces not configured' do
+        allow(ENV).to receive(:[]).with('DO_SPACES_KEY').and_return(nil)
+        allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_KEY').and_return(nil)
+        allow(Rails.logger).to receive(:warn)
+        
+        post :upload_image, params: { id: bucket.id, file: file }
+        
+        expect(response).to have_http_status(:created)
+        expect(Rails.logger).to have_received(:warn).with(match(/placeholder image/))
+      end
     end
 
     it 'handles upload errors gracefully' do
@@ -480,6 +623,69 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
       json_response = JSON.parse(response.body)
       expect(json_response['error']).to include('Video upload failed')
     end
+
+    it 'cleans up video when bucket_video save fails' do
+      # Stub save to fail for new BucketVideo instances
+      save_failed = false
+      allow_any_instance_of(BucketVideo).to receive(:save) do |instance|
+        if instance.new_record? && !save_failed
+          save_failed = true
+          instance.errors.add(:friendly_name, "can't be blank")
+          false
+        else
+          true
+        end
+      end
+      
+      video_count_before = Video.count
+      post :upload_video, params: { id: bucket.id, file: video_file }
+      
+      expect(Video.count).to eq(video_count_before)
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it 'returns error when video save fails' do
+      allow_any_instance_of(Video).to receive(:save).and_return(false)
+      allow_any_instance_of(Video).to receive_message_chain(:errors, :full_messages).and_return(['Validation error'])
+      
+      post :upload_video, params: { id: bucket.id, file: video_file }
+      
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['errors']).to be_present
+    end
+
+    context 'in production environment' do
+      before do
+        allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new('production'))
+        allow(ENV).to receive(:[]).and_call_original
+      end
+
+      it 'uploads to DigitalOcean Spaces when configured' do
+        allow(ENV).to receive(:[]).with('DO_SPACES_KEY').and_return('test_key')
+        allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_KEY').and_return(nil)
+        allow(ENV).to receive(:[]).with('DO_SPACES_SECRET').and_return('test_secret')
+        allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return('https://test.endpoint.com')
+        allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('test-bucket')
+        allow(controller).to receive(:upload_to_spaces).and_return('production/videos/test.mp4')
+        
+        post :upload_video, params: { id: bucket.id, file: video_file }
+        
+        expect(response).to have_http_status(:created)
+        expect(controller).to have_received(:upload_to_spaces)
+      end
+
+      it 'uses placeholder when DigitalOcean Spaces not configured' do
+        allow(ENV).to receive(:[]).with('DO_SPACES_KEY').and_return(nil)
+        allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_KEY').and_return(nil)
+        allow(Rails.logger).to receive(:warn)
+        
+        post :upload_video, params: { id: bucket.id, file: video_file }
+        
+        expect(response).to have_http_status(:created)
+        expect(Rails.logger).to have_received(:warn).with(match(/placeholder video/))
+      end
+    end
   end
 
   describe 'JSON serializer methods' do
@@ -563,6 +769,87 @@ RSpec.describe Api::V1::BucketsController, type: :controller do
         expect(json).to have_key(:created_at)
         expect(json).to have_key(:updated_at)
       end
+    end
+  end
+
+  describe '#upload_to_spaces' do
+    let(:uploaded_file) { double(original_filename: 'test.jpg') }
+    let(:unique_filename) { 'test-uuid.jpg' }
+    let(:s3_client) { instance_double(Aws::S3::Client) }
+
+    before do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('DO_SPACES_KEY').and_return('test_key')
+      allow(ENV).to receive(:[]).with('DO_SPACES_SECRET').and_return('test_secret')
+      allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return('https://test.endpoint.com')
+      allow(ENV).to receive(:[]).with('DO_SPACES_REGION').and_return('sfo2')
+      allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('test-bucket')
+      allow(Aws::S3::Client).to receive(:new).and_return(s3_client)
+      allow(s3_client).to receive(:put_object)
+      allow(uploaded_file).to receive(:read).and_return('file content')
+      allow(uploaded_file).to receive(:rewind)
+    end
+
+    it 'uploads file to DigitalOcean Spaces' do
+      result = controller.send(:upload_to_spaces, uploaded_file, unique_filename)
+      
+      expect(result).to include('test-uuid.jpg')
+      expect(s3_client).to have_received(:put_object)
+    end
+
+    it 'uses DIGITAL_OCEAN_SPACES_KEY when DO_SPACES_KEY is not set' do
+      allow(ENV).to receive(:[]).with('DO_SPACES_KEY').and_return(nil)
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_KEY').and_return('alt_key')
+      allow(ENV).to receive(:[]).with('DO_SPACES_SECRET').and_return(nil)
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_SECRET').and_return('alt_secret')
+      allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return('https://test.endpoint.com')
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+      allow(ENV).to receive(:[]).with('DO_SPACES_REGION').and_return('sfo2')
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_REGION').and_return(nil)
+      allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('test-bucket')
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+      
+      s3_client_double = instance_double(Aws::S3::Client)
+      allow(Aws::S3::Client).to receive(:new).and_return(s3_client_double)
+      allow(s3_client_double).to receive(:put_object)
+      
+      controller.send(:upload_to_spaces, uploaded_file, unique_filename)
+      
+      expect(Aws::S3::Client).to have_received(:new).with(
+        hash_including(access_key_id: 'alt_key', secret_access_key: 'alt_secret')
+      )
+    end
+
+    it 'uses default endpoint and region when not configured' do
+      allow(ENV).to receive(:[]).with('DO_SPACES_KEY').and_return('test_key')
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_KEY').and_return(nil)
+      allow(ENV).to receive(:[]).with('DO_SPACES_SECRET').and_return('test_secret')
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_SECRET').and_return(nil)
+      allow(ENV).to receive(:[]).with('DO_SPACES_ENDPOINT').and_return(nil)
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_ENDPOINT').and_return(nil)
+      allow(ENV).to receive(:[]).with('DO_SPACES_REGION').and_return(nil)
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_REGION').and_return(nil)
+      allow(ENV).to receive(:[]).with('DO_SPACES_BUCKET').and_return('test-bucket')
+      allow(ENV).to receive(:[]).with('DIGITAL_OCEAN_SPACES_NAME').and_return(nil)
+      
+      s3_client_double = instance_double(Aws::S3::Client)
+      allow(Aws::S3::Client).to receive(:new).and_return(s3_client_double)
+      allow(s3_client_double).to receive(:put_object)
+      
+      controller.send(:upload_to_spaces, uploaded_file, unique_filename)
+      
+      expect(Aws::S3::Client).to have_received(:new).with(
+        hash_including(endpoint: 'https://sfo2.digitaloceanspaces.com', region: 'sfo2')
+      )
+    end
+
+    it 'uploads to videos folder when specified' do
+      result = controller.send(:upload_to_spaces, uploaded_file, unique_filename, 'videos')
+      
+      expect(result).to include('videos/')
+      expect(s3_client).to have_received(:put_object).with(
+        hash_including(key: match(/videos\/test-uuid\.jpg/))
+      )
     end
   end
 end

@@ -1,6 +1,41 @@
 require 'rails_helper'
 
 RSpec.describe BucketVideo, type: :model do
+  describe '#forced_is_due?' do
+    it 'always returns false' do
+      bucket_video = create(:bucket_video)
+      expect(bucket_video.forced_is_due?).to be false
+    end
+  end
+
+  describe '#should_display_twitter_warning?' do
+    it 'returns false when description is nil' do
+      bucket_video = create(:bucket_video, description: nil)
+      expect(bucket_video.should_display_twitter_warning?).to be false
+    end
+
+    it 'returns false when description is blank' do
+      bucket_video = create(:bucket_video, description: '')
+      expect(bucket_video.should_display_twitter_warning?).to be false
+    end
+
+    it 'returns false when description is short' do
+      bucket_video = create(:bucket_video, description: 'Short description')
+      expect(bucket_video.should_display_twitter_warning?).to be false
+    end
+
+    it 'returns false when description is long but twitter_description is present' do
+      long_description = 'a' * 300
+      bucket_video = create(:bucket_video, description: long_description, twitter_description: 'Twitter desc')
+      expect(bucket_video.should_display_twitter_warning?).to be false
+    end
+
+    it 'returns true when description is long and twitter_description is blank' do
+      long_description = 'a' * 300
+      bucket_video = create(:bucket_video, description: long_description, twitter_description: '')
+      expect(bucket_video.should_display_twitter_warning?).to be true
+    end
+  end
   describe 'associations' do
     it { should belong_to(:bucket) }
     it { should belong_to(:video) }

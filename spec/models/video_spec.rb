@@ -3,6 +3,22 @@ require 'rails_helper'
 RSpec.describe Video, type: :model do
   describe 'associations' do
     it { should belong_to(:user) }
+    it { should have_many(:bucket_videos).dependent(:destroy) }
+    it { should have_many(:buckets).through(:bucket_videos) }
+  end
+
+  describe 'constants' do
+    it 'defines STATUS_UNPROCESSED' do
+      expect(Video::STATUS_UNPROCESSED).to eq(0)
+    end
+
+    it 'defines STATUS_PROCESSING' do
+      expect(Video::STATUS_PROCESSING).to eq(1)
+    end
+
+    it 'defines STATUS_PROCESSED' do
+      expect(Video::STATUS_PROCESSED).to eq(2)
+    end
   end
 
   describe 'validations' do

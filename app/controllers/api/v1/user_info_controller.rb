@@ -64,6 +64,19 @@ class Api::V1::UserInfoController < ApplicationController
     }
   end
 
+  # GET /api/v1/user_info/support
+  # Get support contact information
+  def support
+    support_email = ENV['SUPPORT_EMAIL'] || 'support@socialrotation.app'
+    support_url = ENV['SUPPORT_URL'] || 'https://socialrotation.app/support'
+    
+    render json: {
+      support_email: support_email,
+      support_url: support_url,
+      message: 'You can update your email address in your account settings. Your account and subscription will remain active.'
+    }
+  end
+
   # GET /api/v1/user_info/facebook_pages
   def facebook_pages
     unless current_user.fb_user_access_key.present?
@@ -465,9 +478,11 @@ class Api::V1::UserInfoController < ApplicationController
     return if user.respond_to?(:youtube_channel_name) && user.youtube_channel_name.present?
     return unless user.respond_to?(:youtube_channel_name=) # Column must exist
     return if Rails.env.test? # Skip in tests to avoid API calls
+    return unless user.youtube_access_token.present? # Need access token
 
     begin
       # Get channel information using YouTube Data API v3
+      # Use the same URL pattern that matches test stubs
       youtube_info_url = "https://www.googleapis.com/youtube/v3/channels"
       youtube_info_response = HTTParty.get(youtube_info_url, {
         query: {

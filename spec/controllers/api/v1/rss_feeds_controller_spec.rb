@@ -74,6 +74,24 @@ RSpec.describe Api::V1::RssFeedsController, type: :controller do
       expect(json_response['valid']).to be false
       expect(json_response['error']).to include('Feed validation failed')
     end
+
+    it 'returns error when feed has no posts' do
+      stub_request(:get, 'https://example.com/feed.xml')
+        .to_return(
+          status: 200,
+          body: '<?xml version="1.0"?><rss version="2.0"><channel><title>Empty Feed</title></channel></rss>',
+          headers: { 'Content-Type' => 'application/xml' }
+        )
+      allow_any_instance_of(RssFetchService).to receive(:send).and_call_original
+      allow_any_instance_of(RssFetchService).to receive(:parse_rss_content).and_return([])
+      
+      post :validate, params: { url: 'https://example.com/feed.xml' }
+      
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['valid']).to be false
+      expect(json_response['error']).to eq('Feed found but no posts could be parsed')
+    end
   end
 
   describe 'GET #index' do
@@ -332,6 +350,23 @@ RSpec.describe Api::V1::RssFeedsController, type: :controller do
         get :show, params: { id: other_feed.id }
         
         expect(response).to have_http_status(:not_found)
+      end
+    end
+
+    context 'with non-account user' do
+      let(:user_no_account) { create(:user, account_id: nil) }
+      let(:user_feed) { create(:rss_feed, user: user_no_account, account: nil) }
+
+      before do
+        allow(controller).to receive(:current_user).and_return(user_no_account)
+      end
+
+      it 'allows access to user feeds' do
+        get :show, params: { id: user_feed.id }
+        
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['rss_feed']['id']).to eq(user_feed.id)
       end
     end
   end

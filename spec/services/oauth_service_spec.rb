@@ -1,6 +1,22 @@
 require 'rails_helper'
 
 RSpec.describe OauthService do
+  describe '#store_state error handling' do
+    let(:service) { OauthService.new(:facebook, 'http://localhost:3000') }
+    
+    context 'when OauthRequestToken.create raises exception' do
+      before do
+        allow(ActiveRecord::Base.connection).to receive(:table_exists?).and_return(true)
+        allow(OauthRequestToken).to receive(:create!).and_raise(StandardError.new('Database error'))
+        allow(Rails.logger).to receive(:error)
+      end
+      
+      it 'handles exception and logs error' do
+        service.store_state('token', 'secret', 1)
+        expect(Rails.logger).to have_received(:error).with(match(/Facebook OAuth - failed to store state/))
+      end
+    end
+  end
   let(:user) { create(:user) }
   let(:request_base_url) { 'https://example.com' }
 

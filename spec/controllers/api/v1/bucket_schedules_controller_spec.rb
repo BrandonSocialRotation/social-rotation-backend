@@ -76,6 +76,26 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
       json_response = JSON.parse(response.body)
       expect(json_response['errors']).to be_present
     end
+
+    it 'returns error when bucket_image_id does not belong to bucket' do
+      other_bucket = create(:bucket, user: user)
+      other_bucket_image = create(:bucket_image, bucket: other_bucket)
+      
+      invalid_params = {
+        bucket_id: bucket.id,
+        bucket_schedule: {
+          schedule: '0 9 * * 1-5',
+          schedule_type: BucketSchedule::SCHEDULE_TYPE_ONCE,
+          bucket_image_id: other_bucket_image.id
+        }
+      }
+      
+      post :create, params: invalid_params
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['errors']).to include('Selected image does not belong to this bucket')
+    end
   end
 
   describe 'PATCH #update' do

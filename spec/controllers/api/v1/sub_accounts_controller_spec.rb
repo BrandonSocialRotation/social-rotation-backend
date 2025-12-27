@@ -99,6 +99,19 @@ RSpec.describe Api::V1::SubAccountsController, type: :controller do
         post :create, params: valid_params
         expect(response).to have_http_status(:forbidden)
       end
+
+      it 'returns errors when sub_account save fails' do
+        allow_any_instance_of(User).to receive(:save).and_return(false)
+        allow_any_instance_of(User).to receive(:errors).and_return(
+          double(full_messages: ['Email has already been taken'])
+        )
+
+        post :create, params: valid_params
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        json = JSON.parse(response.body)
+        expect(json['errors']).to be_present
+      end
     end
   end
 
@@ -143,6 +156,20 @@ RSpec.describe Api::V1::SubAccountsController, type: :controller do
     it 'returns success' do
       put :update, params: { id: sub_account.id, sub_account: { name: 'New Name' } }
       expect(response).to have_http_status(:success)
+    end
+
+    it 'returns errors when update fails' do
+      errors_double = double('errors')
+      allow(errors_double).to receive(:full_messages).and_return(['Email has already been taken'])
+      allow(errors_double).to receive(:clear).and_return(nil)
+      allow_any_instance_of(User).to receive(:update).and_return(false)
+      allow_any_instance_of(User).to receive(:errors).and_return(errors_double)
+
+      put :update, params: { id: sub_account.id, sub_account: { email: 'invalid' } }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json = JSON.parse(response.body)
+      expect(json['errors']).to be_present
     end
   end
 

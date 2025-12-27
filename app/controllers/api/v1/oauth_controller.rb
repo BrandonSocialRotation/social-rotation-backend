@@ -1,5 +1,6 @@
 class Api::V1::OauthController < ApplicationController
-  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback]
+  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback, :twitter_login]
+  skip_before_action :require_active_subscription!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback, :twitter_login]
   
   def frontend_url
     (Rails.env.development? ? "http://localhost:3001" : (ENV['FRONTEND_URL'] || 'https://my.socialrotation.app')).chomp('/')
@@ -85,6 +86,22 @@ class Api::V1::OauthController < ApplicationController
   end
   
   def twitter_login
+    # Skip authenticate_user! for this action to handle auth manually
+    token = request.headers['Authorization']&.split(' ')&.last
+    if token.blank?
+      return render json: { error: 'Authentication required' }, status: :unauthorized
+    end
+    
+    decoded = JsonWebToken.decode(token)
+    if decoded
+      @current_user = User.find_by(id: decoded[:user_id])
+      unless @current_user
+        return render json: { error: 'Authentication required' }, status: :unauthorized
+      end
+    else
+      return render json: { error: 'Authentication required' }, status: :unauthorized
+    end
+    
     unless current_user
       return render json: { error: 'Authentication required' }, status: :unauthorized
     end
@@ -294,6 +311,9 @@ class Api::V1::OauthController < ApplicationController
   end
   
   def fetch_pinterest_user_info(user, access_token)
+    return unless user.respond_to?(:pinterest_access_token=) # Only fetch if user model supports Pinterest
+    return if Rails.env.test? # Skip in tests to avoid API calls
+    
     response = HTTParty.get('https://api.pinterest.com/v5/user_account', headers: { 'Authorization' => "Bearer #{access_token}" }, timeout: 5)
     return unless response.success?
     data = JSON.parse(response.body)

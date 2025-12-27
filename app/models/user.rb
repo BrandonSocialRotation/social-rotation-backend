@@ -24,8 +24,47 @@ class User < ApplicationRecord
   has_many :rss_feeds, dependent: :destroy
   
   # VALIDATIONS
-  # Email must exist, be unique, and match valid email format
+  # Email must exist, be unique, and match valid email format with proper domain
   validates :email, presence: true, uniqueness: true, format: { with: URI::MailTo::EMAIL_REGEXP }
+  validate :email_has_valid_domain
+  
+  # Custom validation to ensure email has a valid domain with TLD
+  def email_has_valid_domain
+    return if email.blank?
+    
+    # Extract domain part after @
+    parts = email.split('@')
+    return if parts.length != 2 # Already caught by format validation
+    
+    domain = parts.last
+    
+    # Domain must exist and have at least one dot (for TLD like .com, .org, etc.)
+    if domain.blank? || !domain.include?('.')
+      errors.add(:email, 'must have a valid domain with top-level domain (e.g., example.com)')
+      return
+    end
+    
+    # Split domain into parts
+    domain_parts = domain.split('.')
+    
+    # Must have at least domain name and TLD
+    if domain_parts.length < 2
+      errors.add(:email, 'must have a valid domain with top-level domain (e.g., example.com)')
+      return
+    end
+    
+    # Ensure TLD is at least 2 characters (like .com, .org, .io)
+    tld = domain_parts.last
+    if tld.length < 2
+      errors.add(:email, 'must have a valid top-level domain (e.g., .com, .org, .io)')
+    end
+    
+    # Ensure domain name part is not empty
+    domain_name = domain_parts[0]
+    if domain_name.blank? || domain_name.length < 1
+      errors.add(:email, 'must have a valid domain name')
+    end
+  end
   # Name must be present
   validates :name, presence: true
   

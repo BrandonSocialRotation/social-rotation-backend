@@ -44,5 +44,20 @@ RSpec.describe SocialMedia::GoogleService do
       end
     end
   end
+
+  describe '#get_access_token' do
+    context 'when token refresh fails' do
+      before do
+        stub_request(:post, /oauth2\.googleapis\.com/)
+          .to_return(status: 200, body: { error: 'invalid_grant', error_description: 'Token expired' }.to_json)
+      end
+
+      it 'raises error when access_token is missing' do
+        expect {
+          service.send(:get_access_token)
+        }.to raise_error(/Failed to refresh Google access token/)
+      end
+    end
+  end
 end
 

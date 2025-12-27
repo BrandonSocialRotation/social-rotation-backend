@@ -50,6 +50,7 @@ Rails.application.routes.draw do
       get 'user_info', to: 'user_info#show'
       get 'user_info/debug', to: 'user_info#debug'
       patch 'user_info', to: 'user_info#update'
+      get 'user_info/support', to: 'user_info#support'
       post 'user_info/watermark', to: 'user_info#update_watermark'
       get 'user_info/connected_accounts', to: 'user_info#connected_accounts'
       post 'user_info/disconnect_facebook', to: 'user_info#disconnect_facebook'

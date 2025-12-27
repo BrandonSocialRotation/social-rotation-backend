@@ -77,6 +77,101 @@ RSpec.describe SocialMediaPosterService do
         service = SocialMediaPosterService.new(user, bucket_image, post_to_flags, 'Test description')
         results = service.post_to_all
         expect(results).to have_key(:twitter)
+        expect(results[:twitter][:success]).to be true
+      end
+    end
+
+    context 'with Instagram selected' do
+      let(:post_to_flags) { SocialMediaPosterService::BIT_INSTAGRAM }
+      
+      before do
+        user.update!(instagram_business_id: 'ig_id', fb_user_access_key: 'test_token')
+        stub_request(:get, /graph\.facebook\.com\/v18\.0\/me\/accounts/)
+          .to_return(status: 200, body: { data: [{ id: 'page123', access_token: 'page_token', instagram_business_account: { id: 'ig_id' } }] }.to_json)
+        stub_request(:post, /graph\.facebook\.com\/v18\.0\/ig_id\/media/)
+          .to_return(status: 200, body: { id: 'media123' }.to_json)
+        stub_request(:post, /graph\.facebook\.com\/v18\.0\/ig_id\/media_publish/)
+          .to_return(status: 200, body: { id: 'post123' }.to_json)
+      end
+      
+      it 'posts to Instagram successfully' do
+        service = SocialMediaPosterService.new(user, bucket_image, post_to_flags, 'Test description')
+        results = service.post_to_all
+        expect(results).to have_key(:instagram)
+        expect(results[:instagram][:success]).to be true
+      end
+    end
+
+    context 'with Twitter selected' do
+      let(:post_to_flags) { SocialMediaPosterService::BIT_TWITTER }
+      
+      before do
+        user.update!(twitter_oauth_token: 'token', twitter_oauth_token_secret: 'secret')
+        image_path = Rails.root.join('public', 'test', 'image.jpg')
+        FileUtils.mkdir_p(File.dirname(image_path))
+        File.write(image_path, 'fake image data') unless File.exist?(image_path)
+        allow_any_instance_of(SocialMedia::TwitterService).to receive(:post_tweet).and_return({ id: 'tweet123' })
+      end
+      
+      it 'posts to Twitter successfully' do
+        service = SocialMediaPosterService.new(user, bucket_image, post_to_flags, 'Test description', 'Twitter description')
+        results = service.post_to_all
+        expect(results).to have_key(:twitter)
+        expect(results[:twitter][:success]).to be true
+        expect(results[:twitter][:response]).to be_present
+      end
+    end
+
+    context 'with LinkedIn selected' do
+      let(:post_to_flags) { SocialMediaPosterService::BIT_LINKEDIN }
+      
+      before do
+        user.update!(linkedin_access_token: 'token', linkedin_profile_id: 'profile123')
+        # Set up image with local file path
+        image_path = Rails.root.join('public', 'test', 'image.jpg')
+        FileUtils.mkdir_p(File.dirname(image_path))
+        File.write(image_path, 'fake image data') unless File.exist?(image_path)
+        bucket_image.image.update!(file_path: 'test/image.jpg')
+        stub_request(:post, /api\.linkedin\.com\/v2\/assets/)
+          .to_return(status: 200, body: {
+            value: {
+              asset: 'urn:li:digitalmediaAsset:123',
+              uploadMechanism: {
+                'com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest' => {
+                  uploadUrl: 'https://upload.linkedin.com/upload'
+                }
+              }
+            }
+          }.to_json)
+        stub_request(:post, /upload\.linkedin\.com/)
+          .to_return(status: 200, body: 'OK')
+        stub_request(:post, /api\.linkedin\.com\/v2\/ugcPosts/)
+          .to_return(status: 200, body: { id: 'post123' }.to_json)
+      end
+      
+      it 'posts to LinkedIn successfully' do
+        service = SocialMediaPosterService.new(user, bucket_image, post_to_flags, 'Test description')
+        results = service.post_to_all
+        expect(results).to have_key(:linkedin)
+        expect(results[:linkedin][:success]).to be true
+        # Check that response is present (line 190 returns { success: true, response: response })
+        expect(results[:linkedin]).to have_key(:response)
+      end
+    end
+
+    context 'with Google My Business selected' do
+      let(:post_to_flags) { SocialMediaPosterService::BIT_GMB }
+      
+      before do
+        user.update!(google_refresh_token: 'token', location_id: 'location123')
+        allow_any_instance_of(SocialMedia::GoogleService).to receive(:post_to_gmb).and_return({ id: 'post123' })
+      end
+      
+      it 'posts to Google My Business successfully' do
+        service = SocialMediaPosterService.new(user, bucket_image, post_to_flags, 'Test description')
+        results = service.post_to_all
+        expect(results).to have_key(:gmb)
+        expect(results[:gmb][:success]).to be true
       end
     end
     

@@ -128,6 +128,63 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
       user.reload
       expect(user.watermark_logo).to be_present
     end
+
+    it 'returns errors when update fails' do
+      allow(user).to receive(:update).and_return(false)
+      allow(user).to receive(:errors).and_return(double(full_messages: ['Validation failed']))
+      
+      post :update_watermark, params: watermark_params
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['errors']).to be_present
+    end
+  end
+
+  describe 'GET #debug' do
+    it 'returns debug information about user account connections' do
+      get :debug
+
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['user_id']).to eq(user.id)
+      expect(json_response['email']).to eq(user.email)
+      expect(json_response).to have_key('fb_user_access_key')
+      expect(json_response).to have_key('twitter_oauth_token')
+      expect(json_response).to have_key('linkedin_access_token')
+      expect(json_response).to have_key('google_refresh_token')
+      expect(json_response).to have_key('tiktok_access_token')
+      expect(json_response).to have_key('youtube_access_token')
+      expect(json_response).to have_key('pinterest_access_token')
+      expect(json_response).to have_key('instagram_business_id')
+    end
+
+    it 'shows present for connected accounts' do
+      user.update!(
+        fb_user_access_key: 'test_token',
+        twitter_oauth_token: 'test_token',
+        linkedin_access_token: 'test_token'
+      )
+
+      get :debug
+
+      json_response = JSON.parse(response.body)
+      expect(json_response['fb_user_access_key']).to eq('present')
+      expect(json_response['twitter_oauth_token']).to eq('present')
+    end
+
+    it 'shows nil for unconnected accounts' do
+      user.update!(
+        fb_user_access_key: nil,
+        twitter_oauth_token: nil
+      )
+
+      get :debug
+
+      json_response = JSON.parse(response.body)
+      expect(json_response['fb_user_access_key']).to eq('nil')
+      expect(json_response['twitter_oauth_token']).to eq('nil')
+    end
   end
 
   describe 'GET #connected_accounts' do
@@ -201,6 +258,400 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
       user.reload
       expect(user.google_refresh_token).to be_nil
       expect(user.location_id).to be_nil
+    end
+  end
+
+  describe 'POST #disconnect_instagram' do
+    before do
+      user.update!(instagram_business_id: 'ig_business_123')
+    end
+
+    it 'clears Instagram connection data' do
+      post :disconnect_instagram
+
+      expect(response).to have_http_status(:ok)
+      json_response = JSON.parse(response.body)
+      expect(json_response['message']).to eq('Instagram disconnected successfully')
+      
+      user.reload
+      expect(user.instagram_business_id).to be_nil
+    end
+  end
+
+
+  describe 'GET #show' do
+    context 'when user has Instagram business account' do
+      before do
+        user.update!(instagram_business_id: 'ig_business_123', fb_user_access_key: 'fb_token')
+        allow(HTTParty).to receive(:get).and_return(
+          double(success?: true, body: '{"data":[{"id":"page123","access_token":"page_token","instagram_business_account":{"id":"ig_business_123"}}]}'),
+          double(success?: true, body: '{"id":"ig_business_123","username":"testuser","name":"Test User"}')
+        )
+        allow(JSON).to receive(:parse).and_call_original
+        allow(JSON).to receive(:parse).with('{"data":[{"id":"page123","access_token":"page_token","instagram_business_account":{"id":"ig_business_123"}}]}').and_return({
+          'data' => [{
+            'id' => 'page123',
+            'access_token' => 'page_token',
+            'instagram_business_account' => { 'id' => 'ig_business_123' }
+          }]
+        })
+        allow(JSON).to receive(:parse).with('{"id":"ig_business_123","username":"testuser","name":"Test User"}').and_return({
+          'id' => 'ig_business_123',
+          'username' => 'testuser',
+          'name' => 'Test User'
+        })
+      end
+
+      it 'fetches Instagram account info' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['user']['instagram_account']).to be_present
+      end
+    end
+
+    context 'when Instagram account info fetch fails' do
+      before do
+        user.update!(instagram_business_id: 'ig_business_123', fb_user_access_key: 'fb_token')
+        allow(HTTParty).to receive(:get).and_raise(StandardError.new('API error'))
+        allow(Rails.logger).to receive(:error)
+      end
+
+      it 'handles errors gracefully' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        expect(Rails.logger).to have_received(:error).with(match(/Error fetching Instagram account info/))
+      end
+    end
+
+    context 'when Instagram response is not successful' do
+      before do
+        user.update!(instagram_business_id: 'ig_business_123', fb_user_access_key: 'fb_token')
+        allow(HTTParty).to receive(:get).and_return(
+          double(success?: true, body: '{"data":[{"id":"page123","access_token":"page_token","instagram_business_account":{"id":"ig_business_123"}}]}'),
+          double(success?: false, body: '{"error":"Invalid token"}')
+        )
+        allow(JSON).to receive(:parse).and_call_original
+        allow(JSON).to receive(:parse).with('{"data":[{"id":"page123","access_token":"page_token","instagram_business_account":{"id":"ig_business_123"}}]}').and_return({
+          'data' => [{
+            'id' => 'page123',
+            'access_token' => 'page_token',
+            'instagram_business_account' => { 'id' => 'ig_business_123' }
+          }]
+        })
+      end
+
+      it 'returns nil for Instagram account' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['user']['instagram_account']).to be_nil
+      end
+    end
+
+    context 'when no matching page found, uses fallback' do
+      before do
+        user.update!(instagram_business_id: 'ig_business_123', fb_user_access_key: 'fb_token')
+        allow(HTTParty).to receive(:get).and_return(
+          double(success?: true, body: '{"data":[{"id":"page123","access_token":"page_token","instagram_business_account":{"id":"other_id"}}]}'),
+          double(success?: true, body: '{"id":"ig_business_123","username":"testuser"}')
+        )
+        allow(JSON).to receive(:parse).and_call_original
+        allow(JSON).to receive(:parse).with('{"data":[{"id":"page123","access_token":"page_token","instagram_business_account":{"id":"other_id"}}]}').and_return({
+          'data' => [{
+            'id' => 'page123',
+            'access_token' => 'page_token',
+            'instagram_business_account' => { 'id' => 'other_id' }
+          }]
+        })
+        allow(JSON).to receive(:parse).with('{"id":"ig_business_123","username":"testuser"}').and_return({
+          'id' => 'ig_business_123',
+          'username' => 'testuser'
+        })
+      end
+
+      it 'uses first page token as fallback' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+      end
+    end
+
+    context 'with different account types' do
+      context 'when user has agency account' do
+        let(:account) { create(:account, is_reseller: true) }
+        
+        before do
+          user.update!(account: account)
+        end
+
+        it 'returns agency account type' do
+          get :show
+          
+          expect(response).to have_http_status(:ok)
+          json_response = JSON.parse(response.body)
+          expect(json_response['user']['account_type']).to eq('agency')
+        end
+      end
+
+      context 'when user has personal account (account_id 0)' do
+        before do
+          user.update!(account_id: 0)
+        end
+
+        it 'returns personal account type' do
+          get :show
+          
+          expect(response).to have_http_status(:ok)
+          json_response = JSON.parse(response.body)
+          expect(json_response['user']['account_type']).to eq('personal')
+        end
+      end
+
+      context 'when user has regular account' do
+        let(:account) { create(:account, is_reseller: false) }
+        
+        before do
+          user.update!(account: account)
+        end
+
+        it 'returns personal account type as fallback' do
+          get :show
+          
+          expect(response).to have_http_status(:ok)
+          json_response = JSON.parse(response.body)
+          expect(json_response['user']['account_type']).to eq('personal')
+        end
+      end
+    end
+
+    context 'with YouTube account info' do
+      before do
+        user.update!(
+          youtube_access_token: 'yt_token',
+          youtube_channel_id: 'channel123',
+          youtube_channel_name: 'My Channel'
+        )
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name=).and_return(true)
+      end
+
+      it 'includes YouTube account information' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        youtube_account = json_response['user']['youtube_account']
+        expect(youtube_account['channel_id']).to eq('channel123')
+        expect(youtube_account['channel_name']).to eq('My Channel')
+      end
+    end
+
+    context 'with Pinterest account info' do
+      before do
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:pinterest_access_token).and_return(true)
+        allow(user).to receive(:respond_to?).with(:pinterest_access_token=).and_return(true)
+        allow(user).to receive(:respond_to?).with(:pinterest_username).and_return(true)
+        allow(user).to receive(:pinterest_access_token).and_return('pinterest_token')
+        allow(user).to receive(:pinterest_username).and_return('pinterest_user')
+      end
+
+      it 'includes Pinterest account information' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['user']['pinterest_account']['username']).to eq('pinterest_user')
+      end
+    end
+
+    context 'when fetch_youtube_channel_name_if_missing is called' do
+      before do
+        allow(Rails.env).to receive(:test?).and_return(false)
+        user.update!(
+          youtube_access_token: 'yt_token',
+          youtube_channel_name: nil
+        )
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name=).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_id=).and_return(true)
+        stub_request(:get, 'https://www.googleapis.com/youtube/v3/channels')
+          .with(query: hash_including(part: 'snippet', mine: 'true'))
+          .to_return(status: 200, body: {
+            items: [{
+              id: 'channel123',
+              snippet: {
+                title: 'My YouTube Channel'
+              }
+            }]
+          }.to_json)
+        allow(Rails.logger).to receive(:info)
+      end
+
+      it 'fetches and saves YouTube channel name' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        expect(user.reload.youtube_channel_name).to eq('My YouTube Channel')
+        expect(user.youtube_channel_id).to eq('channel123')
+        expect(Rails.logger).to have_received(:info).with(match(/YouTube channel name fetched and saved/))
+      end
+    end
+
+    context 'when YouTube API call fails' do
+      before do
+        allow(Rails.env).to receive(:test?).and_return(false)
+        user.update!(
+          youtube_access_token: 'yt_token',
+          youtube_channel_name: nil
+        )
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name=).and_return(true)
+        stub_request(:get, 'https://www.googleapis.com/youtube/v3/channels')
+          .with(query: hash_including(part: 'snippet', mine: 'true'))
+          .to_raise(StandardError.new('API error'))
+        allow(Rails.logger).to receive(:warn)
+      end
+
+      it 'handles errors gracefully' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        expect(Rails.logger).to have_received(:warn).with(match(/Failed to fetch YouTube channel name/))
+      end
+    end
+
+    context 'when YouTube API returns no items' do
+      before do
+        allow(Rails.env).to receive(:test?).and_return(false)
+        user.update!(
+          youtube_access_token: 'yt_token',
+          youtube_channel_name: nil
+        )
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name=).and_return(true)
+        stub_request(:get, 'https://www.googleapis.com/youtube/v3/channels')
+          .with(query: hash_including(part: 'snippet', mine: 'true'))
+          .to_return(status: 200, body: { items: [] }.to_json)
+      end
+
+      it 'does not update channel name when no items returned' do
+        get :show
+        
+        expect(response).to have_http_status(:ok)
+        expect(user.reload.youtube_channel_name).to be_nil
+      end
+    end
+
+    context 'when YouTube API succeeds with items and channel_id missing' do
+      before do
+        allow(Rails.env).to receive(:test?).and_return(false)
+        user.update!(
+          youtube_access_token: 'yt_token',
+          youtube_channel_name: nil,
+          youtube_channel_id: nil
+        )
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name=).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_id=).and_return(true)
+        stub_request(:get, 'https://www.googleapis.com/youtube/v3/channels')
+          .with(query: hash_including(part: 'snippet', mine: 'true'))
+          .to_return(status: 200, body: {
+            items: [{
+              id: 'channel123',
+              snippet: {
+                title: 'Test Channel'
+              }
+            }]
+          }.to_json)
+        allow(Rails.logger).to receive(:info)
+      end
+
+      it 'saves channel_id and channel_name' do
+        get :show
+        expect(response).to have_http_status(:ok)
+        user.reload
+        expect(user.youtube_channel_id).to eq('channel123')
+        expect(user.youtube_channel_name).to eq('Test Channel')
+        expect(Rails.logger).to have_received(:info).with(match(/YouTube channel name fetched and saved/))
+      end
+    end
+
+    context 'when YouTube API succeeds with items but channel_id already exists' do
+      before do
+        allow(Rails.env).to receive(:test?).and_return(false)
+        user.update!(
+          youtube_access_token: 'yt_token',
+          youtube_channel_name: nil,
+          youtube_channel_id: 'existing_id'
+        )
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name=).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_id=).and_return(true)
+        stub_request(:get, 'https://www.googleapis.com/youtube/v3/channels')
+          .with(query: hash_including(part: 'snippet', mine: 'true'))
+          .to_return(status: 200, body: {
+            items: [{
+              id: 'channel123',
+              snippet: {
+                title: 'Test Channel'
+              }
+            }]
+          }.to_json)
+        allow(Rails.logger).to receive(:info)
+      end
+
+      it 'saves channel_name but not channel_id' do
+        get :show
+        expect(response).to have_http_status(:ok)
+        user.reload
+        expect(user.youtube_channel_id).to eq('existing_id')
+        expect(user.youtube_channel_name).to eq('Test Channel')
+        expect(Rails.logger).to have_received(:info).with(match(/YouTube channel name fetched and saved/))
+      end
+    end
+
+    context 'when YouTube API succeeds but user does not respond to youtube_channel_id=' do
+      before do
+        allow(Rails.env).to receive(:test?).and_return(false)
+        user.update!(
+          youtube_access_token: 'yt_token',
+          youtube_channel_name: nil
+        )
+        allow(user).to receive(:respond_to?).and_call_original
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_name=).and_return(true)
+        allow(user).to receive(:respond_to?).with(:youtube_channel_id=).and_return(false)
+        stub_request(:get, 'https://www.googleapis.com/youtube/v3/channels')
+          .with(query: hash_including(part: 'snippet', mine: 'true'))
+          .to_return(status: 200, body: {
+            items: [{
+              id: 'channel123',
+              snippet: {
+                title: 'Test Channel'
+              }
+            }]
+          }.to_json)
+        allow(Rails.logger).to receive(:info)
+      end
+
+      it 'saves channel_name only' do
+        get :show
+        expect(response).to have_http_status(:ok)
+        user.reload
+        expect(user.youtube_channel_name).to eq('Test Channel')
+        expect(Rails.logger).to have_received(:info).with(match(/YouTube channel name fetched and saved/))
+      end
     end
   end
 
@@ -374,6 +825,56 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
       expect(user.tiktok_refresh_token).to be_nil
       expect(user.tiktok_user_id).to be_nil
       expect(user.tiktok_username).to be_nil
+    end
+  end
+
+  describe 'POST #disconnect_pinterest' do
+    context 'when user has pinterest_access_token method' do
+      before do
+        allow(user).to receive(:respond_to?).with(:pinterest_access_token).and_return(true)
+        allow(user).to receive(:respond_to?).with(:pinterest_access_token=).and_return(true)
+        allow(user).to receive(:respond_to?).with(:pinterest_username=).and_return(true)
+        user.update!(pinterest_access_token: 'token', pinterest_refresh_token: 'refresh', pinterest_username: 'username')
+      end
+
+      it 'disconnects Pinterest and clears username' do
+        post :disconnect_pinterest
+
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to eq('Pinterest disconnected successfully')
+      end
+    end
+
+    context 'when user does not have pinterest_access_token method' do
+      before do
+        allow(user).to receive(:respond_to?).with(:pinterest_access_token).and_return(false)
+      end
+
+      it 'returns bad request' do
+        post :disconnect_pinterest
+
+        expect(response).to have_http_status(:bad_request)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to eq('Pinterest not connected')
+      end
+    end
+
+    context 'when user does not have pinterest_username= method' do
+      before do
+        allow(user).to receive(:respond_to?).with(:pinterest_access_token).and_return(true)
+        allow(user).to receive(:respond_to?).with(:pinterest_access_token=).and_return(true)
+        allow(user).to receive(:respond_to?).with(:pinterest_username=).and_return(false)
+        user.update!(pinterest_access_token: 'token', pinterest_refresh_token: 'refresh')
+      end
+
+      it 'disconnects Pinterest without clearing username' do
+        post :disconnect_pinterest
+
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['message']).to eq('Pinterest disconnected successfully')
+      end
     end
   end
 

@@ -273,10 +273,15 @@ class Api::V1::RssPostsController < ApplicationController
     if params[:start_date].present?
       begin
         start_time = Time.parse(params[:start_date])
-      rescue
-        start_time = Date.parse(params[:start_date]).beginning_of_day
+      rescue ArgumentError, TypeError
+        begin
+          start_time = Date.parse(params[:start_date]).beginning_of_day
+        rescue ArgumentError, TypeError
+          # Invalid date format, skip this filter
+          start_time = nil
+        end
       end
-      @posts = @posts.where('published_at >= ?', start_time)
+      @posts = @posts.where('published_at >= ?', start_time) if start_time
     end
 
     if params[:end_date].present?
@@ -287,10 +292,15 @@ class Api::V1::RssPostsController < ApplicationController
         if end_time.hour == 0 && end_time.min == 0 && end_time.sec == 0
           end_time = end_time.end_of_day
         end
-      rescue
-        end_time = Date.parse(params[:end_date]).end_of_day
+      rescue ArgumentError, TypeError
+        begin
+          end_time = Date.parse(params[:end_date]).end_of_day
+        rescue ArgumentError, TypeError
+          # Invalid date format, skip this filter
+          end_time = nil
+        end
       end
-      @posts = @posts.where('published_at <= ?', end_time)
+      @posts = @posts.where('published_at <= ?', end_time) if end_time
     end
 
     # Filter by search term

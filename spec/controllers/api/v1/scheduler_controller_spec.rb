@@ -215,6 +215,19 @@ RSpec.describe Api::V1::SchedulerController, type: :controller do
 
       expect(response).to have_http_status(:not_found)
     end
+
+    it 'returns errors when bucket_schedule save fails' do
+      allow_any_instance_of(BucketSchedule).to receive(:save).and_return(false)
+      allow_any_instance_of(BucketSchedule).to receive(:errors).and_return(
+        double(full_messages: ['Schedule is invalid'])
+      )
+
+      post :schedule, params: schedule_params
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json_response = JSON.parse(response.body)
+      expect(json_response['errors']).to be_present
+    end
   end
 
   describe 'POST #post_now' do

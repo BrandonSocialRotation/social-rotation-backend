@@ -546,8 +546,10 @@ RSpec.describe BucketSchedule, type: :model do
         it 'falls back to first image when get_next_rotation_image returns nil' do
           # Mock get_next_rotation_image to return nil to test fallback
           allow(bucket).to receive(:get_next_rotation_image).and_return(nil)
+          allow(Rails.logger).to receive(:warn)
           result = rotation_schedule.get_next_bucket_image_due
           expect(result).to eq(image1)
+          expect(Rails.logger).to have_received(:warn).with(match(/get_next_rotation_image returned nil/))
         end
       end
 

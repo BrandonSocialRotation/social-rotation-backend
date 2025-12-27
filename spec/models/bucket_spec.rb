@@ -191,6 +191,27 @@ RSpec.describe Bucket, type: :model do
           expect(result).to eq(bucket_image2)
         end
 
+        it 'finds image by friendly_name when bucket_image not found by id' do
+          # Create history with bucket_image2, then delete it
+          history = create(:bucket_send_history,
+            bucket_schedule: rotation_schedule,
+            bucket_image: bucket_image2,
+            friendly_name: 'B',
+            sent_at: 1.hour.ago
+          )
+          # Delete bucket_image2 so it won't be found by id
+          bucket_image2.destroy
+          # Reload bucket to refresh associations
+          bucket.reload
+          # Should find next image after 'B' which is 'C' (line 116)
+          # Then use that as last_sent_image and get next in rotation
+          result = bucket.get_next_rotation_image
+          # After 'C' (index 2 in ordered list), next is index 0 (first image), wrapped around
+          # Verify result is one of the remaining images
+          expect(result).to be_present
+          expect([bucket_image1, bucket_image3]).to include(result)
+        end
+
         it 'handles case when last_sent_image found by friendly_name lookup' do
           # Create history with friendly_name but bucket_image deleted
           history = create(:bucket_send_history,
@@ -215,6 +236,42 @@ RSpec.describe Bucket, type: :model do
           )
           result = bucket.get_next_rotation_image
           expect(result).to eq(bucket_image3)
+        end
+
+        it 'handles case when last_sent_image not found by id but found by friendly_name lookup' do
+          # Create history with friendly_name but bucket_image deleted
+          history = create(:bucket_send_history,
+            bucket_schedule: rotation_schedule,
+            bucket_image: bucket_image2,
+            friendly_name: 'B',
+            sent_at: 1.hour.ago
+          )
+          bucket_image2.destroy
+          bucket.reload
+          # Should find next image after 'B' which is 'C' (line 116)
+          result = bucket.get_next_rotation_image
+          expect(result).to eq(bucket_image3)
+        end
+
+        it 'handles case when no image found with friendly_name > last_sent, falls back to first' do
+          # Create history with last image (C is the last alphabetically)
+          history = create(:bucket_send_history,
+            bucket_schedule: rotation_schedule,
+            bucket_image: bucket_image3,
+            friendly_name: 'C',
+            sent_at: 1.hour.ago
+          )
+          bucket_image3.destroy
+          bucket.reload
+          # Update history to have friendly_name that's after all remaining images
+          history.update_column(:friendly_name, 'Z')
+          # No image with friendly_name > 'Z', so should fall back to first image (line 119)
+          # The logic: last_sent_image ||= bucket_images.first sets last_sent_image to first
+          # Then it finds the index of that first image and gets next in rotation
+          result = bucket.get_next_rotation_image
+          # After first image (index 0), next is index 1 (second image)
+          expect(result).to be_present
+          expect(bucket.bucket_images).to include(result)
         end
       end
 

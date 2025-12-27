@@ -46,6 +46,30 @@ RSpec.describe Api::V1::OauthController, type: :controller do
         get :facebook_callback
         expect(response).to have_http_status(:redirect)
       end
+
+      context 'when callback succeeds' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:facebook_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(HTTParty).to receive(:get).and_return(double(success?: true, body: '{"name":"Test User"}'))
+          allow(user).to receive(:respond_to?).with(:facebook_name=).and_return(true)
+        end
+
+        it 'updates user with access token and fetches user info' do
+          get :facebook_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+          user.reload
+          expect(user.fb_user_access_key).to eq('token123')
+        end
+      end
     end
   end
 
@@ -79,6 +103,29 @@ RSpec.describe Api::V1::OauthController, type: :controller do
         get :linkedin_callback, params: { code: 'test', state: 'wrong_state' }
         expect(response).to have_http_status(:redirect)
         expect(response.location).to include('error=invalid_state')
+      end
+
+      context 'when callback succeeds' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:linkedin_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(HTTParty).to receive(:get).and_return(double(success?: true, body: '{"id":"profile123"}'))
+        end
+
+        it 'updates user with access token and extracts profile ID' do
+          get :linkedin_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+          user.reload
+          expect(user.linkedin_access_token).to eq('token123')
+        end
       end
     end
   end
@@ -114,6 +161,30 @@ RSpec.describe Api::V1::OauthController, type: :controller do
         expect(response).to have_http_status(:redirect)
         expect(response.location).to include('error=invalid_state')
       end
+
+      context 'when callback succeeds' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123","refresh_token":"refresh123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:google_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(HTTParty).to receive(:get).and_return(double(success?: true, body: '{"name":"Test User"}'))
+          allow(user).to receive(:respond_to?).with(:google_account_name=).and_return(true)
+        end
+
+        it 'updates user with refresh token and fetches user info' do
+          get :google_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+          user.reload
+          expect(user.google_refresh_token).to eq('refresh123')
+        end
+      end
     end
   end
 
@@ -125,11 +196,71 @@ RSpec.describe Api::V1::OauthController, type: :controller do
 
       before do
         request.headers['Authorization'] = "Bearer #{generate_token(user)}"
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('TWITTER_API_KEY').and_return('test_key')
+        allow(ENV).to receive(:[]).with('TWITTER_API_SECRET_KEY').and_return('test_secret')
         allow(::OAuth::Consumer).to receive(:new).and_return(consumer_double)
         allow(consumer_double).to receive(:get_request_token).and_return(request_token_double)
         allow(request_token_double).to receive(:token).and_return('req_token')
         allow(request_token_double).to receive(:secret).and_return('req_secret')
         allow(request_token_double).to receive(:authorize_url).and_return('https://api.twitter.com/oauth/authorize')
+      end
+
+      context 'when user is not authenticated' do
+        before do
+          request.headers['Authorization'] = nil
+          allow(controller).to receive(:current_user).and_return(nil)
+        end
+
+        it 'returns unauthorized error' do
+          get :twitter_login
+          expect(response).to have_http_status(:unauthorized)
+          json_response = JSON.parse(response.body)
+          expect(json_response['error']).to eq('Authentication required')
+        end
+      end
+
+      context 'when Twitter API credentials are not configured' do
+        before do
+          allow(ENV).to receive(:[]).with('TWITTER_API_KEY').and_return(nil)
+          allow(ENV).to receive(:[]).with('TWITTER_API_SECRET_KEY').and_return(nil)
+        end
+
+        it 'returns internal server error' do
+          get :twitter_login
+          expect(response).to have_http_status(:internal_server_error)
+          json_response = JSON.parse(response.body)
+          expect(json_response['error']).to include('Twitter API credentials not configured')
+        end
+      end
+
+      context 'when OAuth gem is not installed' do
+        before do
+          allow(::OAuth::Consumer).to receive(:new).and_raise(LoadError.new('OAuth gem not found'))
+          allow(Rails.logger).to receive(:error)
+        end
+
+        it 'handles LoadError gracefully' do
+          get :twitter_login
+          expect(response).to have_http_status(:internal_server_error)
+          json_response = JSON.parse(response.body)
+          expect(json_response['error']).to include('OAuth gem not installed')
+        end
+      end
+
+      context 'when OAuth request fails' do
+        before do
+          allow(consumer_double).to receive(:get_request_token).and_raise(StandardError.new('OAuth error'))
+          allow(Rails.logger).to receive(:error)
+        end
+
+        it 'handles OAuth errors gracefully' do
+          get :twitter_login
+          expect(response).to have_http_status(:bad_request)
+          json_response = JSON.parse(response.body)
+          expect(json_response['error']).to include('Twitter authentication failed')
+          expect(Rails.logger).to have_received(:error).with(match(/Twitter OAuth error/))
+        end
       end
 
       it 'redirects to Twitter authorization' do
@@ -145,11 +276,106 @@ RSpec.describe Api::V1::OauthController, type: :controller do
     end
 
     describe 'GET #twitter_callback' do
-      before { session[:user_id] = user.id }
+      let(:consumer_double) { instance_double(::OAuth::Consumer) }
+      let(:request_token_double) { instance_double(::OAuth::RequestToken) }
+      let(:access_token_double) { instance_double(::OAuth::AccessToken, token: 'access_token', secret: 'access_secret', params: {'user_id' => '123', 'screen_name' => 'testuser'}) }
 
-      it 'handles missing oauth_verifier' do
-        get :twitter_callback, params: { oauth_token: 'test' }
-        expect(response).to have_http_status(:redirect)
+      before do
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('TWITTER_API_KEY').and_return('test_key')
+        allow(ENV).to receive(:[]).with('TWITTER_API_SECRET_KEY').and_return('test_secret')
+        allow(::OAuth::Consumer).to receive(:new).and_return(consumer_double)
+        allow(::OAuth::RequestToken).to receive(:new).and_return(request_token_double)
+        allow(request_token_double).to receive(:get_access_token).and_return(access_token_double)
+      end
+
+      context 'when Twitter API credentials are not configured' do
+        before do
+          allow(ENV).to receive(:[]).with('TWITTER_API_KEY').and_return(nil)
+          allow(ENV).to receive(:[]).with('TWITTER_API_SECRET_KEY').and_return(nil)
+        end
+
+        it 'redirects with config error' do
+          get :twitter_callback, params: { oauth_token: 'test', oauth_verifier: 'verifier' }
+          expect(response).to have_http_status(:redirect)
+          expect(response.location).to include('error=twitter_config_error')
+        end
+      end
+
+      context 'when user_id is missing' do
+        before do
+          session[:user_id] = nil
+        end
+
+        it 'redirects with user_not_found error' do
+          get :twitter_callback, params: { oauth_token: 'test', oauth_verifier: 'verifier' }
+          expect(response).to have_http_status(:redirect)
+          expect(response.location).to include('error=user_not_found')
+        end
+      end
+
+      context 'when user is not found' do
+        before do
+          session[:user_id] = 99999
+        end
+
+        it 'redirects with user_not_found error' do
+          get :twitter_callback, params: { oauth_token: 'test', oauth_verifier: 'verifier', user_id: 99999 }
+          expect(response).to have_http_status(:redirect)
+          expect(response.location).to include('error=user_not_found')
+        end
+      end
+
+      context 'when request token is missing' do
+        before do
+          session[:user_id] = user.id
+          session[:twitter_request_token] = nil
+          session[:twitter_request_secret] = nil
+        end
+
+        it 'redirects with session expired error' do
+          get :twitter_callback, params: { oauth_token: 'test', oauth_verifier: 'verifier', user_id: user.id }
+          expect(response).to have_http_status(:redirect)
+          expect(response.location).to include('error=twitter_session_expired')
+        end
+      end
+
+      context 'when callback succeeds' do
+        before do
+          session[:user_id] = user.id
+          session[:twitter_request_token] = 'req_token'
+          session[:twitter_request_secret] = 'req_secret'
+        end
+
+        it 'updates user and redirects with success' do
+          get :twitter_callback, params: { oauth_token: 'req_token', oauth_verifier: 'verifier', user_id: user.id }
+          
+          expect(response).to have_http_status(:redirect)
+          expect(response.location).to include('success=twitter_connected')
+          user.reload
+          expect(user.twitter_oauth_token).to eq('access_token')
+          expect(user.twitter_oauth_token_secret).to eq('access_secret')
+          expect(session[:twitter_request_token]).to be_nil
+          expect(session[:twitter_request_secret]).to be_nil
+        end
+      end
+
+      context 'when callback raises exception' do
+        before do
+          session[:user_id] = user.id
+          session[:twitter_request_token] = 'req_token'
+          session[:twitter_request_secret] = 'req_secret'
+          allow(request_token_double).to receive(:get_access_token).and_raise(StandardError.new('OAuth error'))
+          allow(Rails.logger).to receive(:error)
+        end
+
+        it 'handles errors gracefully' do
+          get :twitter_callback, params: { oauth_token: 'req_token', oauth_verifier: 'verifier', user_id: user.id }
+          
+          expect(response).to have_http_status(:redirect)
+          expect(response.location).to include('error=twitter_auth_failed')
+          expect(Rails.logger).to have_received(:error).with(match(/Twitter callback error/))
+        end
       end
     end
   end
@@ -207,6 +433,27 @@ RSpec.describe Api::V1::OauthController, type: :controller do
         get :tiktok_callback, params: { code: 'test', state: 'wrong_state' }
         expect(response).to have_http_status(:redirect)
       end
+
+      context 'when callback succeeds' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:tiktok_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(user).to receive(:respond_to?).with(:tiktok_access_token=).and_return(true)
+        end
+
+        it 'updates user with access token' do
+          get :tiktok_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+        end
+      end
     end
   end
 
@@ -239,6 +486,55 @@ RSpec.describe Api::V1::OauthController, type: :controller do
         session[:youtube_state] = 'correct_state'
         get :youtube_callback, params: { code: 'test', state: 'wrong_state' }
         expect(response).to have_http_status(:redirect)
+      end
+
+      context 'when callback succeeds with refresh token' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123","refresh_token":"refresh123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:youtube_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(HTTParty).to receive(:get).and_return(double(success?: true, body: '{"items":[{"id":"channel123","snippet":{"title":"Test Channel"}}]}'))
+          allow(user).to receive(:respond_to?).and_return(true)
+        end
+
+        it 'updates user with refresh token and access token' do
+          get :youtube_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+          user.reload
+          expect(user.youtube_refresh_token).to eq('refresh123')
+          expect(user.youtube_access_token).to eq('token123')
+        end
+      end
+
+      context 'when callback succeeds without refresh token' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:youtube_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(HTTParty).to receive(:get).and_return(double(success?: true, body: '{"items":[{"id":"channel123","snippet":{"title":"Test Channel"}}]}'))
+          allow(user).to receive(:respond_to?).and_return(true)
+        end
+
+        it 'updates user with access token only' do
+          get :youtube_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+          user.reload
+          expect(user.youtube_access_token).to eq('token123')
+        end
       end
     end
   end
@@ -274,6 +570,50 @@ RSpec.describe Api::V1::OauthController, type: :controller do
         session[:pinterest_state] = 'correct_state'
         get :pinterest_callback, params: { code: 'test', state: 'wrong_state' }
         expect(response).to have_http_status(:redirect)
+      end
+
+      context 'when callback succeeds' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123","refresh_token":"refresh123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:pinterest_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(HTTParty).to receive(:get).and_return(double(success?: true, body: '{"username":"testuser"}'))
+          allow(user).to receive(:respond_to?).with(:pinterest_access_token=).and_return(true)
+          allow(user).to receive(:respond_to?).with(:pinterest_username=).and_return(true)
+        end
+
+        it 'updates user with access token and refresh token' do
+          get :pinterest_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+        end
+      end
+
+      context 'when user does not respond to pinterest_access_token=' do
+        let(:mock_service) { instance_double(OauthService) }
+        let(:mock_response) { instance_double(HTTParty::Response, success?: true, body: '{"access_token":"token123"}') }
+        
+        before do
+          session[:user_id] = user.id
+          session[:pinterest_state] = 'test_state'
+          allow(OauthService).to receive(:new).and_return(mock_service)
+          allow(mock_service).to receive(:verify_state).and_return([user.id, 'test_state'])
+          allow(mock_service).to receive(:exchange_code_for_token).and_return(mock_response)
+          allow(mock_service).to receive(:send).with(:default_callback_url).and_return('http://test.com/callback')
+          allow(user).to receive(:respond_to?).with(:pinterest_access_token=).and_return(false)
+        end
+
+        it 'returns early without updating' do
+          get :pinterest_callback, params: { code: 'test_code', state: 'test_state' }
+          
+          expect(response).to have_http_status(:redirect)
+        end
       end
     end
   end
