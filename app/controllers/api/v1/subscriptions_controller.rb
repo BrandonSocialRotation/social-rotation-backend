@@ -138,6 +138,13 @@ class Api::V1::SubscriptionsController < ApplicationController
         })
       end
       
+      # Check if there's a pending registration for this user (shouldn't happen, but handle it)
+      pending_registration = PendingRegistration.find_by(email: current_user.email)
+      if pending_registration && !pending_registration.expired?
+        # User already exists but has pending registration - clean it up
+        pending_registration.destroy
+      end
+      
       # Calculate price based on plan type
       if plan.supports_per_user_pricing
         # For per-user pricing, calculate based on provided user count
@@ -484,17 +491,44 @@ class Api::V1::SubscriptionsController < ApplicationController
   end
   
   def handle_checkout_completed(session)
-    user_id = session.metadata['user_id'].to_i
     plan_id = session.metadata['plan_id'].to_i
     billing_period = session.metadata['billing_period'] || 'monthly'
     account_type = session.metadata['account_type'] || 'personal'
     company_name = session.metadata['company_name']
     user_count = session.metadata['user_count']&.to_i || 1
     
-    user = User.find_by(id: user_id)
     plan = Plan.find_by(id: plan_id)
+    return unless plan
+
+    # Check if this is a new registration (pending_registration_id) or existing user (user_id)
+    pending_registration_id = session.metadata['pending_registration_id']
+    user_id = session.metadata['user_id']&.to_i
     
-    return unless user && plan
+    user = nil
+    
+    if pending_registration_id.present?
+      # New registration - create user from pending registration
+      pending_registration = PendingRegistration.find_by(id: pending_registration_id)
+      return unless pending_registration
+      
+      # Check if user already exists (race condition protection)
+      user = User.find_by(email: pending_registration.email)
+      unless user
+        # Create user from pending registration
+        user = pending_registration.create_user!
+      end
+      
+      # Clean up pending registration
+      pending_registration.destroy
+    elsif user_id > 0
+      # Existing user - find by ID
+      user = User.find_by(id: user_id)
+      return unless user
+    else
+      # No user identifier - can't proceed
+      Rails.logger.error "Checkout completed but no user_id or pending_registration_id in metadata"
+      return
+    end
     
     # Create account NOW (after successful payment)
     if account_type == 'agency' && company_name.present?

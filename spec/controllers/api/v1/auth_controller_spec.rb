@@ -3,46 +3,69 @@
 require 'rails_helper'
 
 RSpec.describe Api::V1::AuthController, type: :controller do
-  # Test: User registration
+  # Test: User registration (now creates PendingRegistration and Stripe checkout)
   describe 'POST #register' do
+    let(:plan) { create(:plan) }
     let(:valid_user_params) do
       {
         name: 'Test User',
         email: 'test@example.com',
         password: 'password123',
-        password_confirmation: 'password123'
+        password_confirmation: 'password123',
+        plan_id: plan.id
       }
     end
 
+    before do
+      Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || 'sk_test_fake'
+      allow(ENV).to receive(:[]).with('STRIPE_SECRET_KEY').and_return('sk_test_fake')
+      allow(ENV).to receive(:[]).with('FRONTEND_URL').and_return('https://test.com')
+    end
+
     context 'with valid parameters' do
-      it 'creates a new user' do
+      it 'creates a pending registration instead of user' do
         expect {
           post :register, params: valid_user_params
-        }.to change(User, :count).by(1)
+        }.to change(PendingRegistration, :count).by(1)
+          .and change(User, :count).by(0)
         
         expect(response).to have_http_status(:created)
         json_response = JSON.parse(response.body)
-        expect(json_response['user']['name']).to eq('Test User')
-        expect(json_response['user']['email']).to eq('test@example.com')
-        expect(json_response['token']).to be_present
+        expect(json_response['checkout_session_id']).to be_present
+        expect(json_response['checkout_url']).to be_present
+        expect(json_response['message']).to include('complete payment')
       end
 
-      it 'returns JWT token' do
-        post :register, params: valid_user_params
-        json_response = JSON.parse(response.body)
-        expect(json_response['token']).to be_present
+      it 'creates Stripe checkout session' do
+        customer_double = double(id: 'cus_test123')
+        session_double = double(id: 'cs_test123', url: 'https://checkout.stripe.com/test')
         
-        # Verify token is valid
-        decoded_token = JsonWebToken.decode(json_response['token'])
-        expect(decoded_token['user_id']).to eq(User.last.id)
+        allow(Stripe::Customer).to receive(:create).and_return(customer_double)
+        allow(Stripe::Price).to receive(:create).and_return(double(id: 'price_test123'))
+        allow(Stripe::Checkout::Session).to receive(:create).and_return(session_double)
+        
+        post :register, params: valid_user_params
+        
+        expect(Stripe::Checkout::Session).to have_received(:create)
+        json_response = JSON.parse(response.body)
+        expect(json_response['checkout_session_id']).to eq('cs_test123')
       end
 
-      it 'sets default account_id to 0 for personal accounts' do
+      it 'stores registration data in pending registration' do
+        customer_double = double(id: 'cus_test123')
+        session_double = double(id: 'cs_test123', url: 'https://checkout.stripe.com/test')
+        
+        allow(Stripe::Customer).to receive(:create).and_return(customer_double)
+        allow(Stripe::Price).to receive(:create).and_return(double(id: 'price_test123'))
+        allow(Stripe::Checkout::Session).to receive(:create).and_return(session_double)
+        
         post :register, params: valid_user_params
-        user = User.last
-        expect(user.account_id).to eq(0)
-        expect(user.is_account_admin).to be false
-        expect(user.role).to eq('user')
+        
+        pending = PendingRegistration.last
+        expect(pending.email).to eq('test@example.com')
+        expect(pending.name).to eq('Test User')
+        expect(pending.account_type).to eq('personal')
+        expect(pending.stripe_session_id).to eq('cs_test123')
       end
     end
 
@@ -54,30 +77,23 @@ RSpec.describe Api::V1::AuthController, type: :controller do
         )
       end
 
-      it 'creates an agency account and reseller user' do
+      it 'creates pending registration with agency type' do
+        customer_double = double(id: 'cus_test123')
+        session_double = double(id: 'cs_test123', url: 'https://checkout.stripe.com/test')
+        
+        allow(Stripe::Customer).to receive(:create).and_return(customer_double)
+        allow(Stripe::Price).to receive(:create).and_return(double(id: 'price_test123'))
+        allow(Stripe::Checkout::Session).to receive(:create).and_return(session_double)
+        
         expect {
           post :register, params: agency_params
-        }.to change(User, :count).by(1)
-          .and change(Account, :count).by(1)
+        }.to change(PendingRegistration, :count).by(1)
+          .and change(User, :count).by(0)
+          .and change(Account, :count).by(0)
 
-        user = User.last
-        account = Account.last
-        
-        expect(user.account_id).to eq(account.id)
-        expect(user.is_account_admin).to be true
-        expect(user.role).to eq('reseller')
-        expect(account.name).to eq('Test Agency')
-        expect(account.is_reseller).to be true
-      end
-
-      it 'creates default account features' do
-        post :register, params: agency_params
-        account = Account.last
-        
-        expect(account.account_feature).to be_present
-        expect(account.account_feature.max_users).to eq(50)
-        expect(account.account_feature.max_buckets).to eq(100)
-        expect(account.account_feature.allow_marketplace).to be true
+        pending = PendingRegistration.last
+        expect(pending.account_type).to eq('agency')
+        expect(pending.company_name).to eq('Test Agency')
       end
     end
 
@@ -104,12 +120,28 @@ RSpec.describe Api::V1::AuthController, type: :controller do
         expect(json_response['details']).to include("Password confirmation doesn't match Password")
       end
 
-      it 'returns error for duplicate email' do
+      it 'returns error for duplicate email (existing user)' do
         create(:user, email: 'test@example.com')
         post :register, params: valid_user_params
         expect(response).to have_http_status(:unprocessable_entity)
         json_response = JSON.parse(response.body)
         expect(json_response['details']).to include('Email has already been taken')
+      end
+
+      it 'returns error for missing plan_id' do
+        params_without_plan = valid_user_params.except(:plan_id)
+        post :register, params: params_without_plan
+        expect(response).to have_http_status(:bad_request)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Plan selection required')
+      end
+
+      it 'returns error for invalid plan_id' do
+        params_with_invalid_plan = valid_user_params.merge(plan_id: 99999)
+        post :register, params: params_with_invalid_plan
+        expect(response).to have_http_status(:bad_request)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Invalid plan')
       end
 
       it 'returns error for agency account without company_name' do
@@ -123,18 +155,19 @@ RSpec.describe Api::V1::AuthController, type: :controller do
     end
 
     context 'with registration errors' do
-      it 'handles database errors gracefully' do
-        allow(User).to receive(:find_by).and_raise(StandardError.new('Database error'))
+      it 'handles Stripe errors gracefully' do
+        allow(Stripe::Customer).to receive(:create).and_raise(Stripe::StripeError.new('Stripe error'))
         post :register, params: valid_user_params
         expect(response).to have_http_status(:internal_server_error)
         json_response = JSON.parse(response.body)
-        expect(json_response['error']).to eq('Registration failed')
+        expect(json_response['error']).to eq('Payment processing error')
+        # Pending registration should be cleaned up
+        expect(PendingRegistration.count).to eq(0)
       end
 
-      it 'handles account creation errors for agency' do
-        allow(Account).to receive(:create!).and_raise(StandardError.new('Account creation failed'))
-        agency_params = valid_user_params.merge(account_type: 'agency', company_name: 'Test Agency')
-        post :register, params: agency_params
+      it 'handles general errors gracefully' do
+        allow(PendingRegistration).to receive(:new).and_raise(StandardError.new('Database error'))
+        post :register, params: valid_user_params
         expect(response).to have_http_status(:internal_server_error)
         json_response = JSON.parse(response.body)
         expect(json_response['error']).to eq('Registration failed')

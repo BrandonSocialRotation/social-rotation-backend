@@ -291,6 +291,117 @@ RSpec.describe Api::V1::SubscriptionsController, type: :controller do
   end
 
   describe '#handle_checkout_completed' do
+    context 'with pending registration (new user)' do
+      let(:pending_registration) { create(:pending_registration,
+        email: 'newuser@example.com',
+        name: 'New User',
+        password: 'password123',
+        password_confirmation: 'password123',
+        account_type: 'personal',
+        stripe_session_id: 'cs_test123'
+      ) }
+      
+      let(:session) { double(
+        metadata: {
+          'pending_registration_id' => pending_registration.id.to_s,
+          'plan_id' => plan.id.to_s,
+          'billing_period' => 'monthly',
+          'account_type' => 'personal',
+          'company_name' => '',
+          'user_count' => '1'
+        },
+        customer: 'cus_test123'
+      ) }
+
+      before do
+        mock_subscription = double(
+          id: 'sub_test',
+          status: 'active',
+          current_period_start: Time.current.to_i,
+          current_period_end: 1.month.from_now.to_i,
+          cancel_at_period_end: false
+        )
+        allow(Stripe::Subscription).to receive(:list).and_return(double(data: [mock_subscription]))
+        allow(Stripe.api_key=).to receive(:call)
+      end
+
+      it 'creates user from pending registration' do
+        expect {
+          controller.send(:handle_checkout_completed, session)
+        }.to change(User, :count).by(1)
+          .and change(PendingRegistration, :count).by(-1)
+          .and change(Account, :count).by(1)
+
+        user = User.find_by(email: 'newuser@example.com')
+        expect(user).to be_present
+        expect(user.name).to eq('New User')
+        expect(user.authenticate('password123')).to eq(user)
+      end
+
+      it 'creates account after user creation' do
+        controller.send(:handle_checkout_completed, session)
+        
+        user = User.find_by(email: 'newuser@example.com')
+        expect(user.account_id).to be > 0
+        expect(user.account).to be_present
+        expect(user.is_account_admin).to be true
+      end
+
+      it 'creates subscription for the account' do
+        controller.send(:handle_checkout_completed, session)
+        
+        user = User.find_by(email: 'newuser@example.com')
+        account = user.account
+        expect(account.subscription).to be_present
+        expect(account.subscription.plan).to eq(plan)
+        expect(account.subscription.status).to eq('active')
+      end
+
+      it 'handles agency account creation from pending registration' do
+        agency_pending = create(:pending_registration_agency,
+          email: 'agency@example.com',
+          name: 'Agency User',
+          password: 'password123',
+          password_confirmation: 'password123',
+          company_name: 'Test Agency',
+          stripe_session_id: 'cs_test456'
+        )
+        
+        agency_session = double(
+          metadata: {
+            'pending_registration_id' => agency_pending.id.to_s,
+            'plan_id' => plan.id.to_s,
+            'billing_period' => 'monthly',
+            'account_type' => 'agency',
+            'company_name' => 'Test Agency',
+            'user_count' => '1'
+          },
+          customer: 'cus_test456'
+        )
+
+        controller.send(:handle_checkout_completed, agency_session)
+        
+        user = User.find_by(email: 'agency@example.com')
+        expect(user).to be_present
+        expect(user.role).to eq('reseller')
+        expect(user.is_account_admin).to be true
+        expect(user.account.name).to eq('Test Agency')
+        expect(user.account.is_reseller).to be true
+      end
+
+      it 'handles case where user already exists (race condition)' do
+        # Create user with same email first
+        existing_user = create(:user, email: 'newuser@example.com')
+        
+        controller.send(:handle_checkout_completed, session)
+        
+        # Should not create duplicate user
+        expect(User.where(email: 'newuser@example.com').count).to eq(1)
+        expect(PendingRegistration.find_by(id: pending_registration.id)).to be_nil
+      end
+    end
+
+    context 'with existing user (upgrade scenario)' do
     let(:session) { double(
       metadata: {
         'user_id' => user.id.to_s,
@@ -312,6 +423,89 @@ RSpec.describe Api::V1::SubscriptionsController, type: :controller do
 
     before do
       allow(Stripe::Subscription).to receive(:list).and_return(double(data: [stripe_subscription]))
+    end
+
+    context 'with pending registration (new user)' do
+      let(:pending_registration) { create(:pending_registration,
+        email: 'newuser@example.com',
+        name: 'New User',
+        password: 'password123',
+        password_confirmation: 'password123',
+        account_type: 'personal',
+        stripe_session_id: 'cs_test123'
+      ) }
+      
+      let(:pending_session) { double(
+        metadata: {
+          'pending_registration_id' => pending_registration.id.to_s,
+          'plan_id' => plan.id.to_s,
+          'billing_period' => 'monthly',
+          'account_type' => 'personal',
+          'company_name' => '',
+          'user_count' => '1'
+        },
+        customer: 'cus_test123'
+      ) }
+
+      before do
+        allow(Stripe::Subscription).to receive(:list).and_return(double(data: [stripe_subscription]))
+        allow(Stripe).to receive(:api_key=)
+      end
+
+      it 'creates user from pending registration' do
+        expect {
+          controller.send(:handle_checkout_completed, pending_session)
+        }.to change(User, :count).by(1)
+          .and change(PendingRegistration, :count).by(-1)
+          .and change(Account, :count).by(1)
+
+        user = User.find_by(email: 'newuser@example.com')
+        expect(user).to be_present
+        expect(user.name).to eq('New User')
+        expect(user.authenticate('password123')).to eq(user)
+      end
+
+      it 'creates account and subscription after user creation' do
+        controller.send(:handle_checkout_completed, pending_session)
+        
+        user = User.find_by(email: 'newuser@example.com')
+        expect(user.account_id).to be > 0
+        expect(user.account).to be_present
+        expect(user.account.subscription).to be_present
+        expect(user.account.subscription.plan).to eq(plan)
+      end
+
+      it 'handles agency account creation from pending registration' do
+        agency_pending = create(:pending_registration_agency,
+          email: 'agency@example.com',
+          name: 'Agency User',
+          password: 'password123',
+          password_confirmation: 'password123',
+          company_name: 'Test Agency',
+          stripe_session_id: 'cs_test456'
+        )
+        
+        agency_session = double(
+          metadata: {
+            'pending_registration_id' => agency_pending.id.to_s,
+            'plan_id' => plan.id.to_s,
+            'billing_period' => 'monthly',
+            'account_type' => 'agency',
+            'company_name' => 'Test Agency',
+            'user_count' => '1'
+          },
+          customer: 'cus_test456'
+        )
+
+        controller.send(:handle_checkout_completed, agency_session)
+        
+        user = User.find_by(email: 'agency@example.com')
+        expect(user).to be_present
+        expect(user.role).to eq('reseller')
+        expect(user.is_account_admin).to be true
+        expect(user.account.name).to eq('Test Agency')
+        expect(user.account.is_reseller).to be true
+      end
     end
 
     context 'when creating agency account' do
