@@ -41,8 +41,9 @@ class MetaInsightsService
       page_token = get_page_access_token
       return mock_summary(range) unless page_token
       
-      period = range == '28d' ? 'day' : 'day'
-      metric_list = 'impressions,reach,likes,comments,shares,saved,profile_views,website_clicks'
+      period = 'day'
+      # Get Hootsuite-style metrics (removed impressions and reach as requested)
+      metric_list = 'likes,comments,saved,profile_views,website_clicks'
       
       # Get insights for the specified range
       insights_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}/insights"
@@ -135,9 +136,10 @@ class MetaInsightsService
       metric_name = case metric
                      when 'likes' then 'likes'
                      when 'comments' then 'comments'
-                     when 'engagement' then 'engagement'
-                     when 'reach' then 'reach'
-                     when 'impressions' then 'impressions'
+                     when 'engagement' then 'likes' # Use likes as proxy for engagement
+                     when 'saves' then 'saved'
+                     when 'clicks' then 'website_clicks'
+                     when 'profile_visits' then 'profile_views'
                      else 'likes'
                      end
       
@@ -225,7 +227,8 @@ class MetaInsightsService
     seed = seed_for(range)
     srand(seed)
     
-    # Hootsuite-style analytics metrics
+    # Hootsuite-style analytics metrics (only used when API is not available)
+    followers = rand(1_000..25_000)
     likes = rand(500..5_000)
     comments = rand(50..500)
     shares = rand(20..200)
@@ -234,7 +237,6 @@ class MetaInsightsService
     profile_visits = rand(200..2_000)
     
     total_engagement = likes + comments + shares + saves
-    engagement_rate = followers = rand(1_000..25_000)
     engagement_rate_percent = followers > 0 ? ((total_engagement.to_f / followers) * 100).round(2) : 0.0
     
     {
@@ -266,10 +268,12 @@ class MetaInsightsService
 
   def base_for(metric)
     case metric
-    when 'reach' then 600
-    when 'impressions' then 1200
+    when 'likes' then 500
+    when 'comments' then 50
+    when 'saves' then 30
+    when 'clicks' then 100
+    when 'profile_visits' then 200
     when 'engagement' then 90
-    when 'followers' then 20
     else 50
     end
   end
