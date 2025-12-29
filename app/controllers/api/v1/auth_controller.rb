@@ -183,8 +183,8 @@ class Api::V1::AuthController < ApplicationController
           }
         })
 
-        # Store session ID in pending registration
-        pending_registration.update!(stripe_session_id: session.id)
+        # Store session ID in pending registration (use update_column to skip validations)
+        pending_registration.update_column(:stripe_session_id, session.id)
 
         render json: {
           checkout_session_id: session.id,
