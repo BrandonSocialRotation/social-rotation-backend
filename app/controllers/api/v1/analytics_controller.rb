@@ -65,4 +65,28 @@ class Api::V1::AnalyticsController < ApplicationController
       total_clicks: metrics.values.sum { |m| m[:clicks] || 0 }
     }
   end
+
+  # GET /api/v1/analytics/posts_count
+  def posts_count
+    # Count all posts made by the user from the app
+    # Posts are tracked in bucket_send_histories through the user's buckets
+    bucket_ids = current_user.buckets.pluck(:id)
+    total_posts = BucketSendHistory.where(bucket_id: bucket_ids).count
+    
+    # Count posts in the last 7 days
+    posts_last_7d = BucketSendHistory.where(bucket_id: bucket_ids)
+                                      .where('sent_at >= ?', 7.days.ago)
+                                      .count
+    
+    # Count posts in the last 30 days
+    posts_last_30d = BucketSendHistory.where(bucket_id: bucket_ids)
+                                      .where('sent_at >= ?', 30.days.ago)
+                                      .count
+    
+    render json: {
+      total_posts: total_posts,
+      posts_last_7d: posts_last_7d,
+      posts_last_30d: posts_last_30d
+    }
+  end
 end

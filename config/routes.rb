@@ -16,6 +16,7 @@ Rails.application.routes.draw do
       get 'analytics/instagram/timeseries', to: 'analytics#instagram_timeseries'
       get 'analytics/platform/:platform', to: 'analytics#platform_analytics'
       get 'analytics/overall', to: 'analytics#overall'
+      get 'analytics/posts_count', to: 'analytics#posts_count'
       get 'sub_accounts/index'
       get 'sub_accounts/create'
       get 'sub_accounts/show'
