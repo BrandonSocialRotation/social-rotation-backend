@@ -130,4 +130,54 @@ RSpec.describe PendingRegistration, type: :model do
       expect(pending.expires_at).to be > Time.current
     end
   end
+
+  describe 'payment-first registration flow' do
+    it 'does not create user account on registration' do
+      plan = create(:plan)
+      
+      # Simulate registration
+      pending = create(:pending_registration,
+        email: 'test@example.com',
+        name: 'Test User',
+        password: 'password123',
+        password_confirmation: 'password123'
+      )
+      
+      # User should NOT exist yet
+      expect(User.find_by(email: 'test@example.com')).to be_nil
+      expect(pending).to be_persisted
+    end
+
+    it 'allows same email to register again if pending registration expired' do
+      # Create expired pending registration
+      expired_pending = create(:pending_registration,
+        email: 'test@example.com',
+        expires_at: 1.hour.ago
+      )
+      
+      # Should be able to create new pending registration with same email
+      new_pending = build(:pending_registration,
+        email: 'test@example.com',
+        expires_at: 1.hour.from_now
+      )
+      
+      # Expired one should be cleaned up, new one should be valid
+      expect(new_pending).to be_valid
+    end
+
+    it 'prevents duplicate pending registrations for same email' do
+      create(:pending_registration,
+        email: 'test@example.com',
+        expires_at: 1.hour.from_now
+      )
+      
+      duplicate = build(:pending_registration,
+        email: 'test@example.com',
+        expires_at: 1.hour.from_now
+      )
+      
+      expect(duplicate).not_to be_valid
+      expect(duplicate.errors[:email]).to include('has already been taken')
+    end
+  end
 end
