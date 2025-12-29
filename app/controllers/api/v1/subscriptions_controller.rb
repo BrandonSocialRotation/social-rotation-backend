@@ -163,13 +163,20 @@ class Api::V1::SubscriptionsController < ApplicationController
       end
 
       # Create checkout session
-      frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
+      frontend_url = ENV['FRONTEND_URL']
       
       # Validate and clean the frontend URL
-      frontend_url = frontend_url.to_s.strip.chomp('/')
-      unless frontend_url.match?(/\Ahttps?:\/\/.+\z/)
-        Rails.logger.error "Invalid FRONTEND_URL format: #{frontend_url.inspect}"
-        return render json: { error: 'Frontend URL configuration error' }, status: :internal_server_error
+      if frontend_url.blank?
+        frontend_url = 'https://my.socialrotation.app'
+        Rails.logger.warn "FRONTEND_URL not set, using default: #{frontend_url}"
+      else
+        frontend_url = frontend_url.to_s.strip.chomp('/')
+        unless frontend_url.match?(/\Ahttps?:\/\/.+\z/)
+          Rails.logger.error "Invalid FRONTEND_URL format: #{frontend_url.inspect}"
+          # Fallback to default if invalid
+          frontend_url = 'https://my.socialrotation.app'
+          Rails.logger.warn "Using default FRONTEND_URL: #{frontend_url}"
+        end
       end
       
       success_url = "#{frontend_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
