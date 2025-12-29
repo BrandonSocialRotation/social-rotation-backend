@@ -509,33 +509,43 @@ class Api::V1::SubscriptionsController < ApplicationController
     
     unless endpoint_secret.present?
       Rails.logger.error "STRIPE_WEBHOOK_SECRET not configured"
-      return head :bad_request
+      # Still return 200 to prevent Stripe from retrying
+      return head :ok
     end
     
     begin
       event = Stripe::Webhook.construct_event(payload, sig_header, endpoint_secret)
     rescue JSON::ParserError => e
       Rails.logger.error "Webhook JSON parse error: #{e.message}"
-      return head :bad_request
+      # Return 200 to prevent Stripe from retrying invalid JSON
+      return head :ok
     rescue Stripe::SignatureVerificationError => e
       Rails.logger.error "Webhook signature verification error: #{e.message}"
-      return head :bad_request
+      # Return 200 to prevent Stripe from retrying signature failures
+      return head :ok
     end
     
     # Handle the event
-    case event.type
-    when 'checkout.session.completed'
-      handle_checkout_completed(event.data.object)
-    when 'customer.subscription.updated'
-      handle_subscription_updated(event.data.object)
-    when 'customer.subscription.deleted'
-      handle_subscription_deleted(event.data.object)
-    when 'invoice.payment_succeeded'
-      handle_payment_succeeded(event.data.object)
-    when 'invoice.payment_failed'
-      handle_payment_failed(event.data.object)
-    else
-      Rails.logger.info "Unhandled webhook event type: #{event.type}"
+    begin
+      case event.type
+      when 'checkout.session.completed'
+        handle_checkout_completed(event.data.object)
+      when 'customer.subscription.updated'
+        handle_subscription_updated(event.data.object)
+      when 'customer.subscription.deleted'
+        handle_subscription_deleted(event.data.object)
+      when 'invoice.payment_succeeded'
+        handle_payment_succeeded(event.data.object)
+      when 'invoice.payment_failed'
+        handle_payment_failed(event.data.object)
+      else
+        Rails.logger.info "Unhandled webhook event type: #{event.type}"
+      end
+    rescue => e
+      # Log error but still return 200 to prevent Stripe from retrying
+      # This allows us to investigate and fix issues without webhook failures
+      Rails.logger.error "Webhook handler error for #{event.type}: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
     end
     
     head :ok

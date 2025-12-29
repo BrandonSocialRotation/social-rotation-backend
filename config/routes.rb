@@ -184,6 +184,9 @@ Rails.application.routes.draw do
     end
   end
 
+  # Stripe webhook endpoint (legacy path that Stripe is configured to use)
+  post 'stripe/subscription_created', to: 'api/v1/subscriptions#webhook'
+  
   # Defines the root path route ("/")
   root "health#show"
 end
