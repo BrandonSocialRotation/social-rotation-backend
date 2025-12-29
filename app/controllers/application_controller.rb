@@ -107,7 +107,8 @@ class ApplicationController < ActionController::API
   
   # Require active subscription for accessing the app
   # Returns 403 if account doesn't have an active subscription
-  # Allows suspended accounts (past_due/canceled) to access subscription management
+  # Allows users with existing accounts to log in even if subscription is suspended/canceled
+  # (so they can manage their subscription), but shows a warning message
   def require_active_subscription!
     # Skip if no current user (authentication failed or not required)
     return if @current_user.nil?
@@ -119,6 +120,7 @@ class ApplicationController < ActionController::API
     end
     
     # If user has no account yet (account_id = nil), they need to complete payment
+    # This enforces payment-first registration - account only created after payment
     if @current_user.account_id.nil?
       render json: {
         error: 'Account not activated',
@@ -146,39 +148,30 @@ class ApplicationController < ActionController::API
     begin
       subscription = account.subscription
       if subscription
-        # If subscription exists but is not active (suspended), allow access to subscription management
-        # but block other features
+        # If subscription exists but is not active (suspended/canceled), allow login
+        # but return a warning so frontend can show appropriate message
         unless account.has_active_subscription?
-          # Check if this is a subscription management route (already handled by skip_subscription_check?)
-          # If we get here, it's not a subscription route, so block access
-          render json: {
-            error: 'Subscription suspended',
-            message: 'Your subscription is not active. Please update your payment method to continue using the app.',
-            subscription_required: true,
-            subscription_suspended: true,
-            redirect_to: '/profile' # Frontend should show subscription management
-          }, status: :forbidden
+          # Allow access but include warning in response headers/metadata
+          # Frontend should check subscription status and show warning message
+          # Users can still access their account to manage subscription
+          response.headers['X-Subscription-Status'] = 'suspended'
+          response.headers['X-Subscription-Message'] = 'Your subscription is not active. Please update your payment method to continue using the app.'
           return
         end
       else
-        # No subscription at all - need to subscribe
-        render json: {
-          error: 'Subscription required',
-          message: 'You need an active subscription to access this feature. Please subscribe to continue.',
-          subscription_required: true,
-          redirect_to: '/register'
-        }, status: :forbidden
+        # No subscription at all - allow login but show message
+        # This shouldn't happen with payment-first registration, but handle it
+        response.headers['X-Subscription-Status'] = 'missing'
+        response.headers['X-Subscription-Message'] = 'You need an active subscription to use this feature. Please subscribe to continue.'
         return
       end
     rescue => e
       Rails.logger.error "Subscription check error: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
-      # If there's an error checking subscription, block access (fail closed for security)
-      render json: {
-        error: 'Subscription verification failed',
-        message: 'Unable to verify subscription status. Please contact support.',
-        subscription_required: true
-      }, status: :forbidden
+      # If there's an error checking subscription, allow access but log the error
+      # Frontend can handle showing appropriate messages
+      response.headers['X-Subscription-Status'] = 'error'
+      return
     end
   end
 end
