@@ -31,18 +31,190 @@ class MetaInsightsService
   private
 
   def live_available?
-    ENV['META_APP_ID'].present? && ENV['META_APP_SECRET'].present?
+    @user.instagram_business_id.present? && @user.fb_user_access_key.present?
   end
 
   def fetch_live_summary(range)
-    # TODO: Implement Graph API calls using page token and ig_business_account_id
-    # Placeholder until credentials/tokens are wired
-    mock_summary(range)
+    return mock_summary(range) unless live_available?
+    
+    begin
+      page_token = get_page_access_token
+      return mock_summary(range) unless page_token
+      
+      period = range == '28d' ? 'day' : 'day'
+      metric_list = 'impressions,reach,likes,comments,shares,saved,profile_views,website_clicks'
+      
+      # Get insights for the specified range
+      insights_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}/insights"
+      insights_params = {
+        metric: metric_list,
+        period: period,
+        access_token: page_token
+      }
+      
+      # Add date range
+      if range == '28d'
+        insights_params[:since] = 28.days.ago.to_i
+        insights_params[:until] = Time.now.to_i
+      else
+        insights_params[:since] = 7.days.ago.to_i
+        insights_params[:until] = Time.now.to_i
+      end
+      
+      response = HTTParty.get(insights_url, query: insights_params)
+      
+      unless response.success?
+        Rails.logger.error "Instagram Insights API error: #{response.body}"
+        return mock_summary(range)
+      end
+      
+      data = JSON.parse(response.body)
+      
+      # Parse insights data
+      metrics_hash = {}
+      if data['data']
+        data['data'].each do |metric_data|
+          metric_name = metric_data['name']
+          values = metric_data['values'] || []
+          # Sum all values for the period
+          total = values.sum { |v| v['value'].to_i }
+          metrics_hash[metric_name] = total
+        end
+      end
+      
+      # Get follower count
+      account_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}"
+      account_params = {
+        fields: 'followers_count,media_count',
+        access_token: page_token
+      }
+      account_response = HTTParty.get(account_url, query: account_params)
+      account_data = account_response.success? ? JSON.parse(account_response.body) : {}
+      
+      followers = account_data['followers_count']&.to_i || 0
+      posts_count = account_data['media_count']&.to_i || 0
+      
+      # Calculate Hootsuite-style metrics
+      likes = metrics_hash['likes'] || 0
+      comments = metrics_hash['comments'] || 0
+      shares = 0 # Instagram doesn't provide shares directly, calculate from engagement
+      clicks = metrics_hash['website_clicks'] || 0
+      saves = metrics_hash['saved'] || 0
+      profile_visits = metrics_hash['profile_views'] || 0
+      
+      total_engagement = likes + comments + saves
+      engagement_rate_percent = followers > 0 ? ((total_engagement.to_f / followers) * 100).round(2) : 0.0
+      
+      {
+        engagement_rate: engagement_rate_percent,
+        likes: likes,
+        comments: comments,
+        shares: shares,
+        clicks: clicks,
+        saves: saves,
+        profile_visits: profile_visits,
+        total_engagement: total_engagement,
+        followers: followers,
+        posts_count: posts_count
+      }
+    rescue => e
+      Rails.logger.error "Error fetching Instagram insights: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      mock_summary(range)
+    end
   end
 
   def fetch_live_timeseries(metric, range)
-    # TODO: Implement Graph API timeseries
-    mock_timeseries(metric, range)
+    return mock_timeseries(metric, range) unless live_available?
+    
+    begin
+      page_token = get_page_access_token
+      return mock_timeseries(metric, range) unless page_token
+      
+      period = 'day'
+      metric_name = case metric
+                     when 'likes' then 'likes'
+                     when 'comments' then 'comments'
+                     when 'engagement' then 'engagement'
+                     when 'reach' then 'reach'
+                     when 'impressions' then 'impressions'
+                     else 'likes'
+                     end
+      
+      insights_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}/insights"
+      insights_params = {
+        metric: metric_name,
+        period: period,
+        access_token: page_token
+      }
+      
+      if range == '28d'
+        insights_params[:since] = 28.days.ago.to_i
+        insights_params[:until] = Time.now.to_i
+      else
+        insights_params[:since] = 7.days.ago.to_i
+        insights_params[:until] = Time.now.to_i
+      end
+      
+      response = HTTParty.get(insights_url, query: insights_params)
+      
+      unless response.success?
+        Rails.logger.error "Instagram Insights timeseries error: #{response.body}"
+        return mock_timeseries(metric, range)
+      end
+      
+      data = JSON.parse(response.body)
+      
+      if data['data'] && data['data'].any?
+        metric_data = data['data'].first
+        values = metric_data['values'] || []
+        
+        values.map do |v|
+          {
+            date: v['end_time']&.split('T')&.first || Date.today.to_s,
+            value: v['value'].to_i
+          }
+        end
+      else
+        mock_timeseries(metric, range)
+      end
+    rescue => e
+      Rails.logger.error "Error fetching Instagram timeseries: #{e.message}"
+      mock_timeseries(metric, range)
+    end
+  end
+  
+  def get_page_access_token
+    return nil unless @user.fb_user_access_key.present? && @user.instagram_business_id.present?
+    
+    begin
+      # Get pages with Instagram accounts
+      url = "https://graph.facebook.com/v18.0/me/accounts"
+      params = {
+        access_token: @user.fb_user_access_key,
+        fields: 'id,name,access_token,instagram_business_account',
+        limit: 1000
+      }
+      
+      response = HTTParty.get(url, query: params)
+      return nil unless response.success?
+      
+      data = JSON.parse(response.body)
+      return nil unless data['data']&.any?
+      
+      # Find the page that has the Instagram account
+      data['data'].each do |page|
+        if page['instagram_business_account'] && page['instagram_business_account']['id'] == @user.instagram_business_id
+          return page['access_token']
+        end
+      end
+      
+      # Fallback to first page if no match
+      data['data'].first&.dig('access_token')
+    rescue => e
+      Rails.logger.error "Error getting page access token: #{e.message}"
+      nil
+    end
   end
 
   def cached(key, ttl)
