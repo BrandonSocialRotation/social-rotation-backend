@@ -164,8 +164,18 @@ class Api::V1::SubscriptionsController < ApplicationController
 
       # Create checkout session
       frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
-      success_url = "#{frontend_url.chomp('/')}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
-      cancel_url = "#{frontend_url.chomp('/')}/register?error=subscription_canceled"
+      
+      # Validate and clean the frontend URL
+      frontend_url = frontend_url.to_s.strip.chomp('/')
+      unless frontend_url.match?(/\Ahttps?:\/\/.+\z/)
+        Rails.logger.error "Invalid FRONTEND_URL format: #{frontend_url.inspect}"
+        return render json: { error: 'Frontend URL configuration error' }, status: :internal_server_error
+      end
+      
+      success_url = "#{frontend_url}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
+      cancel_url = "#{frontend_url}/register?error=subscription_canceled"
+      
+      Rails.logger.info "Creating checkout session with success_url: #{success_url}, cancel_url: #{cancel_url}"
 
       session = Stripe::Checkout::Session.create({
         customer: customer.id,
