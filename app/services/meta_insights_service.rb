@@ -224,32 +224,19 @@ class MetaInsightsService
   end
 
   def mock_summary(range)
-    seed = seed_for(range)
-    srand(seed)
-    
-    # Hootsuite-style analytics metrics (only used when API is not available)
-    followers = rand(1_000..25_000)
-    likes = rand(500..5_000)
-    comments = rand(50..500)
-    shares = rand(20..200)
-    clicks = rand(100..1_000)
-    saves = rand(30..300)
-    profile_visits = rand(200..2_000)
-    
-    total_engagement = likes + comments + shares + saves
-    engagement_rate_percent = followers > 0 ? ((total_engagement.to_f / followers) * 100).round(2) : 0.0
-    
+    # Only used as fallback when Instagram API is not available
+    # Returns zeros instead of fake data to indicate no data available
     {
-      engagement_rate: engagement_rate_percent,
-      likes: likes,
-      comments: comments,
-      shares: shares,
-      clicks: clicks,
-      saves: saves,
-      profile_visits: profile_visits,
-      total_engagement: total_engagement,
-      followers: followers,
-      posts_count: rand(5..50)
+      engagement_rate: 0.0,
+      likes: 0,
+      comments: 0,
+      shares: 0,
+      clicks: 0,
+      saves: 0,
+      profile_visits: 0,
+      total_engagement: 0,
+      followers: 0,
+      posts_count: 0
     }
   end
 
