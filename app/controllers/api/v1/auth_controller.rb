@@ -234,6 +234,14 @@ class Api::V1::AuthController < ApplicationController
   def login
     user = User.find_by(email: params[:email])
     
+    if user.nil?
+      render json: {
+        error: 'Account does not exist',
+        message: 'No account found with this email address. Please check your email or register for a new account.'
+      }, status: :unauthorized
+      return
+    end
+    
     if user&.authenticate(params[:password])
       token = JsonWebToken.encode(user_id: user.id)
       render json: {
@@ -243,7 +251,8 @@ class Api::V1::AuthController < ApplicationController
       }
     else
       render json: {
-        error: 'Invalid email or password'
+        error: 'Invalid password',
+        message: 'The password you entered is incorrect. Please try again.'
       }, status: :unauthorized
     end
   end
