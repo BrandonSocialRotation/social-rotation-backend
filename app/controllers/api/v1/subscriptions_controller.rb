@@ -1,10 +1,10 @@
 class Api::V1::SubscriptionsController < ApplicationController
   include JsonSerializers
   
-  skip_before_action :authenticate_user!, only: [:webhook, :test_stripe]
+  skip_before_action :authenticate_user!, only: [:webhook, :test_stripe, :checkout_session_for_pending]
   before_action :require_account_admin!, only: [:create, :cancel]
-  before_action :check_stripe_configured!, only: [:checkout_session, :cancel, :webhook]
-  skip_before_action :require_active_subscription!, only: [:index, :show, :create, :checkout_session, :cancel, :webhook, :test_stripe]
+  before_action :check_stripe_configured!, only: [:checkout_session, :checkout_session_for_pending, :cancel, :webhook]
+  skip_before_action :require_active_subscription!, only: [:index, :show, :create, :checkout_session, :checkout_session_for_pending, :cancel, :webhook, :test_stripe]
   
   # GET /api/v1/subscriptions/test_stripe
   # Test Stripe connection and configuration
