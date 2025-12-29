@@ -92,6 +92,117 @@ class Api::V1::SubscriptionsController < ApplicationController
     end
   end
 
+  # POST /api/v1/subscriptions/checkout_session_for_pending
+  # Create Stripe checkout session for pending registration (after plan selection)
+  # Params: pending_registration_id, plan_id, billing_period (optional), user_count (optional)
+  def checkout_session_for_pending
+    pending_registration = PendingRegistration.find_by(id: params[:pending_registration_id])
+    unless pending_registration
+      return render json: { error: 'Pending registration not found' }, status: :not_found
+    end
+
+    if pending_registration.expired?
+      pending_registration.destroy
+      return render json: { error: 'Registration session expired. Please register again.' }, status: :unprocessable_entity
+    end
+
+    plan = Plan.find_by(id: params[:plan_id])
+    unless plan&.status?
+      return render json: { error: 'Plan is not available' }, status: :bad_request
+    end
+
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || ''
+    billing_period = params[:billing_period] || 'monthly'
+    user_count = params[:user_count]&.to_i || 1
+
+    begin
+      # Create Stripe customer
+      customer = Stripe::Customer.create({
+        email: pending_registration.email,
+        name: pending_registration.name,
+        metadata: {
+          pending_registration_id: pending_registration.id.to_s
+        }
+      })
+
+      # Calculate price and create line items
+      if plan.supports_per_user_pricing
+        price_cents = plan.calculate_price_for_users(user_count, billing_period)
+        stripe_price = Stripe::Price.create({
+          unit_amount: price_cents,
+          currency: 'usd',
+          recurring: {
+            interval: billing_period == 'annual' ? 'year' : 'month',
+          },
+          product_data: {
+            name: "#{plan.name} (#{user_count} user#{user_count != 1 ? 's' : ''})"
+          }
+        })
+        line_items = [{ price: stripe_price.id, quantity: 1 }]
+      else
+        if plan.stripe_price_id.present?
+          line_items = [{ price: plan.stripe_price_id, quantity: 1 }]
+        else
+          price_cents = plan.price_cents || 0
+          unless price_cents > 0
+            return render json: { error: 'Plan does not have a price configured' }, status: :bad_request
+          end
+          
+          stripe_price = Stripe::Price.create({
+            unit_amount: price_cents,
+            currency: 'usd',
+            recurring: {
+              interval: billing_period == 'annual' ? 'year' : 'month',
+            },
+            product_data: {
+              name: plan.name
+            }
+          })
+          line_items = [{ price: stripe_price.id, quantity: 1 }]
+        end
+      end
+
+      # Create checkout session
+      frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
+      success_url = "#{frontend_url.chomp('/')}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
+      cancel_url = "#{frontend_url.chomp('/')}/register?error=subscription_canceled"
+
+      session = Stripe::Checkout::Session.create({
+        customer: customer.id,
+        payment_method_types: ['card'],
+        line_items: line_items,
+        mode: 'subscription',
+        success_url: success_url,
+        cancel_url: cancel_url,
+        billing_address_collection: 'required',
+        automatic_tax: { enabled: false },
+        metadata: {
+          pending_registration_id: pending_registration.id.to_s,
+          plan_id: plan.id.to_s,
+          billing_period: billing_period,
+          account_type: pending_registration.account_type,
+          company_name: pending_registration.company_name || '',
+          user_count: user_count.to_s
+        }
+      })
+
+      # Store session ID in pending registration
+      pending_registration.update!(stripe_session_id: session.id)
+
+      render json: {
+        checkout_session_id: session.id,
+        checkout_url: session.url,
+        message: 'Please complete payment to create your account'
+      }
+    rescue Stripe::StripeError => e
+      Rails.logger.error "Stripe error: #{e.message}"
+      render json: { error: "Payment processing error: #{e.message}" }, status: :internal_server_error
+    rescue => e
+      Rails.logger.error "Checkout session error: #{e.message}"
+      render json: { error: "Failed to create checkout session" }, status: :internal_server_error
+    end
+  end
+
   # POST /api/v1/subscriptions/checkout_session
   # Create Stripe Checkout Session for a plan
   # Params: plan_id, billing_period (optional, default: 'monthly'), account_type, company_name, user_count

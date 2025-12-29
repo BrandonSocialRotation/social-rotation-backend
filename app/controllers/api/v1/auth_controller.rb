@@ -37,85 +37,78 @@ class Api::V1::AuthController < ApplicationController
 
       # Check if pending registration already exists
       existing_pending = PendingRegistration.find_by(email: params[:email])
-      if existing_pending && !existing_pending.expired?
-        # Delete expired pending registration
-        existing_pending.destroy if existing_pending.expired?
+      if existing_pending
+        if existing_pending.expired?
+          existing_pending.destroy
+        else
+          # If plan_id is provided, use the existing pending registration
+          if params[:plan_id].present?
+            # Continue with existing pending registration
+            pending_registration = existing_pending
+          else
+            # Return existing pending registration so frontend can proceed to plan selection
+            return render json: {
+              pending_registration_id: existing_pending.id,
+              email: existing_pending.email,
+              name: existing_pending.name,
+              account_type: existing_pending.account_type,
+              message: 'Registration data saved. Please select a plan to continue.'
+            }, status: :ok
+          end
+        end
       end
-
-      # Validate plan_id is provided
-      unless params[:plan_id].present?
-        return render json: {
-          error: 'Plan selection required',
-          message: 'Please select a subscription plan'
-        }, status: :bad_request
-      end
-
-      plan = Plan.find_by(id: params[:plan_id])
-      unless plan&.status?
-        return render json: {
-          error: 'Invalid plan',
-          message: 'Selected plan is not available'
-        }, status: :bad_request
-      end
-
-      # Create pending registration (validates email, name, password)
-      pending_registration = PendingRegistration.new(
-        email: params[:email],
-        name: params[:name],
-        password: params[:password],
-        password_confirmation: params[:password_confirmation],
-        account_type: params[:account_type] || 'personal',
-        company_name: params[:company_name]
-      )
-
-      unless pending_registration.save
-        return render json: {
-          error: 'Registration failed',
-          message: pending_registration.errors.full_messages.join('. '),
-          details: pending_registration.errors.full_messages,
-          errors: pending_registration.errors.as_json
-        }, status: :unprocessable_entity
-      end
-
-      # Create Stripe checkout session
-      Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || ''
       
-      billing_period = params[:billing_period] || 'monthly'
-      user_count = params[:user_count]&.to_i || 1
+      # Create new pending registration if one doesn't exist
+      unless defined?(pending_registration) && pending_registration
+        # Create pending registration (validates email, name, password)
+        # This can be done WITHOUT plan_id - plan selection happens next
+        pending_registration = PendingRegistration.new(
+          email: params[:email],
+          name: params[:name],
+          password: params[:password],
+          password_confirmation: params[:password_confirmation],
+          account_type: params[:account_type] || 'personal',
+          company_name: params[:company_name]
+        )
 
-      # Create Stripe customer
-      customer = Stripe::Customer.create({
-        email: pending_registration.email,
-        name: pending_registration.name,
-        metadata: {
-          pending_registration_id: pending_registration.id.to_s
-        }
-      })
+        unless pending_registration.save
+          return render json: {
+            error: 'Registration failed',
+            message: pending_registration.errors.full_messages.join('. '),
+            details: pending_registration.errors.full_messages,
+            errors: pending_registration.errors.as_json
+          }, status: :unprocessable_entity
+        end
+      end
 
-      # Calculate price and create line items
-      if plan.supports_per_user_pricing
-        price_cents = plan.calculate_price_for_users(user_count, billing_period)
-        stripe_price = Stripe::Price.create({
-          unit_amount: price_cents,
-          currency: 'usd',
-          recurring: {
-            interval: billing_period == 'annual' ? 'year' : 'month',
-          },
-          product_data: {
-            name: "#{plan.name} (#{user_count} user#{user_count != 1 ? 's' : ''})"
+      # If plan_id is provided, create Stripe checkout immediately
+      if params[:plan_id].present?
+        plan = Plan.find_by(id: params[:plan_id])
+        unless plan&.status?
+          return render json: {
+            error: 'Invalid plan',
+            message: 'Selected plan is not available'
+          }, status: :bad_request
+        end
+
+        # Create Stripe checkout session
+        Stripe.api_key = ENV['STRIPE_SECRET_KEY'] || ''
+        
+        billing_period = params[:billing_period] || 'monthly'
+        user_count = params[:user_count]&.to_i || 1
+
+        # Create Stripe customer
+        customer = Stripe::Customer.create({
+          email: pending_registration.email,
+          name: pending_registration.name,
+          metadata: {
+            pending_registration_id: pending_registration.id.to_s
           }
         })
-        line_items = [{ price: stripe_price.id, quantity: 1 }]
-      else
-        if plan.stripe_price_id.present?
-          line_items = [{ price: plan.stripe_price_id, quantity: 1 }]
-        else
-          price_cents = plan.price_cents || 0
-          unless price_cents > 0
-            pending_registration.destroy
-            return render json: { error: 'Plan does not have a price configured' }, status: :bad_request
-          end
-          
+
+        # Calculate price and create line items
+        if plan.supports_per_user_pricing
+          price_cents = plan.calculate_price_for_users(user_count, billing_period)
           stripe_price = Stripe::Price.create({
             unit_amount: price_cents,
             currency: 'usd',
@@ -123,45 +116,76 @@ class Api::V1::AuthController < ApplicationController
               interval: billing_period == 'annual' ? 'year' : 'month',
             },
             product_data: {
-              name: plan.name
+              name: "#{plan.name} (#{user_count} user#{user_count != 1 ? 's' : ''})"
             }
           })
           line_items = [{ price: stripe_price.id, quantity: 1 }]
+        else
+          if plan.stripe_price_id.present?
+            line_items = [{ price: plan.stripe_price_id, quantity: 1 }]
+          else
+            price_cents = plan.price_cents || 0
+            unless price_cents > 0
+              pending_registration.destroy
+              return render json: { error: 'Plan does not have a price configured' }, status: :bad_request
+            end
+            
+            stripe_price = Stripe::Price.create({
+              unit_amount: price_cents,
+              currency: 'usd',
+              recurring: {
+                interval: billing_period == 'annual' ? 'year' : 'month',
+              },
+              product_data: {
+                name: plan.name
+              }
+            })
+            line_items = [{ price: stripe_price.id, quantity: 1 }]
+          end
         end
-      end
 
-      # Create checkout session
-      frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
-      success_url = "#{frontend_url.chomp('/')}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
-      cancel_url = "#{frontend_url.chomp('/')}/register?error=subscription_canceled"
+        # Create checkout session
+        frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
+        success_url = "#{frontend_url.chomp('/')}/profile?success=subscription_active&session_id={CHECKOUT_SESSION_ID}"
+        cancel_url = "#{frontend_url.chomp('/')}/register?error=subscription_canceled"
 
-      session = Stripe::Checkout::Session.create({
-        customer: customer.id,
-        payment_method_types: ['card'],
-        line_items: line_items,
-        mode: 'subscription',
-        success_url: success_url,
-        cancel_url: cancel_url,
-        billing_address_collection: 'required',
-        automatic_tax: { enabled: false },
-        metadata: {
-          pending_registration_id: pending_registration.id.to_s,
-          plan_id: plan.id.to_s,
-          billing_period: billing_period,
+        session = Stripe::Checkout::Session.create({
+          customer: customer.id,
+          payment_method_types: ['card'],
+          line_items: line_items,
+          mode: 'subscription',
+          success_url: success_url,
+          cancel_url: cancel_url,
+          billing_address_collection: 'required',
+          automatic_tax: { enabled: false },
+          metadata: {
+            pending_registration_id: pending_registration.id.to_s,
+            plan_id: plan.id.to_s,
+            billing_period: billing_period,
+            account_type: pending_registration.account_type,
+            company_name: pending_registration.company_name || '',
+            user_count: user_count.to_s
+          }
+        })
+
+        # Store session ID in pending registration
+        pending_registration.update!(stripe_session_id: session.id)
+
+        render json: {
+          checkout_session_id: session.id,
+          checkout_url: session.url,
+          message: 'Please complete payment to create your account'
+        }, status: :created
+      else
+        # No plan_id provided - return pending registration ID for plan selection step
+        render json: {
+          pending_registration_id: pending_registration.id,
+          email: pending_registration.email,
+          name: pending_registration.name,
           account_type: pending_registration.account_type,
-          company_name: pending_registration.company_name || '',
-          user_count: user_count.to_s
-        }
-      })
-
-      # Store session ID in pending registration
-      pending_registration.update!(stripe_session_id: session.id)
-
-      render json: {
-        checkout_session_id: session.id,
-        checkout_url: session.url,
-        message: 'Please complete payment to create your account'
-      }, status: :created
+          message: 'Registration successful. Please select a plan to continue.'
+        }, status: :created
+      end
 
     rescue ActiveRecord::RecordNotFound => e
       render json: {
