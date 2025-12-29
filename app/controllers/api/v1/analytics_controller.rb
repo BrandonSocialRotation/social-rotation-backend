@@ -58,9 +58,11 @@ class Api::V1::AnalyticsController < ApplicationController
     render json: {
       range: range,
       platforms: metrics,
-      total_reach: metrics.values.sum { |m| m[:reach] || 0 },
-      total_impressions: metrics.values.sum { |m| m[:impressions] || 0 },
-      total_engagement: metrics.values.sum { |m| m[:engagement] || 0 }
+      total_engagement: metrics.values.sum { |m| m[:total_engagement] || 0 },
+      total_likes: metrics.values.sum { |m| m[:likes] || 0 },
+      total_comments: metrics.values.sum { |m| m[:comments] || 0 },
+      total_shares: metrics.values.sum { |m| m[:shares] || 0 },
+      total_clicks: metrics.values.sum { |m| m[:clicks] || 0 }
     }
   end
 end

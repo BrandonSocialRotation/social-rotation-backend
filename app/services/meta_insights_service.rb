@@ -52,11 +52,30 @@ class MetaInsightsService
   def mock_summary(range)
     seed = seed_for(range)
     srand(seed)
+    
+    # Hootsuite-style analytics metrics
+    likes = rand(500..5_000)
+    comments = rand(50..500)
+    shares = rand(20..200)
+    clicks = rand(100..1_000)
+    saves = rand(30..300)
+    profile_visits = rand(200..2_000)
+    
+    total_engagement = likes + comments + shares + saves
+    engagement_rate = followers = rand(1_000..25_000)
+    engagement_rate_percent = followers > 0 ? ((total_engagement.to_f / followers) * 100).round(2) : 0.0
+    
     {
-      reach: rand(5_000..18_000),
-      impressions: rand(10_000..40_000),
-      engagement: rand(300..2_400),
-      followers: rand(1_000..25_000)
+      engagement_rate: engagement_rate_percent,
+      likes: likes,
+      comments: comments,
+      shares: shares,
+      clicks: clicks,
+      saves: saves,
+      profile_visits: profile_visits,
+      total_engagement: total_engagement,
+      followers: followers,
+      posts_count: rand(5..50)
     }
   end
 
