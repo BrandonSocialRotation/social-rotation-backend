@@ -16,8 +16,12 @@ class Api::V1::AuthController < ApplicationController
   # Returns: checkout_session_id and checkout_url
   def register
     begin
+      # Extract account_type and company_name (handle nested params)
+      account_type = params[:account_type] || params.dig(:auth, :account_type) || 'personal'
+      company_name = params[:company_name] || params.dig(:auth, :company_name)
+      
       # Validate company name for agency accounts
-      if params[:account_type] == 'agency' && params[:company_name].blank?
+      if account_type == 'agency' && company_name.blank?
         return render json: {
           error: 'Company name is required for agency accounts',
           message: 'Please provide a company or agency name',
@@ -25,8 +29,11 @@ class Api::V1::AuthController < ApplicationController
         }, status: :unprocessable_entity
       end
 
+      # Extract email (handle nested params)
+      email = params[:email] || params.dig(:auth, :email)
+      
       # Check if user already exists
-      existing_user = User.find_by(email: params[:email])
+      existing_user = User.find_by(email: email)
       if existing_user
         return render json: {
           error: 'Registration failed',
@@ -36,7 +43,7 @@ class Api::V1::AuthController < ApplicationController
       end
 
       # Check if pending registration already exists
-      existing_pending = PendingRegistration.find_by(email: params[:email])
+      existing_pending = PendingRegistration.find_by(email: email)
       if existing_pending
         if existing_pending.expired?
           existing_pending.destroy
@@ -60,15 +67,23 @@ class Api::V1::AuthController < ApplicationController
       
       # Create new pending registration if one doesn't exist
       unless defined?(pending_registration) && pending_registration
+        # Extract params (handle both nested and flat params)
+        email = params[:email] || params.dig(:auth, :email)
+        name = params[:name] || params.dig(:auth, :name)
+        password = params[:password] || params.dig(:auth, :password)
+        password_confirmation = params[:password_confirmation] || params.dig(:auth, :password_confirmation) || password
+        account_type = params[:account_type] || params.dig(:auth, :account_type) || 'personal'
+        company_name = params[:company_name] || params.dig(:auth, :company_name)
+        
         # Create pending registration (validates email, name, password)
         # This can be done WITHOUT plan_id - plan selection happens next
         pending_registration = PendingRegistration.new(
-          email: params[:email],
-          name: params[:name],
-          password: params[:password],
-          password_confirmation: params[:password_confirmation],
-          account_type: params[:account_type] || 'personal',
-          company_name: params[:company_name]
+          email: email,
+          name: name,
+          password: password,
+          password_confirmation: password_confirmation || password, # Fallback to password if confirmation not provided
+          account_type: account_type,
+          company_name: company_name
         )
 
         unless pending_registration.save
