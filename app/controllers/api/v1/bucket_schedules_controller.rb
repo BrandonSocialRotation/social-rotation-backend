@@ -22,6 +22,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
 
   # POST /api/v1/bucket_schedules
   def create
+    require_active_subscription_for_action!
+    
     bucket_id = params[:bucket_id] || params.dig(:bucket_schedule, :bucket_id)
     @bucket = current_user.buckets.find(bucket_id)
     
@@ -59,6 +61,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
 
   # PATCH/PUT /api/v1/bucket_schedules/:id
   def update
+    require_active_subscription_for_action!
+    
     if @bucket_schedule.update(bucket_schedule_params)
       render json: {
         bucket_schedule: bucket_schedule_json(@bucket_schedule),
@@ -133,6 +137,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
 
   # POST /api/v1/bucket_schedules/rotation_create
   def rotation_create
+    require_active_subscription_for_action!
+    
     @bucket = current_user.buckets.find(params[:bucket_id])
     networks = params[:networks] || []
     time = params[:time]
@@ -197,6 +203,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
 
   # POST /api/v1/bucket_schedules/:id/post_now
   def post_now
+    require_active_subscription_for_action!
+    
     # This would trigger the actual posting process
     # For now, we'll just mark it as processed
     @bucket_schedule.update!(times_sent: @bucket_schedule.times_sent + 1)

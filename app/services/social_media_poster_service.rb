@@ -21,6 +21,21 @@ class SocialMediaPosterService
   # Post to all selected social media platforms
   # @return [Hash] Results from each platform
   def post_to_all
+    # Check if user has active subscription before posting
+    account = @user.account
+    unless account&.has_active_subscription?
+      subscription = account&.subscription
+      error_message = if subscription&.canceled?
+        'Your subscription has been canceled. Please resubscribe to post content.'
+      elsif subscription
+        'Your subscription is not active. Please update your payment method to post content.'
+      else
+        'You need an active subscription to post content. Please subscribe to continue.'
+      end
+      
+      raise StandardError.new(error_message)
+    end
+    
     results = {}
     
     begin

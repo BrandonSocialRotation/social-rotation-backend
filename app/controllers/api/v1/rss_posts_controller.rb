@@ -140,6 +140,8 @@ class Api::V1::RssPostsController < ApplicationController
 
   # POST /api/v1/rss_posts/:id/schedule_post
   def schedule_post
+    require_active_subscription_for_action!
+    
     begin
       # Create a new bucket for this RSS post
       bucket = current_user.buckets.create!(

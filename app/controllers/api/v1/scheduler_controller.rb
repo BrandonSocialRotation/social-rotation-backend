@@ -4,6 +4,8 @@ class Api::V1::SchedulerController < ApplicationController
 
   # POST /api/v1/scheduler/single_post
   def single_post
+    require_active_subscription_for_action!
+    
     # Convert network names to bit flags
     post_to = calculate_post_to_flags(params[:networks] || [])
     
@@ -43,6 +45,8 @@ class Api::V1::SchedulerController < ApplicationController
   # POST /api/v1/scheduler/post_now/:id
   # Immediately posts the scheduled content to social media
   def post_now
+    require_active_subscription_for_action!
+    
     # Get the next image to post
     bucket_image = @bucket_schedule.get_next_bucket_image_due
     

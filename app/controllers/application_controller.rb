@@ -53,6 +53,53 @@ class ApplicationController < ActionController::API
     @current_user
   end
 
+  # Check if user has active subscription (for blocking specific actions like posting/scheduling)
+  # Returns true if subscription is active, false otherwise
+  def has_active_subscription?
+    return false if @current_user.nil?
+    return true if @current_user.account_id == 0 # Super admin bypass
+    
+    account = @current_user.account
+    return false unless account
+    
+    account.has_active_subscription? rescue false
+  end
+
+  # Require active subscription for specific actions (like posting/scheduling)
+  # Returns 403 if subscription is not active
+  def require_active_subscription_for_action!
+    return if has_active_subscription?
+    
+    account = @current_user&.account
+    subscription = account&.subscription
+    
+    if subscription && subscription.canceled?
+      render json: {
+        error: 'Subscription canceled',
+        message: 'Your subscription has been canceled. Please resubscribe to schedule posts or post content.',
+        subscription_required: true,
+        subscription_status: 'canceled',
+        redirect_to: '/profile'
+      }, status: :forbidden
+    elsif subscription
+      render json: {
+        error: 'Subscription not active',
+        message: 'Your subscription is not active. Please update your payment method to schedule posts or post content.',
+        subscription_required: true,
+        subscription_status: subscription.status,
+        redirect_to: '/profile'
+      }, status: :forbidden
+    else
+      render json: {
+        error: 'No subscription',
+        message: 'You need an active subscription to schedule posts or post content. Please subscribe to continue.',
+        subscription_required: true,
+        subscription_status: 'missing',
+        redirect_to: '/register'
+      }, status: :forbidden
+    end
+  end
+
   def record_not_found(exception)
     render json: { error: 'Record not found' }, status: :not_found
   end
@@ -145,54 +192,29 @@ class ApplicationController < ActionController::API
     end
     
     # Check if account has active subscription
+    # Allow access but add warning headers for frontend to display
     begin
       subscription = account.subscription
       if subscription
-        # If subscription exists but is not active (suspended/canceled), block app access
+        # If subscription exists but is not active (suspended/canceled), allow access but show warning
         unless account.has_active_subscription?
-          # Check if subscription is canceled
-          if subscription.canceled? || subscription.status == Subscription::STATUS_CANCELED
-            render json: {
-              error: 'Subscription canceled',
-              message: 'Your subscription has been canceled. Please resubscribe to continue using the app.',
-              subscription_required: true,
-              subscription_status: 'canceled',
-              redirect_to: '/profile'
-            }, status: :forbidden
-            return
-          else
-            # Subscription is past_due, unpaid, or other non-active status
-            render json: {
-              error: 'Subscription not active',
-              message: 'Your subscription is not active. Please update your payment method to continue using the app.',
-              subscription_required: true,
-              subscription_status: subscription.status,
-              redirect_to: '/profile'
-            }, status: :forbidden
-            return
-          end
+          # Add warning headers so frontend can display subscription status
+          response.headers['X-Subscription-Status'] = subscription.status || 'inactive'
+          response.headers['X-Subscription-Message'] = 'Your subscription is not active. Please update your payment method to continue using the app.'
+          return
         end
       else
-        # No subscription at all - block access
+        # No subscription at all - allow access but show message
         # This shouldn't happen with payment-first registration, but handle it
-        render json: {
-          error: 'No subscription',
-          message: 'You need an active subscription to use this feature. Please subscribe to continue.',
-          subscription_required: true,
-          subscription_status: 'missing',
-          redirect_to: '/register'
-        }, status: :forbidden
+        response.headers['X-Subscription-Status'] = 'missing'
+        response.headers['X-Subscription-Message'] = 'You need an active subscription to use this feature. Please subscribe to continue.'
         return
       end
     rescue => e
       Rails.logger.error "Subscription check error: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
-      # If there's an error checking subscription, block access for safety
-      render json: {
-        error: 'Subscription check failed',
-        message: 'Unable to verify subscription status. Please contact support.',
-        subscription_required: true
-      }, status: :forbidden
+      # If there's an error checking subscription, allow access but log the error
+      response.headers['X-Subscription-Status'] = 'error'
       return
     end
   end
