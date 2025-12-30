@@ -102,10 +102,18 @@ class Api::V1::SchedulerController < ApplicationController
       Rails.logger.error "Error posting to social media: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
       
-      render json: {
-        error: 'Failed to post to social media',
-        details: e.message
-      }, status: :unprocessable_entity
+      # Check if error is about subscription
+      if e.message.include?('subscription') || e.message.include?('Subscription')
+        render json: {
+          error: 'Subscription needed to post',
+          message: 'Subscription needed to post'
+        }, status: :forbidden
+      else
+        render json: {
+          error: 'Failed to post to social media',
+          message: e.message
+        }, status: :internal_server_error
+      end
     end
   end
 
