@@ -176,10 +176,21 @@ class Api::V1::OauthController < ApplicationController
   def instagram_callback
     handle_oauth_callback(:instagram, 'Instagram') do |user, data|
       access_token = data['access_token']
-      user.update!(fb_user_access_key: access_token) # Store for Instagram API access
       
-      # Fetch user's pages and Instagram accounts
-      fetch_and_store_instagram_account(user, access_token)
+      # Try to get Instagram account directly (Instagram Login API)
+      instagram_account = fetch_instagram_account_direct(access_token)
+      
+      if instagram_account
+        # Direct Instagram account found - store it
+        user.update!(
+          instagram_business_id: instagram_account[:id],
+          fb_user_access_key: access_token # Store access token for API calls
+        )
+      else
+        # Fallback: Try to find Instagram account through Facebook pages
+        user.update!(fb_user_access_key: access_token)
+        fetch_and_store_instagram_account(user, access_token)
+      end
     end
   end
   
@@ -351,6 +362,53 @@ class Api::V1::OauthController < ApplicationController
     user.update!(pinterest_username: username) if username && user.respond_to?(:pinterest_username=)
   rescue => e
     Rails.logger.warn "Failed to fetch Pinterest user info: #{e.message}"
+  end
+  
+  # Try to get Instagram account directly using Instagram Login API
+  def fetch_instagram_account_direct(access_token)
+    # First, try to get user's Instagram accounts directly
+    # This works if the Instagram account is connected to the Facebook App
+    response = HTTParty.get('https://graph.facebook.com/v18.0/me/accounts', query: { 
+      access_token: access_token, 
+      fields: 'instagram_business_account{id,username}',
+      limit: 1000 
+    })
+    
+    data = JSON.parse(response.body)
+    
+    # Check if we got Instagram accounts directly
+    if data['data']&.any?
+      data['data'].each do |page|
+        if page['instagram_business_account']
+          instagram_account = page['instagram_business_account']
+          return {
+            id: instagram_account['id'],
+            username: instagram_account['username']
+          }
+        end
+      end
+    end
+    
+    # Alternative: Try to get Instagram account from user's profile
+    # Some Instagram accounts can be accessed directly
+    response = HTTParty.get('https://graph.facebook.com/v18.0/me', query: {
+      access_token: access_token,
+      fields: 'instagram_business_account{id,username}'
+    })
+    
+    data = JSON.parse(response.body)
+    if data['instagram_business_account']
+      instagram_account = data['instagram_business_account']
+      return {
+        id: instagram_account['id'],
+        username: instagram_account['username']
+      }
+    end
+    
+    nil
+  rescue => e
+    Rails.logger.warn "Failed to fetch Instagram account directly: #{e.message}"
+    nil
   end
   
   def fetch_and_store_instagram_account(user, access_token)
