@@ -148,29 +148,51 @@ class ApplicationController < ActionController::API
     begin
       subscription = account.subscription
       if subscription
-        # If subscription exists but is not active (suspended/canceled), allow login
-        # but return a warning so frontend can show appropriate message
+        # If subscription exists but is not active (suspended/canceled), block app access
         unless account.has_active_subscription?
-          # Allow access but include warning in response headers/metadata
-          # Frontend should check subscription status and show warning message
-          # Users can still access their account to manage subscription
-          response.headers['X-Subscription-Status'] = 'suspended'
-          response.headers['X-Subscription-Message'] = 'Your subscription is not active. Please update your payment method to continue using the app.'
-          return
+          # Check if subscription is canceled
+          if subscription.canceled? || subscription.status == Subscription::STATUS_CANCELED
+            render json: {
+              error: 'Subscription canceled',
+              message: 'Your subscription has been canceled. Please resubscribe to continue using the app.',
+              subscription_required: true,
+              subscription_status: 'canceled',
+              redirect_to: '/profile'
+            }, status: :forbidden
+            return
+          else
+            # Subscription is past_due, unpaid, or other non-active status
+            render json: {
+              error: 'Subscription not active',
+              message: 'Your subscription is not active. Please update your payment method to continue using the app.',
+              subscription_required: true,
+              subscription_status: subscription.status,
+              redirect_to: '/profile'
+            }, status: :forbidden
+            return
+          end
         end
       else
-        # No subscription at all - allow login but show message
+        # No subscription at all - block access
         # This shouldn't happen with payment-first registration, but handle it
-        response.headers['X-Subscription-Status'] = 'missing'
-        response.headers['X-Subscription-Message'] = 'You need an active subscription to use this feature. Please subscribe to continue.'
+        render json: {
+          error: 'No subscription',
+          message: 'You need an active subscription to use this feature. Please subscribe to continue.',
+          subscription_required: true,
+          subscription_status: 'missing',
+          redirect_to: '/register'
+        }, status: :forbidden
         return
       end
     rescue => e
       Rails.logger.error "Subscription check error: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
-      # If there's an error checking subscription, allow access but log the error
-      # Frontend can handle showing appropriate messages
-      response.headers['X-Subscription-Status'] = 'error'
+      # If there's an error checking subscription, block access for safety
+      render json: {
+        error: 'Subscription check failed',
+        message: 'Unable to verify subscription status. Please contact support.',
+        subscription_required: true
+      }, status: :forbidden
       return
     end
   end
