@@ -105,22 +105,33 @@ class SocialMediaPosterService
   
   # Get local file path for the image
   # Downloads the image if it's a URL, otherwise returns local path
-  # @return [String] Local file path or nil if download fails
+  # @return [String] Local file path or URL if local file doesn't exist
   def get_local_image_path
     file_path = @bucket_image.image.file_path
     return nil if file_path.nil?
     
-    # If it's a URL (http:// or https://), download it to a temp file
+    # If it's a URL (http:// or https://), return it (TwitterService will download it)
     if file_path.start_with?('http://') || file_path.start_with?('https://')
-      begin
-        download_image_to_temp(file_path)
-      rescue => e
-        Rails.logger.error "Failed to get local image path: #{e.message}"
-        nil
-      end
+      return file_path
+    end
+    
+    # Check if file_path starts with environment prefix (production/, development/, etc.)
+    if file_path.start_with?('production/') || file_path.start_with?('development/') || file_path.start_with?('test/')
+      # This is a Digital Ocean Spaces path, not a local file
+      # Return the public URL instead
+      return get_public_image_url
+    end
+    
+    # Try local file path
+    local_path = Rails.root.join('public', file_path).to_s
+    
+    # Check if file actually exists
+    if File.exist?(local_path)
+      local_path
     else
-      # Local file path (even if empty string, return the path)
-      Rails.root.join('public', file_path).to_s
+      # File doesn't exist locally, use public URL instead
+      Rails.logger.warn "Local file not found at #{local_path}, using public URL instead"
+      get_public_image_url
     end
   end
   

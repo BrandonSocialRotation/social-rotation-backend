@@ -67,7 +67,13 @@ module SocialMedia
       data = JSON.parse(response.body)
       
       unless data['id']
-        raise "Failed to create Instagram media container: #{data['error']}"
+        error_message = if data['error']
+          "#{data['error']['message']} (Code: #{data['error']['code']})"
+        else
+          "Unknown error: #{data.inspect}"
+        end
+        Rails.logger.error "Instagram media creation failed: #{error_message}, URL: #{media_url}"
+        raise "Failed to create Instagram media container: #{error_message}"
       end
       
       creation_id = data['id']
@@ -85,7 +91,15 @@ module SocialMedia
       }
       
       response = HTTParty.post(publish_url, body: publish_params)
-      JSON.parse(response.body)
+      publish_data = JSON.parse(response.body)
+      
+      if publish_data['error']
+        error_message = "#{publish_data['error']['message']} (Code: #{publish_data['error']['code']})"
+        Rails.logger.error "Instagram publish failed: #{error_message}"
+        raise "Failed to publish Instagram media: #{error_message}"
+      end
+      
+      publish_data
     end
     
     # Fetch user's Facebook pages
