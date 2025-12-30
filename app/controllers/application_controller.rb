@@ -75,24 +75,24 @@ class ApplicationController < ActionController::API
     
     if subscription && subscription.canceled?
       render json: {
-        error: 'Subscription canceled',
-        message: 'Your subscription has been canceled. Please resubscribe to schedule posts or post content.',
+        error: 'Subscription needed to post',
+        message: 'Subscription needed to post',
         subscription_required: true,
         subscription_status: 'canceled',
         redirect_to: '/profile'
       }, status: :forbidden
     elsif subscription
       render json: {
-        error: 'Subscription not active',
-        message: 'Your subscription is not active. Please update your payment method to schedule posts or post content.',
+        error: 'Subscription needed to post',
+        message: 'Subscription needed to post',
         subscription_required: true,
         subscription_status: subscription.status,
         redirect_to: '/profile'
       }, status: :forbidden
     else
       render json: {
-        error: 'No subscription',
-        message: 'You need an active subscription to schedule posts or post content. Please subscribe to continue.',
+        error: 'Subscription needed to post',
+        message: 'Subscription needed to post',
         subscription_required: true,
         subscription_status: 'missing',
         redirect_to: '/register'
