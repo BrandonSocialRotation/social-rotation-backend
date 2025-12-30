@@ -120,7 +120,16 @@ class Api::V1::OauthController < ApplicationController
     session[:twitter_request_token] = request_token.token
     session[:twitter_request_secret] = request_token.secret
     session[:user_id] = current_user.id
-    redirect_to request_token.authorize_url, allow_other_host: true
+    
+    oauth_url = request_token.authorize_url
+    
+    # If request is from API (JSON accept header or AJAX), return JSON with URL
+    # Otherwise, redirect as normal (for direct browser access)
+    if request.headers['Accept']&.include?('application/json') || request.xhr?
+      render json: { oauth_url: oauth_url, platform: 'X' }
+    else
+      redirect_to oauth_url, allow_other_host: true
+    end
   rescue LoadError
     render json: { error: 'OAuth gem not installed' }, status: :internal_server_error
   rescue => e
@@ -186,7 +195,14 @@ class Api::V1::OauthController < ApplicationController
     unless oauth_url
       return render json: { error: "#{platform_name} not configured" }, status: :internal_server_error
     end
-    redirect_to oauth_url, allow_other_host: true
+    
+    # If request is from API (JSON accept header or AJAX), return JSON with URL
+    # Otherwise, redirect as normal (for direct browser access)
+    if request.headers['Accept']&.include?('application/json') || request.xhr?
+      render json: { oauth_url: oauth_url, platform: platform_name }
+    else
+      redirect_to oauth_url, allow_other_host: true
+    end
   rescue => e
     Rails.logger.error "#{platform_name} OAuth login error: #{e.message}"
     render json: { error: "Failed to initiate #{platform_name} OAuth", details: e.message }, status: :internal_server_error
