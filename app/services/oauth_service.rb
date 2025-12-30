@@ -53,6 +53,15 @@ class OauthService
       token_url: 'https://api.pinterest.com/v5/oauth/token',
       scopes: 'boards:read,pins:read,pins:write',
       callback_path: '/api/v1/oauth/pinterest/callback'
+    },
+    instagram: {
+      env_client_id: 'FACEBOOK_APP_ID', # Instagram uses Facebook OAuth
+      env_client_secret: 'FACEBOOK_APP_SECRET',
+      env_callback: nil,
+      auth_url: 'https://www.facebook.com/v18.0/dialog/oauth',
+      token_url: 'https://graph.facebook.com/v18.0/oauth/access_token',
+      scopes: 'instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement',
+      callback_path: '/api/v1/oauth/instagram/callback'
     }
   }.freeze
 
@@ -122,7 +131,7 @@ class OauthService
     redirect_uri = @config[:env_callback] ? (ENV[@config[:env_callback]] || default_callback_url) : default_callback_url
     
     case @platform
-    when :facebook
+    when :facebook, :instagram
       "#{@config[:auth_url]}?client_id=#{client_id}&redirect_uri=#{CGI.escape(redirect_uri)}&state=#{state}&scope=#{@config[:scopes]}"
     when :linkedin
       "#{@config[:auth_url]}?response_type=code&client_id=#{client_id}&redirect_uri=#{CGI.escape(redirect_uri)}&state=#{CGI.escape(state)}&scope=#{CGI.escape(@config[:scopes])}"
@@ -143,7 +152,7 @@ class OauthService
     return nil unless client_id && (@platform == :tiktok || client_secret)
     
     case @platform
-    when :facebook
+    when :facebook, :instagram
       HTTParty.get("#{@config[:token_url]}?client_id=#{client_id}&redirect_uri=#{CGI.escape(redirect_uri)}&client_secret=#{client_secret}&code=#{code}")
     when :linkedin
       HTTParty.post(@config[:token_url], {

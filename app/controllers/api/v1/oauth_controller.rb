@@ -1,6 +1,6 @@
 class Api::V1::OauthController < ApplicationController
-  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback, :twitter_login]
-  skip_before_action :require_active_subscription!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback, :twitter_login]
+  skip_before_action :authenticate_user!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback, :twitter_login, :instagram_callback]
+  skip_before_action :require_active_subscription!, only: [:facebook_callback, :twitter_callback, :linkedin_callback, :google_callback, :tiktok_callback, :youtube_callback, :pinterest_callback, :twitter_login, :instagram_callback]
   
   def frontend_url
     (Rails.env.development? ? "http://localhost:3001" : (ENV['FRONTEND_URL'] || 'https://my.socialrotation.app')).chomp('/')
@@ -167,6 +167,20 @@ class Api::V1::OauthController < ApplicationController
   rescue => e
     Rails.logger.error "Twitter callback error: #{e.message}"
     redirect_to oauth_callback_url(error: 'twitter_auth_failed', platform: 'X'), allow_other_host: true
+  end
+  
+  def instagram_login
+    handle_oauth_login(:instagram, 'Instagram')
+  end
+  
+  def instagram_callback
+    handle_oauth_callback(:instagram, 'Instagram') do |user, data|
+      access_token = data['access_token']
+      user.update!(fb_user_access_key: access_token) # Store for Instagram API access
+      
+      # Fetch user's pages and Instagram accounts
+      fetch_and_store_instagram_account(user, access_token)
+    end
   end
   
   def instagram_connect
@@ -337,6 +351,48 @@ class Api::V1::OauthController < ApplicationController
     user.update!(pinterest_username: username) if username && user.respond_to?(:pinterest_username=)
   rescue => e
     Rails.logger.warn "Failed to fetch Pinterest user info: #{e.message}"
+  end
+  
+  def fetch_and_store_instagram_account(user, access_token)
+    return nil unless access_token.present?
+    
+    # Fetch user's Facebook pages with Instagram accounts
+    response = HTTParty.get('https://graph.facebook.com/v18.0/me/accounts', query: { 
+      access_token: access_token, 
+      fields: 'id,name,access_token,instagram_business_account{id,username}', 
+      limit: 1000 
+    })
+    
+    data = JSON.parse(response.body)
+    return nil unless data['data']&.any?
+    
+    # Find first page with Instagram Business account
+    data['data'].each do |page|
+      if page['instagram_business_account']
+        instagram_account = page['instagram_business_account']
+        instagram_id = instagram_account['id']
+        page_token = page['access_token']
+        
+        # Store Instagram Business ID and page access token
+        user.update!(
+          instagram_business_id: instagram_id,
+          fb_user_access_key: page_token # Use page token for Instagram API
+        )
+        
+        return { 
+          id: instagram_id, 
+          username: instagram_account['username'],
+          page_id: page['id'], 
+          page_name: page['name'] 
+        }
+      end
+    end
+    
+    nil
+  rescue => e
+    Rails.logger.error "Failed to fetch and store Instagram account: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    raise e
   end
   
   def fetch_instagram_account(user)

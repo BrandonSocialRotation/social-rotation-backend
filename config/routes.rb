@@ -32,6 +32,8 @@ Rails.application.routes.draw do
       # OAuth routes
       get 'oauth/facebook/login', to: 'oauth#facebook_login'
       get 'oauth/facebook/callback', to: 'oauth#facebook_callback'
+      get 'oauth/instagram/login', to: 'oauth#instagram_login'
+      get 'oauth/instagram/callback', to: 'oauth#instagram_callback'
       get 'oauth/instagram/connect', to: 'oauth#instagram_connect'
       get 'oauth/twitter/login', to: 'oauth#twitter_login'
       get 'oauth/twitter/callback', to: 'oauth#twitter_callback'
