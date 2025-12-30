@@ -195,12 +195,20 @@ class SocialMediaPosterService
   # Post to Instagram
   def post_to_instagram(image_url)
     begin
+      # Ensure URL is HTTPS (Instagram requires HTTPS)
+      instagram_url = image_url
+      if instagram_url.start_with?('http://')
+        instagram_url = instagram_url.sub('http://', 'https://')
+        Rails.logger.warn "Converted HTTP to HTTPS for Instagram: #{instagram_url}"
+      end
+      
       service = SocialMedia::FacebookService.new(@user)
-      response = service.post_to_instagram(@description, image_url)
+      response = service.post_to_instagram(@description, instagram_url)
       
       { success: true, response: response }
     rescue => e
       Rails.logger.error "Instagram posting error: #{e.message}"
+      Rails.logger.error "Image URL was: #{image_url}"
       { success: false, error: e.message }
     end
   end
