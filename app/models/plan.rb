@@ -81,9 +81,10 @@ class Plan < ApplicationRecord
       end
     end
     
-    # Apply annual discount (2 months free = multiply by 10/12)
+    # Apply annual discount (2 months free = pay for 10 months, get 12)
+    # For annual, multiply monthly price by 10 to get annual total
     if billing_period == 'annual'
-      total = (total * 10.0 / 12.0).round
+      total = (total * 10).round
     end
     
     total
