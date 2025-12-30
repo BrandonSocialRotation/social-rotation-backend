@@ -123,12 +123,12 @@ class Api::V1::OauthController < ApplicationController
     
     oauth_url = request_token.authorize_url
     
-    # If request is from API (JSON accept header or AJAX), return JSON with URL
-    # Otherwise, redirect as normal (for direct browser access)
-    if request.headers['Accept']&.include?('application/json') || request.xhr?
-      render json: { oauth_url: oauth_url, platform: 'X' }
-    else
+    # Always return JSON for API endpoints (frontend will handle redirect)
+    # Check if it's a direct browser request (no Accept header or HTML request)
+    if request.headers['Accept']&.include?('text/html') && !request.xhr? && !request.headers['Accept']&.include?('application/json')
       redirect_to oauth_url, allow_other_host: true
+    else
+      render json: { oauth_url: oauth_url, platform: 'X' }
     end
   rescue LoadError
     render json: { error: 'OAuth gem not installed' }, status: :internal_server_error
@@ -196,12 +196,12 @@ class Api::V1::OauthController < ApplicationController
       return render json: { error: "#{platform_name} not configured" }, status: :internal_server_error
     end
     
-    # If request is from API (JSON accept header or AJAX), return JSON with URL
-    # Otherwise, redirect as normal (for direct browser access)
-    if request.headers['Accept']&.include?('application/json') || request.xhr?
-      render json: { oauth_url: oauth_url, platform: platform_name }
-    else
+    # Always return JSON for API endpoints (frontend will handle redirect)
+    # Check if it's a direct browser request (no Accept header or HTML request)
+    if request.headers['Accept']&.include?('text/html') && !request.xhr? && !request.headers['Accept']&.include?('application/json')
       redirect_to oauth_url, allow_other_host: true
+    else
+      render json: { oauth_url: oauth_url, platform: platform_name }
     end
   rescue => e
     Rails.logger.error "#{platform_name} OAuth login error: #{e.message}"
