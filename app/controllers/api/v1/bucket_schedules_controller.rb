@@ -292,7 +292,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
       skip_image: bucket_schedule.skip_image,
       bucket_id: bucket_schedule.bucket_id,
       bucket_image_id: bucket_schedule.bucket_image_id,
-      name: bucket_schedule.name,
+      name: bucket_schedule.respond_to?(:name) ? bucket_schedule.name : nil,
       bucket: bucket_schedule.bucket ? {
         id: bucket_schedule.bucket.id,
         name: bucket_schedule.bucket.name
