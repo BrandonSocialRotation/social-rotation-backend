@@ -36,6 +36,11 @@ class Api::V1::BucketSchedulesController < ApplicationController
       )
     end
     
+    # Remove name if column doesn't exist yet (for production migration compatibility)
+    unless BucketSchedule.column_names.include?('name')
+      schedule_params = schedule_params.except(:name)
+    end
+    
     @bucket_schedule = @bucket.bucket_schedules.build(schedule_params)
     
     # Validate that bucket_image_id belongs to the bucket if provided
@@ -63,7 +68,13 @@ class Api::V1::BucketSchedulesController < ApplicationController
   def update
     require_active_subscription_for_action!
     
-    if @bucket_schedule.update(bucket_schedule_params)
+    update_params = bucket_schedule_params
+    # Remove name if column doesn't exist yet (for production migration compatibility)
+    unless BucketSchedule.column_names.include?('name')
+      update_params = update_params.except(:name)
+    end
+    
+    if @bucket_schedule.update(update_params)
       render json: {
         bucket_schedule: bucket_schedule_json(@bucket_schedule),
         message: 'Schedule updated successfully'
