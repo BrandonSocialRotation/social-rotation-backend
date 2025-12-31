@@ -594,5 +594,59 @@ module SocialMedia
       
       data
     end
+    
+    # Create LinkedIn organization post
+    def create_organization_post(message, asset_urn, organization_urn)
+      url = "#{API_BASE_URL}/ugcPosts"
+      headers = {
+        'Authorization' => "Bearer #{@user.linkedin_access_token}",
+        'Content-Type' => 'application/json',
+        'X-Restli-Protocol-Version' => '2.0.0'
+      }
+      
+      body = {
+        author: organization_urn,
+        lifecycleState: 'PUBLISHED',
+        specificContent: {
+          'com.linkedin.ugc.ShareContent' => {
+            shareCommentary: {
+              text: message
+            },
+            shareMediaCategory: 'IMAGE',
+            media: [
+              {
+                status: 'READY',
+                description: {
+                  text: message
+                },
+                media: asset_urn,
+                title: {
+                  text: message
+                }
+              }
+            ]
+          }
+        },
+        visibility: {
+          'com.linkedin.ugc.MemberNetworkVisibility' => 'PUBLIC'
+        }
+      }
+      
+      response = HTTParty.post(url, headers: headers, body: body.to_json)
+      data = JSON.parse(response.body)
+      
+      unless response.success?
+        error_msg = data['message'] || response.body
+        Rails.logger.error "LinkedIn organization post creation failed: #{error_msg}"
+        raise "Failed to create LinkedIn organization post: #{error_msg}"
+      end
+      
+      Rails.logger.info "LinkedIn organization post created successfully: #{data.inspect}"
+      data
+    rescue => e
+      Rails.logger.error "LinkedIn organization post creation exception: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      raise
+    end
   end
 end
