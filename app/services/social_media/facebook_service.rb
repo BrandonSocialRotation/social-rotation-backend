@@ -38,13 +38,37 @@ module SocialMedia
     # @param message [String] The post caption
     # @param media_url [String] Public URL of the image or video
     # @param is_video [Boolean] Whether the media is a video
+    # @param page_id [String] Optional Facebook page ID that has the Instagram account
     # @return [Hash] Response from Instagram API
-    def post_to_instagram(message, media_url, is_video: false)
-      unless @user.instagram_business_id.present?
+    def post_to_instagram(message, media_url, is_video: false, page_id: nil)
+      # If page_id is provided, get Instagram account from that specific page
+      instagram_id = nil
+      page_token = nil
+      
+      if page_id
+        # Get the specific page and its Instagram account
+        url = "#{BASE_URL}/#{page_id}"
+        params = {
+          access_token: @user.fb_user_access_key,
+          fields: 'access_token,instagram_business_account{id}'
+        }
+        response = HTTParty.get(url, query: params)
+        if response.success?
+          data = JSON.parse(response.body)
+          page_token = data['access_token']
+          if data['instagram_business_account']
+            instagram_id = data['instagram_business_account']['id']
+          end
+        end
+      end
+      
+      # Fallback to user's stored Instagram account
+      instagram_id ||= @user.instagram_business_id
+      unless instagram_id.present?
         raise "User does not have Instagram connected"
       end
       
-      page_token = get_page_access_token
+      page_token ||= get_page_access_token(page_id: page_id)
       
       unless page_token
         raise "Could not get Facebook page access token for Instagram"
@@ -129,11 +153,22 @@ module SocialMedia
       
       if data['data'] && data['data'].any?
         data['data'].map do |page|
-          {
+          page_info = {
             id: page['id'],
             name: page['name'],
             access_token: page['access_token']
           }
+          
+          # Include Instagram account if linked to this page
+          if page['instagram_business_account']
+            instagram_account = page['instagram_business_account']
+            page_info[:instagram_account] = {
+              id: instagram_account['id'],
+              username: instagram_account['username']
+            }
+          end
+          
+          page_info
         end
       else
         []

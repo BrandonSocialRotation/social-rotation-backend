@@ -205,7 +205,10 @@ class SocialMediaPosterService
       end
       
       service = SocialMedia::FacebookService.new(@user)
-      response = service.post_to_instagram(@description, instagram_url)
+      # Use page_id from bucket_image or bucket_schedule if available
+      # Instagram is linked to a Facebook page, so we need the page that has the Instagram account
+      page_id = @bucket_image.facebook_page_id || @facebook_page_id
+      response = service.post_to_instagram(@description, instagram_url, page_id: page_id)
       
       { success: true, response: response }
     rescue => e
