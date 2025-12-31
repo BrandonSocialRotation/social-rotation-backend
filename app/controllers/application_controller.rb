@@ -81,6 +81,7 @@ class ApplicationController < ActionController::API
         subscription_status: 'canceled',
         redirect_to: '/profile'
       }, status: :forbidden
+      return
     elsif subscription
       render json: {
         error: 'Subscription needed to post',
@@ -89,6 +90,7 @@ class ApplicationController < ActionController::API
         subscription_status: subscription.status,
         redirect_to: '/profile'
       }, status: :forbidden
+      return
     else
       render json: {
         error: 'Subscription needed to post',
@@ -97,6 +99,7 @@ class ApplicationController < ActionController::API
         subscription_status: 'missing',
         redirect_to: '/register'
       }, status: :forbidden
+      return
     end
   end
 

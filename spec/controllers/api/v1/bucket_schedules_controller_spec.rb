@@ -10,6 +10,9 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
     # Mock authentication
     allow(controller).to receive(:authenticate_user!).and_return(true)
     allow(controller).to receive(:current_user).and_return(user)
+    # Mock subscription check - assume user has active subscription for these tests
+    allow(controller).to receive(:has_active_subscription?).and_return(true)
+    allow(controller).to receive(:require_active_subscription_for_action!).and_return(true)
   end
 
   describe 'GET #index' do
@@ -67,6 +70,52 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
       expect(json_response['bucket_schedule']['schedule']).to eq('0 9 * * 1-5')
     end
 
+    it 'creates schedule with facebook_page_id' do
+      params_with_page = create_params.deep_merge(
+        bucket_schedule: { facebook_page_id: 'page_123' }
+      )
+      
+      expect {
+        post :create, params: params_with_page
+      }.to change(BucketSchedule, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      schedule = BucketSchedule.last
+      expect(schedule.facebook_page_id).to eq('page_123')
+    end
+
+    it 'creates schedule with linkedin_organization_urn' do
+      params_with_org = create_params.deep_merge(
+        bucket_schedule: { linkedin_organization_urn: 'urn:li:organization:123' }
+      )
+      
+      expect {
+        post :create, params: params_with_org
+      }.to change(BucketSchedule, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      schedule = BucketSchedule.last
+      expect(schedule.linkedin_organization_urn).to eq('urn:li:organization:123')
+    end
+
+    it 'creates schedule with both facebook_page_id and linkedin_organization_urn' do
+      params_with_both = create_params.deep_merge(
+        bucket_schedule: {
+          facebook_page_id: 'page_123',
+          linkedin_organization_urn: 'urn:li:organization:123'
+        }
+      )
+      
+      expect {
+        post :create, params: params_with_both
+      }.to change(BucketSchedule, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      schedule = BucketSchedule.last
+      expect(schedule.facebook_page_id).to eq('page_123')
+      expect(schedule.linkedin_organization_urn).to eq('urn:li:organization:123')
+    end
+
     it 'returns errors for invalid parameters' do
       invalid_params = { bucket_id: bucket.id, bucket_schedule: { schedule: '' } }
       
@@ -116,6 +165,59 @@ RSpec.describe Api::V1::BucketSchedulesController, type: :controller do
       bucket_schedule.reload
       expect(bucket_schedule.schedule).to eq('0 10 * * 1-5')
       expect(bucket_schedule.post_to).to eq(BucketSchedule::BIT_INSTAGRAM)
+    end
+
+    it 'updates facebook_page_id' do
+      params_with_page = update_params.deep_merge(
+        bucket_schedule: { facebook_page_id: 'page_456' }
+      )
+      
+      patch :update, params: params_with_page
+
+      expect(response).to have_http_status(:ok)
+      bucket_schedule.reload
+      expect(bucket_schedule.facebook_page_id).to eq('page_456')
+    end
+
+    it 'updates linkedin_organization_urn' do
+      params_with_org = update_params.deep_merge(
+        bucket_schedule: { linkedin_organization_urn: 'urn:li:organization:456' }
+      )
+      
+      patch :update, params: params_with_org
+
+      expect(response).to have_http_status(:ok)
+      bucket_schedule.reload
+      expect(bucket_schedule.linkedin_organization_urn).to eq('urn:li:organization:456')
+    end
+
+    it 'updates both facebook_page_id and linkedin_organization_urn' do
+      params_with_both = update_params.deep_merge(
+        bucket_schedule: {
+          facebook_page_id: 'page_789',
+          linkedin_organization_urn: 'urn:li:organization:789'
+        }
+      )
+      
+      patch :update, params: params_with_both
+
+      expect(response).to have_http_status(:ok)
+      bucket_schedule.reload
+      expect(bucket_schedule.facebook_page_id).to eq('page_789')
+      expect(bucket_schedule.linkedin_organization_urn).to eq('urn:li:organization:789')
+    end
+
+    it 'clears facebook_page_id when set to empty string' do
+      bucket_schedule.update!(facebook_page_id: 'page_123')
+      params_clear_page = update_params.deep_merge(
+        bucket_schedule: { facebook_page_id: '' }
+      )
+      
+      patch :update, params: params_clear_page
+
+      expect(response).to have_http_status(:ok)
+      bucket_schedule.reload
+      expect(bucket_schedule.facebook_page_id).to be_nil
     end
 
     it 'returns error when update fails' do

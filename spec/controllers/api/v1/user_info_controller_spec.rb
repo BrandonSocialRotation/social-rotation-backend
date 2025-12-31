@@ -1163,6 +1163,71 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
     end
   end
 
+  describe 'GET #linkedin_organizations' do
+    let(:mock_linkedin_service) { instance_double(SocialMedia::LinkedinService) }
+
+    before do
+      allow(SocialMedia::LinkedinService).to receive(:new).with(user).and_return(mock_linkedin_service)
+    end
+
+    context 'when LinkedIn is connected' do
+      it 'returns LinkedIn organizations' do
+        orgs_data = [
+          { id: 'org_1', name: 'Organization 1', urn: 'urn:li:organization:123' },
+          { id: 'org_2', name: 'Organization 2', urn: 'urn:li:organization:456' }
+        ]
+        allow(mock_linkedin_service).to receive(:fetch_organizations).and_return(orgs_data)
+
+        get :linkedin_organizations
+
+        expect(response).to have_http_status(:success)
+        json_response = JSON.parse(response.body)
+        expect(json_response['organizations']).to be_an(Array)
+        expect(json_response['organizations'].length).to eq(2)
+        expect(json_response['organizations'].first['id']).to eq('org_1')
+        expect(json_response['organizations'].first['name']).to eq('Organization 1')
+        expect(json_response['organizations'].first['urn']).to eq('urn:li:organization:123')
+      end
+
+      it 'returns empty array when user has no organizations' do
+        allow(mock_linkedin_service).to receive(:fetch_organizations).and_return([])
+
+        get :linkedin_organizations
+
+        expect(response).to have_http_status(:success)
+        json_response = JSON.parse(response.body)
+        expect(json_response['organizations']).to eq([])
+      end
+    end
+
+    context 'when LinkedIn is not connected' do
+      before do
+        user.update!(linkedin_access_token: nil)
+      end
+
+      it 'returns unauthorized error' do
+        get :linkedin_organizations
+
+        expect(response).to have_http_status(:unauthorized)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('LinkedIn not connected')
+      end
+    end
+
+    context 'when LinkedIn API error occurs' do
+      it 'handles errors gracefully' do
+        allow(mock_linkedin_service).to receive(:fetch_organizations).and_raise(StandardError.new('API error'))
+
+        get :linkedin_organizations
+
+        expect(response).to have_http_status(:internal_server_error)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Failed to fetch LinkedIn organizations')
+        expect(json_response['message']).to eq('API error')
+      end
+    end
+  end
+
   describe 'GET #support' do
     it 'returns support contact information with default values' do
       get :support

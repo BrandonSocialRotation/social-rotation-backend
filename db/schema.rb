@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_12_10_211326) do
+ActiveRecord::Schema[7.1].define(version: 2025_12_27_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -151,6 +151,21 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_10_211326) do
     t.datetime "updated_at", null: false
     t.index ["expires_at"], name: "index_oauth_request_tokens_on_expires_at"
     t.index ["oauth_token"], name: "index_oauth_request_tokens_on_oauth_token", unique: true
+  end
+
+  create_table "pending_registrations", force: :cascade do |t|
+    t.string "email", null: false
+    t.string "name", null: false
+    t.text "encrypted_password", null: false
+    t.string "account_type", null: false
+    t.string "company_name"
+    t.datetime "expires_at", null: false
+    t.string "stripe_session_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_pending_registrations_on_email", unique: true
+    t.index ["expires_at"], name: "index_pending_registrations_on_expires_at"
+    t.index ["stripe_session_id"], name: "index_pending_registrations_on_stripe_session_id"
   end
 
   create_table "plans", force: :cascade do |t|

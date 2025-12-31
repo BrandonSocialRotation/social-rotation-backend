@@ -32,7 +32,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
     if params[:bucket_schedule].present?
       schedule_params = params.require(:bucket_schedule).permit(
         :schedule, :schedule_type, :post_to, :description, :twitter_description,
-        :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn
+        :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name
       )
     end
     
@@ -257,7 +257,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
   def bucket_schedule_params
     params.require(:bucket_schedule).permit(
       :schedule, :schedule_type, :post_to, :description, :twitter_description,
-      :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn
+      :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name
     )
   end
 
@@ -292,6 +292,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
       skip_image: bucket_schedule.skip_image,
       bucket_id: bucket_schedule.bucket_id,
       bucket_image_id: bucket_schedule.bucket_image_id,
+      name: bucket_schedule.name,
       bucket: bucket_schedule.bucket ? {
         id: bucket_schedule.bucket.id,
         name: bucket_schedule.bucket.name
