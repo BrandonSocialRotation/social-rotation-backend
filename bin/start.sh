@@ -31,6 +31,26 @@ else
   echo "Attempting to continue anyway..."
 fi
 
+# Start scheduler in background (runs every minute)
+echo "Starting scheduler..."
+while true; do
+  bundle exec rails scheduler:process 2>&1 | head -20
+  sleep 60  # Wait 60 seconds before next run
+done &
+SCHEDULER_PID=$!
+echo "Scheduler started with PID: $SCHEDULER_PID"
+
+# Start scheduler in background (runs every minute)
+echo "Starting scheduler..."
+(
+  while true; do
+    bundle exec rails scheduler:process 2>&1 | head -20
+    sleep 60  # Wait 60 seconds before next run
+  done
+) &
+SCHEDULER_PID=$!
+echo "Scheduler started with PID: $SCHEDULER_PID"
+
 # Start the server
 echo "Starting Rails server on port ${PORT:-8080}..."
 exec bundle exec rails server -b 0.0.0.0 -p ${PORT:-8080} -e production

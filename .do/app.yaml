@@ -56,3 +56,23 @@ jobs:
     value: YOUR_MASTER_KEY_HERE
   - key: DATABASE_URL
     value: ${dev-db-045706.DATABASE_URL}
+
+- name: scheduler
+  source_dir: /
+  github:
+    repo: BOSS_GITHUB_USERNAME/Rebrand-Social-rotation
+    branch: main
+  build_command: bundle install
+  run_command: bundle exec rails scheduler:process
+  environment_slug: ruby
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  kind: CRON
+  schedule: "*/1 * * * *"  # Run every minute
+  envs:
+  - key: RAILS_ENV
+    value: production
+  - key: RAILS_MASTER_KEY
+    value: YOUR_MASTER_KEY_HERE
+  - key: DATABASE_URL
+    value: ${dev-db-045706.DATABASE_URL}
