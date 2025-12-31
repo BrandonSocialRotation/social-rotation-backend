@@ -127,9 +127,14 @@ module SocialMedia
     # @param message [String] Post text
     # @param image_path [String] Local path to image file
     # @return [Hash] Response from LinkedIn API
-    def post_with_image(message, image_path)
+    def post_with_image(message, image_path, organization_urn: nil)
       unless @user.linkedin_access_token.present?
         raise "User does not have LinkedIn connected"
+      end
+      
+      # If organization_urn is provided, post to organization instead of personal profile
+      if organization_urn
+        return post_to_organization(message, image_path, organization_urn)
       end
       
       # Try to get profile ID if not stored - but don't fail if we can't get it
@@ -159,6 +164,18 @@ module SocialMedia
       
       # Step 3: Create post
       create_post(message, asset_urn)
+    end
+    
+    # Post to LinkedIn organization page
+    def post_to_organization(message, image_path, organization_urn)
+      # Step 1: Register upload
+      asset_urn = register_upload
+      
+      # Step 2: Upload image
+      upload_image(asset_urn, image_path)
+      
+      # Step 3: Create organization post
+      create_organization_post(message, asset_urn, organization_urn)
     end
     
     private

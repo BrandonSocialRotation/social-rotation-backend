@@ -92,6 +92,22 @@ class Api::V1::UserInfoController < ApplicationController
       render json: { error: 'Failed to fetch Facebook pages', message: e.message }, status: :internal_server_error
     end
   end
+  
+  # GET /api/v1/user_info/linkedin_organizations
+  def linkedin_organizations
+    unless current_user.linkedin_access_token.present?
+      return render json: { error: 'LinkedIn not connected' }, status: :unauthorized
+    end
+
+    begin
+      linkedin_service = SocialMedia::LinkedinService.new(current_user)
+      organizations = linkedin_service.fetch_organizations
+      render json: { organizations: organizations }
+    rescue => e
+      Rails.logger.error "LinkedIn organizations error: #{e.message}"
+      render json: { error: 'Failed to fetch LinkedIn organizations', message: e.message }, status: :internal_server_error
+    end
+  end
 
   # GET /api/v1/user_info/debug
   # Debug endpoint to check what account info is stored

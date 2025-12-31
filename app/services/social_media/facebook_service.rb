@@ -10,14 +10,15 @@ module SocialMedia
     # Post a photo to Facebook page
     # @param message [String] The post message/caption
     # @param image_url [String] Public URL of the image to post
+    # @param page_id [String] Optional Facebook page ID to post to (if not provided, uses first page)
     # @return [Hash] Response from Facebook API
-    def post_photo(message, image_url)
+    def post_photo(message, image_url, page_id: nil)
       unless @user.fb_user_access_key.present?
         raise "User does not have Facebook connected"
       end
       
-      # Get page access token
-      page_token = get_page_access_token
+      # Get page access token (for specific page if page_id provided)
+      page_token = get_page_access_token(page_id: page_id)
       
       unless page_token
         raise "Could not get Facebook page access token"
@@ -27,9 +28,9 @@ module SocialMedia
       extension = File.extname(image_url).downcase
       
       if ['.gif', '.mp4'].include?(extension)
-        post_video(message, image_url, page_token)
+        post_video(message, image_url, page_token, page_id: page_id)
       else
-        post_image(message, image_url, page_token)
+        post_image(message, image_url, page_token, page_id: page_id)
       end
     end
     
@@ -180,35 +181,37 @@ module SocialMedia
     private
     
     # Post an image to Facebook
-    def post_image(message, image_url, page_token)
-      url = "#{BASE_URL}/me/photos"
+    def post_image(message, image_url, page_token, page_id: nil)
+      # Use page_id if provided, otherwise use /me endpoint
+      endpoint = page_id ? "#{BASE_URL}/#{page_id}/photos" : "#{BASE_URL}/me/photos"
       params = {
         message: message,
         url: image_url,
         access_token: page_token
       }
       
-      response = HTTParty.post(url, body: params)
+      response = HTTParty.post(endpoint, body: params)
       JSON.parse(response.body)
     end
     
     # Post a video to Facebook
-    def post_video(message, video_url, page_token)
-      url = "#{BASE_URL}/me/videos"
+    def post_video(message, video_url, page_token, page_id: nil)
+      # Use page_id if provided, otherwise use /me endpoint
+      endpoint = page_id ? "#{BASE_URL}/#{page_id}/videos" : "#{BASE_URL}/me/videos"
       params = {
         description: message,
         file_url: video_url,
         access_token: page_token
       }
       
-      response = HTTParty.post(url, body: params)
+      response = HTTParty.post(endpoint, body: params)
       JSON.parse(response.body)
     end
     
     # Get the page access token from user's access token
-    # In production, you'd fetch the user's pages and let them select one
-    # For now, we'll use the first page
-    def get_page_access_token
+    # @param page_id [String] Optional specific page ID to get token for
+    # @return [String] Page access token
+    def get_page_access_token(page_id: nil)
       url = "#{BASE_URL}/me/accounts"
       params = {
         access_token: @user.fb_user_access_key,
@@ -219,8 +222,14 @@ module SocialMedia
       data = JSON.parse(response.body)
       
       if data['data'] && data['data'].any?
-        # Return the first page's access token
-        data['data'].first['access_token']
+        if page_id
+          # Find the specific page
+          page = data['data'].find { |p| p['id'] == page_id }
+          page ? page['access_token'] : data['data'].first['access_token']
+        else
+          # Return the first page's access token
+          data['data'].first['access_token']
+        end
       else
         nil
       end

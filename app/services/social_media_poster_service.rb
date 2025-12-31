@@ -164,18 +164,20 @@ class SocialMediaPosterService
     end
   end
   
-  # Post to Facebook
-  def post_to_facebook(image_url)
-    begin
-      service = SocialMedia::FacebookService.new(@user)
-      response = service.post_photo(@description, image_url)
-      
-      { success: true, response: response }
-    rescue => e
-      Rails.logger.error "Facebook posting error: #{e.message}"
-      { success: false, error: e.message }
+    # Post to Facebook
+    def post_to_facebook(image_url)
+      begin
+        service = SocialMedia::FacebookService.new(@user)
+        # Use page_id from bucket_image or bucket_schedule if available
+        page_id = @bucket_image.facebook_page_id || @facebook_page_id
+        response = service.post_photo(@description, image_url, page_id: page_id)
+        
+        { success: true, response: response }
+      rescue => e
+        Rails.logger.error "Facebook posting error: #{e.message}"
+        { success: false, error: e.message }
+      end
     end
-  end
   
   # Post to Twitter
   def post_to_twitter(image_path)
@@ -219,7 +221,9 @@ class SocialMediaPosterService
       return { success: false, error: 'Image path is required' } if image_path.nil?
       
       service = SocialMedia::LinkedinService.new(@user)
-      response = service.post_with_image(@description, image_path)
+      # Use organization_urn from bucket_image or bucket_schedule if available
+      organization_urn = @bucket_image.linkedin_organization_urn || @linkedin_organization_urn
+      response = service.post_with_image(@description, image_path, organization_urn: organization_urn)
       
       { success: true, response: response }
     rescue => e
