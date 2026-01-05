@@ -114,9 +114,26 @@ class Api::V1::OauthController < ApplicationController
     # Twitter OAuth callback must go to backend, then redirect to frontend
     # Note: Twitter OAuth 1.0a requires callback URL to match exactly (no query params)
     # So we store user_id in the OauthRequestToken record instead
-    backend_callback_url = "#{ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000' : request.base_url)}/api/v1/oauth/twitter/callback"
+    # Use "oob" (out of band) if TWITTER_CALLBACK is not set, or use the configured callback
+    backend_callback_url = if ENV['TWITTER_CALLBACK'].present?
+      ENV['TWITTER_CALLBACK']
+    elsif Rails.env.development?
+      'http://localhost:3000/api/v1/oauth/twitter/callback'
+    else
+      "#{request.base_url}/api/v1/oauth/twitter/callback"
+    end
+    
+    Rails.logger.info "Twitter OAuth callback URL: #{backend_callback_url}"
+    
     consumer = ::OAuth::Consumer.new(consumer_key, consumer_secret, site: 'https://api.twitter.com', request_token_path: '/oauth/request_token', authorize_path: '/oauth/authorize', access_token_path: '/oauth/access_token')
-    request_token = consumer.get_request_token(oauth_callback: backend_callback_url)
+    
+    begin
+      request_token = consumer.get_request_token(oauth_callback: backend_callback_url)
+    rescue => e
+      Rails.logger.error "Twitter OAuth request token error: #{e.class} - #{e.message}"
+      Rails.logger.error "Callback URL used: #{backend_callback_url}"
+      raise e
+    end
     if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
       OauthRequestToken.create!(oauth_token: request_token.token, request_secret: request_token.secret, user_id: current_user.id, expires_at: 10.minutes.from_now)
     end
@@ -136,8 +153,15 @@ class Api::V1::OauthController < ApplicationController
   rescue LoadError
     render json: { error: 'OAuth gem not installed' }, status: :internal_server_error
   rescue => e
-    Rails.logger.error "Twitter OAuth error: #{e.message}"
-    render json: { error: 'Twitter authentication failed', message: e.message }, status: :bad_request
+    Rails.logger.error "Twitter OAuth error: #{e.class} - #{e.message}"
+    Rails.logger.error e.backtrace.join("\n") if e.backtrace
+    error_message = if e.message.include?('403') || e.message.include?('Forbidden')
+      'Twitter rejected the request. Please verify your callback URL in Twitter Developer Portal matches: ' + 
+      (ENV['TWITTER_CALLBACK'] || "#{request.base_url}/api/v1/oauth/twitter/callback")
+    else
+      e.message
+    end
+    render json: { error: 'Twitter authentication failed', message: error_message, details: e.message }, status: :bad_request
   end
   
   def twitter_callback
