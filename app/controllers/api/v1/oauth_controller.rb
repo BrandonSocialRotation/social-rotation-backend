@@ -112,18 +112,19 @@ class Api::V1::OauthController < ApplicationController
       return render json: { error: 'Twitter API credentials not configured' }, status: :internal_server_error
     end
     # Twitter OAuth callback must go to backend, then redirect to frontend
-    # Note: Twitter OAuth 1.0a requires callback URL to match exactly (no query params)
+    # Note: Twitter OAuth 1.0a requires callback URL to match EXACTLY what's registered in Twitter Developer Portal
+    # The callback URL cannot have query parameters
     # So we store user_id in the OauthRequestToken record instead
-    # Use "oob" (out of band) if TWITTER_CALLBACK is not set, or use the configured callback
     backend_callback_url = if ENV['TWITTER_CALLBACK'].present?
       ENV['TWITTER_CALLBACK']
     elsif Rails.env.development?
-      'http://localhost:3000/api/v1/oauth/twitter/callback'
+      'http://127.0.0.1:3000/api/v1/oauth/twitter/callback'  # Use 127.0.0.1 instead of localhost per Twitter recommendations
     else
       "#{request.base_url}/api/v1/oauth/twitter/callback"
     end
     
-    Rails.logger.info "Twitter OAuth callback URL: #{backend_callback_url}"
+    Rails.logger.info "Twitter OAuth - Using callback URL: #{backend_callback_url}"
+    Rails.logger.info "Twitter OAuth - Make sure this EXACT URL is registered in Twitter Developer Portal (Settings > App settings > Callback URLs)"
     
     consumer = ::OAuth::Consumer.new(consumer_key, consumer_secret, site: 'https://api.twitter.com', request_token_path: '/oauth/request_token', authorize_path: '/oauth/authorize', access_token_path: '/oauth/access_token')
     
@@ -155,9 +156,12 @@ class Api::V1::OauthController < ApplicationController
   rescue => e
     Rails.logger.error "Twitter OAuth error: #{e.class} - #{e.message}"
     Rails.logger.error e.backtrace.join("\n") if e.backtrace
+    
     error_message = if e.message.include?('403') || e.message.include?('Forbidden')
-      'Twitter rejected the request. Please verify your callback URL in Twitter Developer Portal matches: ' + 
-      (ENV['TWITTER_CALLBACK'] || "#{request.base_url}/api/v1/oauth/twitter/callback")
+      callback_url = ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://127.0.0.1:3000/api/v1/oauth/twitter/callback' : "#{request.base_url}/api/v1/oauth/twitter/callback")
+      "Twitter rejected the request (403 Forbidden). This usually means the callback URL doesn't match what's registered in your Twitter app. " +
+      "Please go to https://developer.twitter.com/en/portal/dashboard, select your app, go to 'Settings' > 'App settings' > 'Callback URLs', " +
+      "and make sure this EXACT URL is listed: #{callback_url} (no trailing slash, no query parameters)"
     else
       e.message
     end
