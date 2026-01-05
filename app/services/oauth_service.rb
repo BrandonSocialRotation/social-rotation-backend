@@ -142,7 +142,8 @@ class OauthService
     when :tiktok
       "#{@config[:auth_url]}?client_key=#{client_id}&scope=#{@config[:scopes]}&response_type=code&redirect_uri=#{CGI.escape(redirect_uri)}&state=#{state}"
     when :pinterest
-      "#{@config[:auth_url]}?client_id=#{client_id}&redirect_uri=#{CGI.escape(redirect_uri)}&response_type=code&scope=#{CGI.escape(@config[:scopes])}&state=#{CGI.escape(state)}"
+      # Pinterest OAuth - add prompt=select_account to allow account selection
+      "#{@config[:auth_url]}?client_id=#{client_id}&redirect_uri=#{CGI.escape(redirect_uri)}&response_type=code&scope=#{CGI.escape(@config[:scopes])}&state=#{CGI.escape(state)}&prompt=select_account"
     end
   end
 

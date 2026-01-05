@@ -111,9 +111,13 @@ class Api::V1::OauthController < ApplicationController
     unless consumer_key.present? && consumer_secret.present?
       return render json: { error: 'Twitter API credentials not configured' }, status: :internal_server_error
     end
-    callback_url = "#{ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000' : request.base_url)}/api/v1/oauth/twitter/callback?user_id=#{current_user.id}"
+    # Use frontend URL for callback to ensure proper redirect
+    callback_url = "#{frontend_url}/oauth/callback?platform=X&user_id=#{current_user.id}"
+    # Twitter callback expects the callback at the backend, so we need to handle it there
+    backend_    # Twitter OAuth callback must go to backend, then redirect to frontend
+    backend_callback_url = "#{ENV['TWITTER_CALLBACK'] || (Rails.env.development? ? 'http://localhost:3000' : request.base_url)}/api/v1/oauth/twitter/callback?user_id=#{current_user.id}"
     consumer = ::OAuth::Consumer.new(consumer_key, consumer_secret, site: 'https://api.twitter.com', request_token_path: '/oauth/request_token', authorize_path: '/oauth/authorize', access_token_path: '/oauth/access_token')
-    request_token = consumer.get_request_token(oauth_callback: callback_url)
+    request_token = consumer.get_request_token(oauth_callback: backend_callback_url)
     if ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
       OauthRequestToken.create!(oauth_token: request_token.token, request_secret: request_token.secret, user_id: current_user.id, expires_at: 10.minutes.from_now)
     end
