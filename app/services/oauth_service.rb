@@ -142,8 +142,10 @@ class OauthService
     when :tiktok
       "#{@config[:auth_url]}?client_key=#{client_id}&scope=#{@config[:scopes]}&response_type=code&redirect_uri=#{CGI.escape(redirect_uri)}&state=#{state}"
     when :pinterest
-      # Pinterest OAuth - add prompt=select_account to allow account selection
-      "#{@config[:auth_url]}?client_id=#{client_id}&redirect_uri=#{CGI.escape(redirect_uri)}&response_type=code&scope=#{CGI.escape(@config[:scopes])}&state=#{CGI.escape(state)}&prompt=select_account"
+      # Pinterest OAuth - Pinterest doesn't support account selection via OAuth parameters
+      # Users need to log out of Pinterest first if they want to use a different account
+      # We add a note in the UI about this limitation
+      "#{@config[:auth_url]}?client_id=#{client_id}&redirect_uri=#{CGI.escape(redirect_uri)}&response_type=code&scope=#{CGI.escape(@config[:scopes])}&state=#{CGI.escape(state)}"
     end
   end
 
