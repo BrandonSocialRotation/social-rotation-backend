@@ -175,17 +175,22 @@ class Api::V1::OauthController < ApplicationController
       return redirect_to oauth_callback_url(error: 'twitter_config_error', platform: 'X'), allow_other_host: true
     end
     
-    # Get user_id from OauthRequestToken record (stored when request token was created)
-    user_id = nil
+    # Get token record (don't delete yet - we need it for the access token exchange)
+    token_record = nil
     if params[:oauth_token].present? && ActiveRecord::Base.connection.table_exists?('oauth_request_tokens')
-      token_data = OauthRequestToken.find_and_delete(params[:oauth_token])
-      user_id = token_data[:user_id] if token_data
+      token_record = OauthRequestToken.find_by(oauth_token: params[:oauth_token])
+      if token_record && token_record.expires_at < Time.current
+        Rails.logger.warn "Twitter OAuth token expired: #{params[:oauth_token]}"
+        token_record.destroy
+        token_record = nil
+      end
     end
     
-    # Fallback to session or URL param if token lookup didn't work
-    user_id ||= session[:user_id] || params[:user_id]
+    # Get user_id from token record or fallback to session
+    user_id = token_record&.user_id || session[:user_id] || params[:user_id]
     
     unless user_id
+      Rails.logger.error "Twitter callback - No user_id found. oauth_token: #{params[:oauth_token].present? ? 'present' : 'missing'}, session user_id: #{session[:user_id]}, token_record: #{token_record.present? ? 'found' : 'not found'}"
       return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'X'), allow_other_host: true
     end
     
@@ -194,22 +199,33 @@ class Api::V1::OauthController < ApplicationController
       return redirect_to oauth_callback_url(error: 'user_not_found', platform: 'X'), allow_other_host: true
     end
     
-    consumer = ::OAuth::Consumer.new(consumer_key, consumer_secret, site: 'https://api.twitter.com', request_token_path: '/oauth/request_token', authorize_path: '/oauth/authorize', access_token_path: '/oauth/access_token')
-    token_data = params[:oauth_token].present? && ActiveRecord::Base.connection.table_exists?('oauth_request_tokens') ? OauthRequestToken.find_by(oauth_token: params[:oauth_token]) : nil
-    request_token_value = token_data ? token_data.oauth_token : session[:twitter_request_token]
-    request_secret_value = token_data ? token_data.request_secret : session[:twitter_request_secret]
+    # Get request token and secret from token record or session
+    request_token_value = token_record ? token_record.oauth_token : session[:twitter_request_token]
+    request_secret_value = token_record ? token_record.request_secret : session[:twitter_request_secret]
     
     unless request_token_value.present? && request_secret_value.present?
+      Rails.logger.error "Twitter callback - Missing request token/secret. token_record: #{token_record.present? ? 'found' : 'not found'}, session token: #{session[:twitter_request_token].present? ? 'present' : 'missing'}"
       return redirect_to oauth_callback_url(error: 'twitter_session_expired', platform: 'X'), allow_other_host: true
     end
     
-    # Delete the token after use
-    token_data&.destroy
+    consumer = ::OAuth::Consumer.new(consumer_key, consumer_secret, site: 'https://api.twitter.com', request_token_path: '/oauth/request_token', authorize_path: '/oauth/authorize', access_token_path: '/oauth/access_token')
     request_token = ::OAuth::RequestToken.new(consumer, request_token_value, request_secret_value)
     access_token = request_token.get_access_token(oauth_verifier: params[:oauth_verifier])
-    user.update!(twitter_oauth_token: access_token.token, twitter_oauth_token_secret: access_token.secret, twitter_user_id: access_token.params['user_id'], twitter_screen_name: access_token.params['screen_name'])
+    
+    # Update user with Twitter credentials
+    user.update!(
+      twitter_oauth_token: access_token.token,
+      twitter_oauth_token_secret: access_token.secret,
+      twitter_user_id: access_token.params['user_id'],
+      twitter_screen_name: access_token.params['screen_name']
+    )
+    
+    # Clean up: delete token record and session data
+    token_record&.destroy
     session.delete(:twitter_request_token)
     session.delete(:twitter_request_secret)
+    session.delete(:user_id)
+    
     redirect_to oauth_callback_url(success: 'twitter_connected', platform: 'X'), allow_other_host: true
   rescue => e
     Rails.logger.error "Twitter callback error: #{e.message}"
