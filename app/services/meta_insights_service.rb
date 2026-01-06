@@ -49,7 +49,8 @@ class MetaInsightsService
       
       period = 'day'
       # Get Hootsuite-style metrics (removed impressions and reach as requested)
-      metric_list = 'likes,comments,saved,profile_views,website_clicks'
+      # Note: Instagram API uses 'saves' not 'saved'
+      metric_list = 'likes,comments,saves,profile_views,website_clicks'
       
       # Get insights for the specified range
       insights_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}/insights"
@@ -131,7 +132,7 @@ class MetaInsightsService
       comments = metrics_hash['comments'] || 0
       shares = 0 # Instagram doesn't provide shares directly, calculate from engagement
       clicks = metrics_hash['website_clicks'] || 0
-      saves = metrics_hash['saved'] || 0
+      saves = metrics_hash['saves'] || 0  # Note: API returns 'saves' not 'saved'
       profile_visits = metrics_hash['profile_views'] || 0
       
       total_engagement = likes + comments + saves
@@ -168,7 +169,7 @@ class MetaInsightsService
                      when 'likes' then 'likes'
                      when 'comments' then 'comments'
                      when 'engagement' then 'likes' # Use likes as proxy for engagement
-                     when 'saves' then 'saved'
+                     when 'saves' then 'saves'
                      when 'clicks' then 'website_clicks'
                      when 'profile_visits' then 'profile_views'
                      else 'likes'
