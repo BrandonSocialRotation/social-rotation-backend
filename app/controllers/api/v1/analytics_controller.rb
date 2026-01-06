@@ -100,19 +100,6 @@ class Api::V1::AnalyticsController < ApplicationController
       engagement_rate: calculate_engagement_rate(valid_metrics)
     }
   end
-  
-  private
-  
-  def calculate_engagement_rate(metrics)
-    return nil if metrics.empty?
-    
-    total_engagement = metrics.values.sum { |m| (m[:total_engagement] || 0).to_f }
-    total_reach = metrics.values.sum { |m| (m[:reach] || 0).to_i }
-    
-    return nil if total_reach == 0
-    
-    ((total_engagement / total_reach) * 100).round(2)
-  end
 
   # GET /api/v1/analytics/posts_count
   def posts_count
@@ -136,5 +123,18 @@ class Api::V1::AnalyticsController < ApplicationController
       posts_last_7d: posts_last_7d,
       posts_last_30d: posts_last_30d
     }
+  end
+  
+  private
+  
+  def calculate_engagement_rate(metrics)
+    return nil if metrics.empty?
+    
+    total_engagement = metrics.values.sum { |m| (m[:total_engagement] || 0).to_f }
+    total_reach = metrics.values.sum { |m| (m[:reach] || 0).to_i }
+    
+    return nil if total_reach == 0
+    
+    ((total_engagement / total_reach) * 100).round(2)
   end
 end
