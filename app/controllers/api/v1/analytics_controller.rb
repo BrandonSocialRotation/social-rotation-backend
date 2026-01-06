@@ -40,12 +40,27 @@ class Api::V1::AnalyticsController < ApplicationController
   # GET /api/v1/analytics/overall
   def overall
     range = params[:range].presence || '7d'
+    # Accept platforms as array: ?platforms[]=instagram&platforms[]=facebook
+    selected_platforms = params[:platforms].present? ? Array(params[:platforms]) : nil
     
-    # Aggregate analytics from all connected platforms
+    # Aggregate analytics from selected platforms (or all connected if none specified)
     metrics = {}
     
+    # Determine which platforms to include
+    platforms_to_fetch = if selected_platforms.present?
+      selected_platforms.map(&:to_sym)
+    else
+      # Default: include all connected platforms
+      connected_platforms = []
+      connected_platforms << :instagram if current_user.instagram_business_id.present?
+      connected_platforms << :facebook if current_user.fb_user_access_key.present?
+      connected_platforms << :twitter if current_user.twitter_oauth_token.present?
+      connected_platforms << :linkedin if current_user.linkedin_access_token.present?
+      connected_platforms
+    end
+    
     # Instagram analytics
-    if current_user.instagram_business_id.present?
+    if platforms_to_fetch.include?(:instagram) && current_user.instagram_business_id.present?
       begin
         service = MetaInsightsService.new(current_user)
         instagram_data = service.summary(range)
@@ -55,15 +70,48 @@ class Api::V1::AnalyticsController < ApplicationController
       end
     end
     
+    # Facebook analytics (placeholder for now)
+    if platforms_to_fetch.include?(:facebook) && current_user.fb_user_access_key.present?
+      metrics[:facebook] = { message: 'Facebook analytics coming soon' }
+    end
+    
+    # Twitter analytics (placeholder for now)
+    if platforms_to_fetch.include?(:twitter) && current_user.twitter_oauth_token.present?
+      metrics[:twitter] = { message: 'Twitter analytics coming soon' }
+    end
+    
+    # LinkedIn analytics (placeholder for now)
+    if platforms_to_fetch.include?(:linkedin) && current_user.linkedin_access_token.present?
+      metrics[:linkedin] = { message: 'LinkedIn analytics coming soon' }
+    end
+    
+    # Aggregate totals from platforms that have actual data (not placeholders)
+    valid_metrics = metrics.select { |k, v| v.is_a?(Hash) && !v[:message] }
+    
     render json: {
       range: range,
       platforms: metrics,
-      total_engagement: metrics.values.sum { |m| m[:total_engagement] || 0 },
-      total_likes: metrics.values.sum { |m| m[:likes] || 0 },
-      total_comments: metrics.values.sum { |m| m[:comments] || 0 },
-      total_shares: metrics.values.sum { |m| m[:shares] || 0 },
-      total_clicks: metrics.values.sum { |m| m[:clicks] || 0 }
+      selected_platforms: platforms_to_fetch.map(&:to_s),
+      total_engagement: valid_metrics.values.sum { |m| (m[:total_engagement] || m[:engagement_rate] || 0).to_f },
+      total_likes: valid_metrics.values.sum { |m| (m[:likes] || 0).to_i },
+      total_comments: valid_metrics.values.sum { |m| (m[:comments] || 0).to_i },
+      total_shares: valid_metrics.values.sum { |m| (m[:shares] || 0).to_i },
+      total_followers: valid_metrics.values.sum { |m| (m[:followers] || 0).to_i },
+      engagement_rate: calculate_engagement_rate(valid_metrics)
     }
+  end
+  
+  private
+  
+  def calculate_engagement_rate(metrics)
+    return nil if metrics.empty?
+    
+    total_engagement = metrics.values.sum { |m| (m[:total_engagement] || 0).to_f }
+    total_reach = metrics.values.sum { |m| (m[:reach] || 0).to_i }
+    
+    return nil if total_reach == 0
+    
+    ((total_engagement / total_reach) * 100).round(2)
   end
 
   # GET /api/v1/analytics/posts_count
