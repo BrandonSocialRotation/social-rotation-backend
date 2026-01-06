@@ -230,7 +230,10 @@ class MetaInsightsService
       }
       
       response = HTTParty.get(url, query: params)
-      return nil unless response.success?
+      unless response.success?
+        Rails.logger.error "Error fetching pages: #{response.body}"
+        return nil
+      end
       
       data = JSON.parse(response.body)
       return nil unless data['data']&.any?
@@ -238,7 +241,22 @@ class MetaInsightsService
       # Find the page that has the Instagram account
       data['data'].each do |page|
         if page['instagram_business_account'] && page['instagram_business_account']['id'] == @user.instagram_business_id
-          return page['access_token']
+          page_token = page['access_token']
+          
+          # Debug: Check what permissions this token has
+          debug_token_url = "https://graph.facebook.com/v18.0/debug_token"
+          debug_params = {
+            input_token: page_token,
+            access_token: @user.fb_user_access_key
+          }
+          debug_response = HTTParty.get(debug_token_url, query: debug_params)
+          if debug_response.success?
+            debug_data = JSON.parse(debug_response.body)
+            Rails.logger.info "Page token permissions: #{debug_data.dig('data', 'scopes')&.inspect}"
+            Rails.logger.info "Page token has instagram_manage_insights: #{debug_data.dig('data', 'scopes')&.include?('instagram_manage_insights')}"
+          end
+          
+          return page_token
         end
       end
       
@@ -246,6 +264,7 @@ class MetaInsightsService
       data['data'].first&.dig('access_token')
     rescue => e
       Rails.logger.error "Error getting page access token: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
       nil
     end
   end

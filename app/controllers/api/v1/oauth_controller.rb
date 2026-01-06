@@ -20,8 +20,23 @@ class Api::V1::OauthController < ApplicationController
   
   def facebook_callback
     handle_oauth_callback(:facebook, 'Facebook') do |user, data|
-      user.update!(fb_user_access_key: data['access_token'])
-      fetch_facebook_user_info(user, data['access_token'])
+      user_token = data['access_token']
+      
+      # Debug: Check what permissions the user token has
+      debug_token_url = "https://graph.facebook.com/v18.0/debug_token"
+      debug_params = {
+        input_token: user_token,
+        access_token: ENV['FACEBOOK_APP_ID'] + '|' + ENV['FACEBOOK_APP_SECRET']
+      }
+      debug_response = HTTParty.get(debug_token_url, query: debug_params)
+      if debug_response.success?
+        debug_data = JSON.parse(debug_response.body)
+        Rails.logger.info "User token permissions: #{debug_data.dig('data', 'scopes')&.inspect}"
+        Rails.logger.info "User token has instagram_manage_insights: #{debug_data.dig('data', 'scopes')&.include?('instagram_manage_insights')}"
+      end
+      
+      user.update!(fb_user_access_key: user_token)
+      fetch_facebook_user_info(user, user_token)
       fetch_instagram_account(user)
     end
   end
