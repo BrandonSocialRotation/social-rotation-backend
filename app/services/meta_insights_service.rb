@@ -35,11 +35,17 @@ class MetaInsightsService
   end
 
   def fetch_live_summary(range)
-    return mock_summary(range) unless live_available?
+    unless live_available?
+      Rails.logger.warn "MetaInsightsService: Live data not available - instagram_business_id: #{@user.instagram_business_id.present?}, fb_user_access_key: #{@user.fb_user_access_key.present?}"
+      return mock_summary(range)
+    end
     
     begin
       page_token = get_page_access_token
-      return mock_summary(range) unless page_token
+      unless page_token
+        Rails.logger.warn "MetaInsightsService: Could not get page access token for user #{@user.id}"
+        return mock_summary(range)
+      end
       
       period = 'day'
       # Get Hootsuite-style metrics (removed impressions and reach as requested)
@@ -54,10 +60,18 @@ class MetaInsightsService
       }
       
       # Add date range
-      if range == '28d'
+      case range.to_s
+      when '24h'
+        insights_params[:since] = 24.hours.ago.to_i
+        insights_params[:until] = Time.now.to_i
+      when '30d'
+        insights_params[:since] = 30.days.ago.to_i
+        insights_params[:until] = Time.now.to_i
+      when '28d'
         insights_params[:since] = 28.days.ago.to_i
         insights_params[:until] = Time.now.to_i
       else
+        # Default to 7 days
         insights_params[:since] = 7.days.ago.to_i
         insights_params[:until] = Time.now.to_i
       end
@@ -65,7 +79,17 @@ class MetaInsightsService
       response = HTTParty.get(insights_url, query: insights_params)
       
       unless response.success?
-        Rails.logger.error "Instagram Insights API error: #{response.body}"
+        error_body = response.body
+        Rails.logger.error "Instagram Insights API error: #{error_body}"
+        Rails.logger.error "Instagram Insights API URL: #{insights_url}"
+        Rails.logger.error "Instagram Insights API Params: #{insights_params.except(:access_token).inspect}"
+        # Try to parse error for more details
+        begin
+          error_data = JSON.parse(error_body)
+          Rails.logger.error "Instagram Insights API Error Details: #{error_data.inspect}"
+        rescue
+          # Not JSON, that's fine
+        end
         return mock_summary(range)
       end
       
@@ -90,10 +114,17 @@ class MetaInsightsService
         access_token: page_token
       }
       account_response = HTTParty.get(account_url, query: account_params)
+      
+      unless account_response.success?
+        Rails.logger.error "Instagram Account API error: #{account_response.body}"
+      end
+      
       account_data = account_response.success? ? JSON.parse(account_response.body) : {}
       
       followers = account_data['followers_count']&.to_i || 0
       posts_count = account_data['media_count']&.to_i || 0
+      
+      Rails.logger.info "MetaInsightsService: Fetched data for user #{@user.id} - Followers: #{followers}, Likes: #{metrics_hash['likes'] || 0}, Comments: #{metrics_hash['comments'] || 0}"
       
       # Calculate Hootsuite-style metrics
       likes = metrics_hash['likes'] || 0
