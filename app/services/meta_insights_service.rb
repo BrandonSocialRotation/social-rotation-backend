@@ -57,6 +57,7 @@ class MetaInsightsService
       insights_params = {
         metric: metric_list,
         period: period,
+        metric_type: 'total_value',  # Required for these metrics
         access_token: page_token
       }
       
