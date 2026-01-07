@@ -77,7 +77,7 @@ namespace :free_accounts do
       stripe_customer_id: "free_account_#{account.id}_#{Time.current.to_i}",
       stripe_subscription_id: nil, # No Stripe subscription for free accounts
       current_period_start: Time.current,
-      current_period_end: 1.year.from_now, # Free for 1 year (can extend)
+      current_period_end: 1.month.from_now, # Free for 1 month (can extend)
       cancel_at_period_end: false
     )
     puts "✓ Created free subscription (active until #{subscription.current_period_end.strftime('%Y-%m-%d')})"
@@ -241,7 +241,7 @@ namespace :free_accounts do
           status: Subscription::STATUS_ACTIVE,
           stripe_customer_id: "free_account_#{account.id}_#{Time.current.to_i}",
           current_period_start: Time.current,
-          current_period_end: 1.year.from_now,
+          current_period_end: 1.month.from_now,
           cancel_at_period_end: false
         )
         account.update!(plan: free_plan)
@@ -263,5 +263,42 @@ namespace :free_accounts do
       puts "\nErrors:"
       errors.each { |e| puts "  #{e[:email]}: #{e[:error]}" }
     end
+  end
+  
+  desc "Update all existing free accounts to end on 2026-02-07 (1 month from now)"
+  task update_all_to_one_month: :environment do
+    free_plan = Plan.find_by(name: "Free Access")
+    
+    if free_plan.nil?
+      puts "No Free Access plan found."
+      exit 0
+    end
+    
+    subscriptions = Subscription.where(plan: free_plan)
+    
+    if subscriptions.empty?
+      puts "No free account subscriptions found."
+      exit 0
+    end
+    
+    new_end_date = Date.new(2026, 2, 7).end_of_day
+    updated = 0
+    
+    puts "\n=== Updating Free Account End Dates ==="
+    
+    subscriptions.each do |subscription|
+      account = subscription.account
+      user = account&.users&.first
+      
+      subscription.update!(
+        current_period_end: new_end_date,
+        status: Subscription::STATUS_ACTIVE
+      )
+      
+      puts "✓ Updated: #{user&.name || 'Unknown'} (#{user&.email || 'N/A'}) - Free until 2026-02-07"
+      updated += 1
+    end
+    
+    puts "\n✅ Updated #{updated} free account(s) to expire on 2026-02-07"
   end
 end
