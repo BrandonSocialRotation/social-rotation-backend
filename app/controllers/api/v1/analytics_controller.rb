@@ -533,50 +533,45 @@ class Api::V1::AnalyticsController < ApplicationController
       
       Rails.logger.info "LinkedIn analytics: Using organization #{org_id} (#{org[:name]})"
       
-      # Get follower statistics
+      # Get follower count using networkSizes endpoint (doesn't require Community Management API)
       headers = {
         'Authorization' => "Bearer #{user.linkedin_access_token}",
         'X-Restli-Protocol-Version' => '2.0.0'
       }
       
-      # Get lifetime follower statistics
-      follower_stats_url = "https://api.linkedin.com/v2/organizationalEntityFollowerStatistics"
-      follower_params = {
-        q: 'organizationalEntity',
-        organizationalEntity: org_urn
+      # Use networkSizes endpoint - works with r_organization_social scope (no Community Management API needed)
+      network_sizes_url = "https://api.linkedin.com/v2/networkSizes/#{org_urn}"
+      network_params = {
+        edgeType: 'COMPANY_FOLLOWED_BY_MEMBER'  # Get followers count
       }
       
-      follower_response = HTTParty.get(follower_stats_url, headers: headers, query: follower_params)
+      follower_response = HTTParty.get(network_sizes_url, headers: headers, query: network_params)
       
       followers = 0
       if follower_response.success?
         follower_data = JSON.parse(follower_response.body)
-        Rails.logger.info "LinkedIn follower stats response: #{follower_data.inspect}"
+        Rails.logger.info "LinkedIn networkSizes response: #{follower_data.inspect}"
         
-        # Extract follower count from the response
-        # The structure varies, but typically has elements with followerCountsByRegion or similar
-        if follower_data['elements']&.any?
-          # Sum up followers from all elements/regions
-          follower_data['elements'].each do |element|
-            if element['followerCountsByRegion']
-              element['followerCountsByRegion'].each do |region_data|
-                followers += region_data['followerCounts']&.values&.sum || 0
-              end
-            elsif element['followerCounts']
-              followers += element['followerCounts'].values.sum { |v| v.to_i }
-            elsif element['organicFollowerCount']
-              followers = element['organicFollowerCount'].to_i
-              break # Use this if available
-            end
-          end
-        end
+        # Extract follower count - firstDegreeSize is the total follower count
+        followers = follower_data['firstDegreeSize']&.to_i || 0
         
-        # If we still don't have followers, try alternative structure
-        if followers == 0 && follower_data['organicFollowerCount']
-          followers = follower_data['organicFollowerCount'].to_i
-        end
+        Rails.logger.info "LinkedIn analytics: Fetched follower count: #{followers} for organization #{org_id}"
       else
-        Rails.logger.warn "LinkedIn follower stats error: #{follower_response.code} - #{follower_response.body}"
+        Rails.logger.warn "LinkedIn networkSizes error: #{follower_response.code} - #{follower_response.body}"
+        
+        # If networkSizes fails, try the organization endpoint to get basic info
+        # (though it might not have follower count)
+        begin
+          org_url = "https://api.linkedin.com/v2/organizations/#{org_id}"
+          org_response = HTTParty.get(org_url, headers: headers)
+          if org_response.success?
+            org_data = JSON.parse(org_response.body)
+            Rails.logger.info "LinkedIn organization response: #{org_data.inspect}"
+            # Organization endpoint doesn't typically include follower count, but worth checking
+          end
+        rescue => e
+          Rails.logger.warn "LinkedIn organization endpoint error: #{e.message}"
+        end
       end
       
       # Get share statistics for engagement metrics
