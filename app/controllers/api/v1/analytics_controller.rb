@@ -214,6 +214,10 @@ class Api::V1::AnalyticsController < ApplicationController
     
     Rails.logger.info "Twitter analytics: Using user_id: #{user_id}"
     
+    # Try to get cached follower count first (cache for 1 hour)
+    cache_key = "twitter_followers_#{user_id}"
+    cached_followers = Rails.cache.read(cache_key)
+    
     # Get user metrics using Twitter API v2
     response = access_token.get("/2/users/#{user_id}?user.fields=public_metrics")
     
@@ -227,27 +231,43 @@ class Api::V1::AnalyticsController < ApplicationController
       public_metrics = data.dig('data', 'public_metrics') || {}
       followers = public_metrics['followers_count']&.to_i || 0
       
+      # Cache the follower count for 1 hour
+      if followers > 0
+        Rails.cache.write(cache_key, followers, expires_in: 1.hour)
+        Rails.logger.info "Twitter analytics: Cached follower count: #{followers} for user #{user_id}"
+      end
+      
       Rails.logger.info "Twitter analytics: Fetched follower count: #{followers} for user #{user_id} (public_metrics: #{public_metrics.inspect})"
     else
       # Handle rate limit or other errors
       error_data = parse_twitter_error(response)
       Rails.logger.warn "Twitter API error fetching user metrics (#{response.code}): #{error_data[:message]}"
       
-      # If it's a rate limit (429), mark it but continue - we'll return a helpful error message
+      # If it's a rate limit (429), use cached value if available
       if response.code == '429'
         rate_limited = true
-        Rails.logger.warn "Twitter rate limit on user metrics endpoint (429). Followers will be 0 until rate limit resets."
+        if cached_followers.present?
+          followers = cached_followers.to_i
+          Rails.logger.info "Twitter rate limit (429) - using cached follower count: #{followers}"
+        else
+          Rails.logger.warn "Twitter rate limit on user metrics endpoint (429). No cached followers available."
+        end
       else
-        # For other errors, return early
-        return { 
-          message: error_data[:message] || 'Failed to fetch Twitter analytics',
-          followers: 0,
-          likes: 0,
-          comments: 0,
-          shares: 0,
-          engagement_rate: nil,
-          total_engagement: 0
-        }
+        # For other errors, try cached value, otherwise return early
+        if cached_followers.present?
+          followers = cached_followers.to_i
+          Rails.logger.info "Twitter API error - using cached follower count: #{followers}"
+        else
+          return { 
+            message: error_data[:message] || 'Failed to fetch Twitter analytics',
+            followers: 0,
+            likes: 0,
+            comments: 0,
+            shares: 0,
+            engagement_rate: nil,
+            total_engagement: 0
+          }
+        end
       end
     end
     
