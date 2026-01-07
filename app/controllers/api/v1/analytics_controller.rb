@@ -218,6 +218,8 @@ class Api::V1::AnalyticsController < ApplicationController
     response = access_token.get("/2/users/#{user_id}?user.fields=public_metrics")
     
     followers = 0
+    rate_limited = false
+    
     if response.is_a?(Net::HTTPSuccess)
       data = JSON.parse(response.body)
       Rails.logger.info "Twitter user metrics response: #{data.inspect}"
@@ -227,14 +229,14 @@ class Api::V1::AnalyticsController < ApplicationController
       
       Rails.logger.info "Twitter analytics: Fetched follower count: #{followers} for user #{user_id} (public_metrics: #{public_metrics.inspect})"
     else
-      # Handle rate limit or other errors - still try to continue with 0 followers
+      # Handle rate limit or other errors
       error_data = parse_twitter_error(response)
       Rails.logger.warn "Twitter API error fetching user metrics (#{response.code}): #{error_data[:message]}"
       
-      # If it's a rate limit, return error but with followers: 0 so we can still show the error message
-      if response.code == '429' || error_data[:error_code] == 'TWITTER_MONTHLY_LIMIT'
-        # Continue with followers = 0, we'll return the rate limit error after trying to fetch tweets
-        Rails.logger.warn "Twitter rate limit on user metrics endpoint, continuing with followers: 0"
+      # If it's a rate limit (429), mark it but continue - we'll return a helpful error message
+      if response.code == '429'
+        rate_limited = true
+        Rails.logger.warn "Twitter rate limit on user metrics endpoint (429). Followers will be 0 until rate limit resets."
       else
         # For other errors, return early
         return { 
@@ -260,17 +262,32 @@ class Api::V1::AnalyticsController < ApplicationController
                    end_time - 7.days
                  end
     
+    # If we got rate limited on user metrics, return early with helpful message
+    if rate_limited
+      return {
+        message: 'Twitter API rate limit reached',
+        error_code: 'TWITTER_RATE_LIMIT',
+        error_details: 'Twitter API rate limit exceeded. Please wait 15 minutes and try again, or upgrade to Twitter API Basic for higher limits.',
+        followers: followers, # Will be 0 if we couldn't fetch it
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        engagement_rate: nil,
+        total_engagement: 0
+      }
+    end
+    
     # Fetch tweets in the time range
     tweets_data = fetch_twitter_tweets(access_token, user_id, start_time, end_time)
     
-    # Check for rate limit errors
-    if tweets_data[:error] == 'rate_limit' || response.code == '429'
-      Rails.logger.warn "Twitter rate limit reached (followers: #{followers})"
+    # Check for rate limit errors on tweet fetching
+    if tweets_data[:error] == 'rate_limit'
+      Rails.logger.warn "Twitter rate limit reached on tweet fetching (followers: #{followers})"
       return {
         message: 'Twitter API monthly limit reached',
         error_code: 'TWITTER_MONTHLY_LIMIT',
         error_details: 'You have reached your monthly limit of 100 tweets. Please upgrade to Twitter API Basic ($100/month) for unlimited analytics, or wait until your limit resets.',
-        followers: followers, # Include followers if we got them, otherwise 0
+        followers: followers, # Include followers if we got them
         likes: 0,
         comments: 0,
         shares: 0,
