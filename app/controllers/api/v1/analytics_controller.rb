@@ -281,12 +281,25 @@ class Api::V1::AnalyticsController < ApplicationController
     tweets_data = fetch_twitter_tweets(access_token, user_id, start_time, end_time)
     
     # Check for rate limit errors on tweet fetching
-    if tweets_data[:error] == 'rate_limit'
-      Rails.logger.warn "Twitter rate limit reached on tweet fetching (followers: #{followers})"
+    if tweets_data[:error] == 'monthly_cap'
+      Rails.logger.warn "Twitter monthly cap reached on tweet fetching (followers: #{followers})"
       return {
         message: 'Twitter API monthly limit reached',
         error_code: 'TWITTER_MONTHLY_LIMIT',
         error_details: 'You have reached your monthly limit of 100 tweets. Please upgrade to Twitter API Basic ($100/month) for unlimited analytics, or wait until your limit resets.',
+        followers: followers, # Include followers if we got them
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        engagement_rate: nil,
+        total_engagement: 0
+      }
+    elsif tweets_data[:error] == 'rate_limit_429'
+      Rails.logger.warn "Twitter temporary rate limit (429) on tweet fetching (followers: #{followers})"
+      return {
+        message: 'Twitter API rate limit exceeded',
+        error_code: 'TWITTER_RATE_LIMIT',
+        error_details: tweets_data[:message] || 'Twitter API rate limit exceeded. Please wait 15 minutes and try again, or upgrade to Twitter API Basic for higher limits.',
         followers: followers, # Include followers if we got them
         likes: 0,
         comments: 0,
@@ -365,15 +378,21 @@ class Api::V1::AnalyticsController < ApplicationController
         
         # Check for rate limit errors (429 = Too Many Requests)
         if response.code == '429'
-          Rails.logger.warn "Twitter API rate limit hit: #{response.body}"
+          Rails.logger.warn "Twitter API rate limit hit (429): #{response.body}"
           error_data = JSON.parse(response.body) rescue {}
-          # Check if it's monthly cap (status 429 with specific error)
-          if error_data.dig('status') == 429 || response.body.include?('limit') || response.body.include?('cap')
-            return { error: 'rate_limit' }
+          
+          # Check error response to distinguish between rate limit and monthly cap
+          error_message = error_data['detail'] || error_data['title'] || response.body.to_s
+          
+          # Monthly cap usually has specific wording, rate limit is just "Too Many Requests"
+          if error_message.include?('monthly') || error_message.include?('cap') || error_message.include?('100')
+            Rails.logger.warn "Twitter monthly cap detected"
+            return { error: 'monthly_cap' }
+          else
+            # This is a temporary rate limit (429), not monthly cap
+            Rails.logger.warn "Twitter temporary rate limit (429) - will retry or return rate limit error"
+            return { error: 'rate_limit_429', message: 'Twitter API rate limit exceeded. Please wait 15 minutes and try again.' }
           end
-          # If it's a temporary rate limit, wait a bit and retry once
-          sleep(1)
-          next
         end
         
         unless response.is_a?(Net::HTTPSuccess)
