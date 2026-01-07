@@ -92,7 +92,11 @@ class Api::V1::AnalyticsController < ApplicationController
     end
     
     # Aggregate totals from platforms that have actual data (not placeholders)
-    valid_metrics = metrics.select { |k, v| v.is_a?(Hash) && !v[:message] }
+    # Include platforms with errors if they have follower data (like Twitter rate limit)
+    valid_metrics = metrics.select { |k, v| v.is_a?(Hash) && (!v[:message] || v[:followers].present?) }
+    
+    # For followers, include ALL platforms that have follower data, even if they have errors
+    all_platforms_with_followers = metrics.select { |k, v| v.is_a?(Hash) && v[:followers].present? }
     
     render json: {
       range: range,
@@ -102,7 +106,7 @@ class Api::V1::AnalyticsController < ApplicationController
       total_likes: valid_metrics.values.sum { |m| (m[:likes] || 0).to_i },
       total_comments: valid_metrics.values.sum { |m| (m[:comments] || 0).to_i },
       total_shares: valid_metrics.values.sum { |m| (m[:shares] || 0).to_i },
-      total_followers: valid_metrics.values.sum { |m| (m[:followers] || 0).to_i },
+      total_followers: all_platforms_with_followers.values.sum { |m| (m[:followers] || 0).to_i },
       engagement_rate: calculate_engagement_rate(valid_metrics)
     }
   end
@@ -202,6 +206,8 @@ class Api::V1::AnalyticsController < ApplicationController
     public_metrics = data.dig('data', 'public_metrics') || {}
     followers = public_metrics['followers_count']&.to_i || 0
     
+    Rails.logger.info "Twitter analytics: Fetched follower count: #{followers} for user #{user_id}"
+    
     # Calculate time range for tweets
     end_time = Time.now
     start_time = case range.to_s
@@ -218,11 +224,12 @@ class Api::V1::AnalyticsController < ApplicationController
     
     # Check for rate limit errors
     if tweets_data[:error] == 'rate_limit'
+      Rails.logger.warn "Twitter rate limit reached, but returning follower count: #{followers}"
       return {
         message: 'Twitter API monthly limit reached',
         error_code: 'TWITTER_MONTHLY_LIMIT',
         error_details: 'You have reached your monthly limit of 100 tweets. Please upgrade to Twitter API Basic ($100/month) for unlimited analytics, or wait until your limit resets.',
-        followers: followers,
+        followers: followers, # Always include followers even with errors
         likes: 0,
         comments: 0,
         shares: 0,
@@ -232,9 +239,10 @@ class Api::V1::AnalyticsController < ApplicationController
     end
     
     if tweets_data[:error]
+      Rails.logger.warn "Twitter tweet fetch error: #{tweets_data[:error]}, but returning follower count: #{followers}"
       return {
         message: tweets_data[:error],
-        followers: followers,
+        followers: followers, # Always include followers even with errors
         likes: 0,
         comments: 0,
         shares: 0,
