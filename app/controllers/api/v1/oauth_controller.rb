@@ -228,10 +228,28 @@ class Api::V1::OauthController < ApplicationController
     access_token = request_token.get_access_token(oauth_verifier: params[:oauth_verifier])
     
     # Update user with Twitter credentials
-    user.update!(
+      # Fetch user ID from Twitter API (OAuth 1.0a doesn't always return it in params)
+      twitter_user_id = access_token.params['user_id']
+      unless twitter_user_id.present?
+        begin
+          # Use OAuth access token to create a consumer and fetch user ID
+          consumer = ::OAuth::Consumer.new(consumer_key, consumer_secret, site: 'https://api.twitter.com')
+          oauth_access_token = ::OAuth::AccessToken.new(consumer, access_token.token, access_token.secret)
+          user_response = oauth_access_token.get('/2/users/me')
+          if user_response.is_a?(Net::HTTPSuccess)
+            user_data = JSON.parse(user_response.body)
+            twitter_user_id = user_data.dig('data', 'id')
+            Rails.logger.info "Twitter OAuth: Fetched user_id from API: #{twitter_user_id}"
+          end
+        rescue => e
+          Rails.logger.warn "Twitter OAuth: Could not fetch user_id: #{e.message}"
+        end
+      end
+      
+      user.update!(
       twitter_oauth_token: access_token.token,
       twitter_oauth_token_secret: access_token.secret,
-      twitter_user_id: access_token.params['user_id'],
+      twitter_user_id: twitter_user_id,
       twitter_screen_name: access_token.params['screen_name']
     )
     
