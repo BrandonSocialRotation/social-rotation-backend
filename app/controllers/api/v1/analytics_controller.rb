@@ -271,90 +271,82 @@ class Api::V1::AnalyticsController < ApplicationController
   end
 
   def fetch_twitter_tweets(access_token, user_id, start_time, end_time)
-    all_tweet_ids = []
+    total_likes = 0
+    total_comments = 0
+    total_shares = 0
     next_token = nil
-    max_requests = 10 # Limit to prevent hitting monthly cap too quickly
+    request_count = 0
+    max_requests = 5 # Limit requests to conserve monthly API quota (100 tweets/month on Free tier)
     
     begin
-      # Fetch tweets with pagination
+      # Fetch tweets with pagination - get metrics directly in the first call to save API quota
       loop do
+        request_count += 1
+        break if request_count > max_requests
+        
         url = "/2/users/#{user_id}/tweets"
         params = {
-          max_results: 100,
+          max_results: 100, # Max per request
           start_time: start_time.iso8601,
           end_time: end_time.iso8601,
-          'tweet.fields' => 'id,created_at,public_metrics'
+          'tweet.fields' => 'id,created_at,public_metrics' # Get metrics in the same call
         }
         params[:pagination_token] = next_token if next_token.present?
         
+        # Build query string
         query_string = params.map { |k, v| "#{k}=#{CGI.escape(v.to_s)}" }.join('&')
         response = access_token.get("#{url}?#{query_string}")
         
-        # Check for rate limit errors
+        # Check for rate limit errors (429 = Too Many Requests)
         if response.code == '429'
+          Rails.logger.warn "Twitter API rate limit hit: #{response.body}"
           error_data = JSON.parse(response.body) rescue {}
-          if error_data.dig('status') == 429
+          # Check if it's monthly cap (status 429 with specific error)
+          if error_data.dig('status') == 429 || response.body.include?('limit') || response.body.include?('cap')
             return { error: 'rate_limit' }
           end
+          # If it's a temporary rate limit, wait a bit and retry once
+          sleep(1)
+          next
         end
         
         unless response.is_a?(Net::HTTPSuccess)
           error_data = parse_twitter_error(response)
+          Rails.logger.error "Twitter API error (#{response.code}): #{error_data[:message]}"
           return { error: error_data[:message] || 'Failed to fetch tweets' }
         end
         
         data = JSON.parse(response.body)
         tweets = data['data'] || []
         
-        # Extract tweet IDs
-        all_tweet_ids.concat(tweets.map { |t| t['id'] })
-        
-        # Check pagination
-        next_token = data.dig('meta', 'next_token')
-        break unless next_token.present?
-        break if all_tweet_ids.length >= 1000 # Safety limit
-        max_requests -= 1
-        break if max_requests <= 0
-      end
-      
-      # If no tweets found, return zeros
-      if all_tweet_ids.empty?
-        return { likes: 0, comments: 0, shares: 0 }
-      end
-      
-      # Batch fetch metrics for tweets (100 at a time)
-      total_likes = 0
-      total_comments = 0
-      total_shares = 0
-      
-      all_tweet_ids.each_slice(100) do |tweet_ids_batch|
-        ids_string = tweet_ids_batch.join(',')
-        response = access_token.get("/2/tweets?ids=#{ids_string}&tweet.fields=public_metrics")
-        
-        # Check for rate limit
-        if response.code == '429'
-          return { error: 'rate_limit' }
-        end
-        
-        unless response.is_a?(Net::HTTPSuccess)
-          Rails.logger.warn "Twitter batch fetch error: #{response.body}"
-          next
-        end
-        
-        data = JSON.parse(response.body)
-        tweets = data['data'] || []
-        
+        # Aggregate metrics directly from the response (no need for second API call!)
         tweets.each do |tweet|
           metrics = tweet['public_metrics'] || {}
           total_likes += metrics['like_count']&.to_i || 0
           total_comments += metrics['reply_count']&.to_i || 0
+          # Shares = retweets + quote tweets
           total_shares += (metrics['retweet_count']&.to_i || 0) + (metrics['quote_count']&.to_i || 0)
         end
+        
+        Rails.logger.info "Twitter analytics: Fetched #{tweets.length} tweets, Total so far - Likes: #{total_likes}, Comments: #{total_comments}, Shares: #{total_shares}"
+        
+        # Check pagination
+        next_token = data.dig('meta', 'next_token')
+        break unless next_token.present?
+        
+        # Safety limit to prevent excessive API usage
+        break if (total_likes + total_comments + total_shares) > 0 && request_count >= max_requests
       end
       
+      Rails.logger.info "Twitter analytics final totals - Likes: #{total_likes}, Comments: #{total_comments}, Shares: #{total_shares}"
+      
       { likes: total_likes, comments: total_comments, shares: total_shares }
+    rescue JSON::ParserError => e
+      Rails.logger.error "Twitter API JSON parse error: #{e.message}"
+      { error: 'Failed to parse Twitter API response' }
     rescue => e
-      Rails.logger.error "Error fetching Twitter tweets: #{e.message}"
+      Rails.logger.error "Error fetching Twitter tweets: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
       { error: 'Failed to fetch tweet metrics' }
     end
   end
