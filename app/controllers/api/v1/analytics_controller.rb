@@ -557,9 +557,36 @@ class Api::V1::AnalyticsController < ApplicationController
         
         Rails.logger.info "LinkedIn analytics: Fetched follower count: #{followers} for organization #{org_id}"
       else
-        Rails.logger.warn "LinkedIn networkSizes error: #{follower_response.code} - #{follower_response.body}"
+        error_body = follower_response.body
+        Rails.logger.warn "LinkedIn networkSizes error: #{follower_response.code} - #{error_body}"
         
-        # If networkSizes fails, try the organization endpoint to get basic info
+        # Check if it's a permissions/access denied error (403 or 401)
+        if follower_response.code == 403 || follower_response.code == 401
+          error_data = begin
+            JSON.parse(error_body)
+          rescue
+            {}
+          end
+          
+          # Check if error mentions Community Management API or insufficient permissions
+          error_message = error_data['message'] || error_body.to_s
+          if error_message.include?('Community Management') || 
+             error_message.include?('insufficient permissions') ||
+             error_message.include?('not authorized') ||
+             error_message.include?('access denied')
+            return {
+              message: 'LinkedIn metrics require Community Management API access. Please apply for access in your LinkedIn Developer Portal and complete identity verification.',
+              followers: 0,
+              likes: 0,
+              comments: 0,
+              shares: 0,
+              engagement_rate: nil,
+              total_engagement: 0
+            }
+          end
+        end
+        
+        # If networkSizes fails for other reasons, try the organization endpoint to get basic info
         # (though it might not have follower count)
         begin
           org_url = "https://api.linkedin.com/v2/organizations/#{org_id}"
