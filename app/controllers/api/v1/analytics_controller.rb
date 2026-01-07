@@ -377,20 +377,22 @@ class Api::V1::AnalyticsController < ApplicationController
         response = access_token.get("#{url}?#{query_string}")
         
         # Check for rate limit errors (429 = Too Many Requests)
+        # Twitter API v2 returns 429 for BOTH rate limits AND monthly caps, but with different titles
         if response.code == '429'
-          Rails.logger.warn "Twitter API rate limit hit (429): #{response.body}"
+          Rails.logger.warn "Twitter API 429 error: #{response.body}"
           error_data = JSON.parse(response.body) rescue {}
           
-          # Check error response to distinguish between rate limit and monthly cap
-          error_message = error_data['detail'] || error_data['title'] || response.body.to_s
+          # Check the title to distinguish between rate limit and monthly cap
+          error_title = error_data['title'] || ''
+          error_detail = error_data['detail'] || ''
           
-          # Monthly cap usually has specific wording, rate limit is just "Too Many Requests"
-          if error_message.include?('monthly') || error_message.include?('cap') || error_message.include?('100')
-            Rails.logger.warn "Twitter monthly cap detected"
+          # Monthly cap has "UsageCapExceeded" title
+          if error_title.include?('UsageCapExceeded') || error_detail.include?('Monthly product cap') || error_detail.include?('monthly')
+            Rails.logger.warn "Twitter monthly cap detected from error response"
             return { error: 'monthly_cap' }
           else
-            # This is a temporary rate limit (429), not monthly cap
-            Rails.logger.warn "Twitter temporary rate limit (429) - will retry or return rate limit error"
+            # Regular rate limit (429) - "Too Many Requests"
+            Rails.logger.warn "Twitter temporary rate limit (429) detected"
             return { error: 'rate_limit_429', message: 'Twitter API rate limit exceeded. Please wait 15 minutes and try again.' }
           end
         end
@@ -439,24 +441,33 @@ class Api::V1::AnalyticsController < ApplicationController
   def parse_twitter_error(response)
     begin
       error_data = JSON.parse(response.body)
+      
+      # Check for monthly cap (UsageCapExceeded)
+      if error_data['title'] == 'UsageCapExceeded' || error_data['detail']&.include?('Monthly product cap')
+        return {
+          message: 'Twitter API monthly limit reached',
+          error_code: 'TWITTER_MONTHLY_LIMIT'
+        }
+      end
+      
+      # Check for rate limit (Too Many Requests)
+      if error_data['title'] == 'Too Many Requests' || response.code == '429'
+        return {
+          message: 'Twitter API rate limit exceeded',
+          error_code: 'TWITTER_RATE_LIMIT'
+        }
+      end
+      
       error_obj = error_data['errors']&.first || error_data['error']
       
       if error_obj.is_a?(Hash)
         error_code = error_obj['code'] || error_obj['type']
         error_message = error_obj['message'] || error_obj['detail']
         
-        # Check for monthly cap error
-        if error_code == 429 || error_message&.include?('limit') || error_message&.include?('cap')
-          return {
-            message: 'Twitter API monthly limit reached',
-            error_code: 'TWITTER_MONTHLY_LIMIT'
-          }
-        end
-        
         return { message: error_message || 'Twitter API error' }
       end
       
-      { message: error_obj.to_s }
+      { message: error_data['detail'] || error_data['title'] || "Twitter API error: #{response.code}" }
     rescue
       { message: "Twitter API error: #{response.code}" }
     end
