@@ -181,34 +181,73 @@ class Api::V1::AnalyticsController < ApplicationController
     
     unless user_id.present?
       # Fetch user ID from Twitter API
-      response = access_token.get('/2/users/me?user.fields=public_metrics')
-      if response.is_a?(Net::HTTPSuccess)
-        data = JSON.parse(response.body)
-        user_id = data.dig('data', 'id')
-        # Store user_id for future use
-        user.update_column(:twitter_user_id, user_id) if user_id.present?
+      begin
+        response = access_token.get('/2/users/me?user.fields=public_metrics')
+        if response.is_a?(Net::HTTPSuccess)
+          data = JSON.parse(response.body)
+          user_id = data.dig('data', 'id')
+          # Store user_id for future use
+          if user_id.present?
+            user.update_column(:twitter_user_id, user_id)
+            Rails.logger.info "Twitter analytics: Stored user_id: #{user_id}"
+          end
+        else
+          Rails.logger.warn "Twitter API error fetching user_id: #{response.code} - #{response.body}"
+        end
+      rescue => e
+        Rails.logger.error "Twitter API exception fetching user_id: #{e.message}"
       end
     end
     
-    return { message: 'Could not fetch Twitter user ID' } unless user_id.present?
+    unless user_id.present?
+      Rails.logger.error "Twitter analytics: No user_id available (stored: #{user.twitter_user_id.present?}, fetched: false)"
+      return { 
+        message: 'Could not fetch Twitter user ID. Please reconnect your Twitter account.',
+        followers: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        engagement_rate: nil,
+        total_engagement: 0
+      }
+    end
+    
+    Rails.logger.info "Twitter analytics: Using user_id: #{user_id}"
     
     # Get user metrics using Twitter API v2
     response = access_token.get("/2/users/#{user_id}?user.fields=public_metrics")
     
-    unless response.is_a?(Net::HTTPSuccess)
+    followers = 0
+    if response.is_a?(Net::HTTPSuccess)
+      data = JSON.parse(response.body)
+      Rails.logger.info "Twitter user metrics response: #{data.inspect}"
+      
+      public_metrics = data.dig('data', 'public_metrics') || {}
+      followers = public_metrics['followers_count']&.to_i || 0
+      
+      Rails.logger.info "Twitter analytics: Fetched follower count: #{followers} for user #{user_id} (public_metrics: #{public_metrics.inspect})"
+    else
+      # Handle rate limit or other errors - still try to continue with 0 followers
       error_data = parse_twitter_error(response)
-      Rails.logger.error "Twitter API error fetching user metrics: #{response.code} - #{response.body}"
-      return error_data if error_data[:message]
-      return { message: 'Failed to fetch Twitter analytics' }
+      Rails.logger.warn "Twitter API error fetching user metrics (#{response.code}): #{error_data[:message]}"
+      
+      # If it's a rate limit, return error but with followers: 0 so we can still show the error message
+      if response.code == '429' || error_data[:error_code] == 'TWITTER_MONTHLY_LIMIT'
+        # Continue with followers = 0, we'll return the rate limit error after trying to fetch tweets
+        Rails.logger.warn "Twitter rate limit on user metrics endpoint, continuing with followers: 0"
+      else
+        # For other errors, return early
+        return { 
+          message: error_data[:message] || 'Failed to fetch Twitter analytics',
+          followers: 0,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          engagement_rate: nil,
+          total_engagement: 0
+        }
+      end
     end
-    
-    data = JSON.parse(response.body)
-    Rails.logger.info "Twitter user metrics response: #{data.inspect}"
-    
-    public_metrics = data.dig('data', 'public_metrics') || {}
-    followers = public_metrics['followers_count']&.to_i || 0
-    
-    Rails.logger.info "Twitter analytics: Fetched follower count: #{followers} for user #{user_id} (public_metrics: #{public_metrics.inspect})"
     
     # Calculate time range for tweets
     end_time = Time.now
@@ -225,13 +264,13 @@ class Api::V1::AnalyticsController < ApplicationController
     tweets_data = fetch_twitter_tweets(access_token, user_id, start_time, end_time)
     
     # Check for rate limit errors
-    if tweets_data[:error] == 'rate_limit'
-      Rails.logger.warn "Twitter rate limit reached, but returning follower count: #{followers}"
+    if tweets_data[:error] == 'rate_limit' || response.code == '429'
+      Rails.logger.warn "Twitter rate limit reached (followers: #{followers})"
       return {
         message: 'Twitter API monthly limit reached',
         error_code: 'TWITTER_MONTHLY_LIMIT',
         error_details: 'You have reached your monthly limit of 100 tweets. Please upgrade to Twitter API Basic ($100/month) for unlimited analytics, or wait until your limit resets.',
-        followers: followers, # Always include followers even with errors
+        followers: followers, # Include followers if we got them, otherwise 0
         likes: 0,
         comments: 0,
         shares: 0,
