@@ -82,4 +82,27 @@ Plan.find_or_create_by(name: "Agency Enterprise") do |plan|
   plan.sort_order = 30
 end
 
+# Free plan (for free access accounts - not shown in public plans)
+Plan.find_or_create_by(name: "Free Access") do |plan|
+  plan.plan_type = 'personal'
+  plan.price_cents = 0 # Free
+  plan.base_price_cents = 0
+  plan.per_user_price_cents = 0
+  plan.per_user_price_after_10_cents = 0
+  plan.supports_per_user_pricing = false
+  plan.billing_period = 'monthly'
+  plan.max_locations = 0
+  plan.max_users = 1
+  plan.max_buckets = 10
+  plan.max_images_per_bucket = 100
+  plan.features_hash = {
+    'rss' => true,
+    'marketplace' => false,
+    'watermark' => true,
+    'analytics' => true
+  }
+  plan.status = false # Hidden from public plans
+  plan.sort_order = 0
+end
+
 puts "✅ Default plans created!"
