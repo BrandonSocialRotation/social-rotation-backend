@@ -86,9 +86,15 @@ class Api::V1::AnalyticsController < ApplicationController
       end
     end
     
-    # LinkedIn analytics (placeholder for now)
+    # LinkedIn analytics
     if platforms_to_fetch.include?(:linkedin) && current_user.linkedin_access_token.present?
-      metrics[:linkedin] = { message: 'LinkedIn analytics coming soon' }
+      begin
+        linkedin_data = fetch_linkedin_analytics(current_user, range)
+        metrics[:linkedin] = linkedin_data
+      rescue => e
+        Rails.logger.error "LinkedIn analytics error: #{e.message}"
+        metrics[:linkedin] = { message: 'LinkedIn analytics unavailable' }
+      end
     end
     
     # Aggregate totals from platforms that have actual data (not placeholders)
@@ -490,6 +496,106 @@ class Api::V1::AnalyticsController < ApplicationController
       { message: error_data['detail'] || error_data['title'] || "Twitter API error: #{response.code}" }
     rescue
       { message: "Twitter API error: #{response.code}" }
+    end
+  end
+
+  def fetch_linkedin_analytics(user, range)
+    unless user.linkedin_access_token.present?
+      return { message: 'LinkedIn not connected' }
+    end
+
+    begin
+      # Get organization URN - try to get from stored data or fetch it
+      org_urn = nil
+      org_id = nil
+      
+      # Try to get organization from user's stored data or fetch organizations
+      linkedin_service = SocialMedia::LinkedinService.new(user)
+      organizations = linkedin_service.fetch_organizations
+      
+      if organizations.empty?
+        Rails.logger.warn "LinkedIn analytics: No organizations found for user #{user.id}"
+        return {
+          message: 'No LinkedIn Company Page found. LinkedIn analytics require a Company Page.',
+          followers: 0,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          engagement_rate: nil,
+          total_engagement: 0
+        }
+      end
+      
+      # Use the first organization (or we could let user select)
+      org = organizations.first
+      org_id = org[:id]
+      org_urn = org[:urn] || "urn:li:organization:#{org_id}"
+      
+      Rails.logger.info "LinkedIn analytics: Using organization #{org_id} (#{org[:name]})"
+      
+      # Get follower statistics
+      headers = {
+        'Authorization' => "Bearer #{user.linkedin_access_token}",
+        'X-Restli-Protocol-Version' => '2.0.0'
+      }
+      
+      # Get lifetime follower statistics
+      follower_stats_url = "https://api.linkedin.com/v2/organizationalEntityFollowerStatistics"
+      follower_params = {
+        q: 'organizationalEntity',
+        organizationalEntity: org_urn
+      }
+      
+      follower_response = HTTParty.get(follower_stats_url, headers: headers, query: follower_params)
+      
+      followers = 0
+      if follower_response.success?
+        follower_data = JSON.parse(follower_response.body)
+        Rails.logger.info "LinkedIn follower stats response: #{follower_data.inspect}"
+        
+        # Extract follower count from the response
+        # The structure varies, but typically has elements with followerCountsByRegion or similar
+        if follower_data['elements']&.any?
+          # Sum up followers from all elements/regions
+          follower_data['elements'].each do |element|
+            if element['followerCountsByRegion']
+              element['followerCountsByRegion'].each do |region_data|
+                followers += region_data['followerCounts']&.values&.sum || 0
+              end
+            elsif element['followerCounts']
+              followers += element['followerCounts'].values.sum { |v| v.to_i }
+            elsif element['organicFollowerCount']
+              followers = element['organicFollowerCount'].to_i
+              break # Use this if available
+            end
+          end
+        end
+        
+        # If we still don't have followers, try alternative structure
+        if followers == 0 && follower_data['organicFollowerCount']
+          followers = follower_data['organicFollowerCount'].to_i
+        end
+      else
+        Rails.logger.warn "LinkedIn follower stats error: #{follower_response.code} - #{follower_response.body}"
+      end
+      
+      # Get share statistics for engagement metrics
+      # Note: LinkedIn API doesn't provide easy access to likes/comments/shares like Instagram
+      # We'd need to fetch individual posts and aggregate, which is complex
+      # For now, return follower count and placeholder engagement metrics
+      
+      {
+        followers: followers,
+        likes: 0,  # LinkedIn API doesn't provide easy aggregated likes
+        comments: 0,  # LinkedIn API doesn't provide easy aggregated comments
+        shares: 0,  # LinkedIn API doesn't provide easy aggregated shares
+        engagement_rate: nil,
+        total_engagement: 0
+      }
+    rescue => e
+      Rails.logger.error "LinkedIn analytics exception: #{e.class} - #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      { message: 'LinkedIn analytics error' }
     end
   end
 end
