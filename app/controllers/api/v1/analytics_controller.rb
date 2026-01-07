@@ -197,16 +197,18 @@ class Api::V1::AnalyticsController < ApplicationController
     
     unless response.is_a?(Net::HTTPSuccess)
       error_data = parse_twitter_error(response)
+      Rails.logger.error "Twitter API error fetching user metrics: #{response.code} - #{response.body}"
       return error_data if error_data[:message]
-      Rails.logger.error "Twitter API error: #{response.body}"
       return { message: 'Failed to fetch Twitter analytics' }
     end
     
     data = JSON.parse(response.body)
+    Rails.logger.info "Twitter user metrics response: #{data.inspect}"
+    
     public_metrics = data.dig('data', 'public_metrics') || {}
     followers = public_metrics['followers_count']&.to_i || 0
     
-    Rails.logger.info "Twitter analytics: Fetched follower count: #{followers} for user #{user_id}"
+    Rails.logger.info "Twitter analytics: Fetched follower count: #{followers} for user #{user_id} (public_metrics: #{public_metrics.inspect})"
     
     # Calculate time range for tweets
     end_time = Time.now
