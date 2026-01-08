@@ -173,35 +173,73 @@ RSpec.describe Account, type: :model do
 
   describe '#has_active_subscription?' do
     let(:account) { create(:account) }
-    let(:plan) { create(:plan) }
+    let(:paid_plan) { create(:plan, name: 'Personal', price_cents: 4900) }
+    let(:free_plan) { create(:plan, name: 'Free Access', price_cents: 0) }
 
     it 'returns false when no subscription exists' do
       expect(account.has_active_subscription?).to be false
     end
 
     it 'returns true when subscription is active' do
-      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_ACTIVE)
+      subscription = create(:subscription, account: account, plan: paid_plan, status: Subscription::STATUS_ACTIVE)
       account.update!(subscription: subscription)
       expect(account.has_active_subscription?).to be true
     end
 
     it 'returns true when subscription is trialing' do
-      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_TRIALING)
+      subscription = create(:subscription, account: account, plan: paid_plan, status: Subscription::STATUS_TRIALING)
       account.update!(subscription: subscription)
       expect(account.has_active_subscription?).to be true
     end
 
     it 'returns false when subscription is canceled' do
-      subscription = create(:subscription, account: account, plan: plan, status: Subscription::STATUS_CANCELED)
+      subscription = create(:subscription, account: account, plan: paid_plan, status: Subscription::STATUS_CANCELED)
       account.update!(subscription: subscription)
       expect(account.has_active_subscription?).to be false
     end
 
     it 'handles subscription errors gracefully' do
-      subscription = create(:subscription, account: account, plan: plan)
+      subscription = create(:subscription, account: account, plan: paid_plan)
       account.update!(subscription: subscription)
       allow(subscription).to receive(:active?).and_raise(StandardError.new('Error'))
       expect(account.has_active_subscription?).to be false
+    end
+    
+    context 'with Free Access plan' do
+      it 'returns true when free subscription is not expired' do
+        subscription = create(:subscription,
+          account: account,
+          plan: free_plan,
+          status: Subscription::STATUS_ACTIVE,
+          current_period_end: 1.month.from_now
+        )
+        account.update!(subscription: subscription)
+        expect(account.has_active_subscription?).to be true
+      end
+      
+      it 'returns false when free subscription is expired' do
+        subscription = create(:subscription,
+          account: account,
+          plan: free_plan,
+          status: Subscription::STATUS_ACTIVE,
+          current_period_end: 1.day.ago
+        )
+        account.update!(subscription: subscription)
+        expect(account.has_active_subscription?).to be false
+      end
+    end
+    
+    context 'with paid plan' do
+      it 'returns true even if current_period_end is in the past (Stripe manages it)' do
+        subscription = create(:subscription,
+          account: account,
+          plan: paid_plan,
+          status: Subscription::STATUS_ACTIVE,
+          current_period_end: 1.day.ago  # Past, but Stripe webhooks update this
+        )
+        account.update!(subscription: subscription)
+        expect(account.has_active_subscription?).to be true
+      end
     end
   end
 

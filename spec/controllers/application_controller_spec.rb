@@ -296,6 +296,57 @@ RSpec.describe ApplicationController, type: :controller do
         expect(json_response['subscription_suspended']).to be true
       end
     end
+    
+    context 'when free subscription is expired' do
+      let(:free_plan) { create(:plan, name: 'Free Access', price_cents: 0) }
+      let(:subscription) do
+        create(:subscription,
+          account: account,
+          plan: free_plan,
+          status: Subscription::STATUS_ACTIVE,
+          current_period_end: 1.day.ago  # Expired
+        )
+      end
+
+      before do
+        user.update!(account: account)
+        account.update!(subscription: subscription)
+      end
+
+      it 'blocks access and returns free trial expired error with payment required' do
+        get :index
+        expect(response).to have_http_status(:forbidden)
+        json_response = JSON.parse(response.body)
+        expect(json_response['error']).to eq('Free trial expired')
+        expect(json_response['message']).to include('Payment information is needed')
+        expect(json_response['subscription_required']).to be true
+        expect(json_response['subscription_status']).to eq('expired')
+        expect(json_response['payment_required']).to be true
+        expect(json_response['redirect_to']).to eq('/profile')
+      end
+    end
+    
+    context 'when paid subscription has past current_period_end (Stripe manages it)' do
+      let(:paid_plan) { create(:plan, name: 'Personal', price_cents: 4900) }
+      let(:subscription) do
+        create(:subscription,
+          account: account,
+          plan: paid_plan,
+          status: Subscription::STATUS_ACTIVE,
+          current_period_end: 1.day.ago  # Past, but Stripe webhooks update this
+        )
+      end
+
+      before do
+        user.update!(account: account)
+        account.update!(subscription: subscription)
+      end
+
+      it 'allows access (trusts Stripe status, not expiration date)' do
+        get :index
+        expect(response).to have_http_status(:ok)
+      end
+    end
 
     context 'when no subscription exists' do
       before do

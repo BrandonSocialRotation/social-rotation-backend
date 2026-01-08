@@ -63,6 +63,9 @@ RSpec.describe Subscription, type: :model do
   end
 
   describe '#active?' do
+    let(:paid_plan) { create(:plan, name: 'Personal', price_cents: 4900) }
+    let(:free_plan) { create(:plan, name: 'Free Access', price_cents: 0) }
+    
     it 'returns true for active status' do
       subscription = create(:subscription, status: Subscription::STATUS_ACTIVE)
       expect(subscription.active?).to be true
@@ -81,6 +84,55 @@ RSpec.describe Subscription, type: :model do
     it 'returns false for past_due status' do
       subscription = create(:subscription, status: Subscription::STATUS_PAST_DUE)
       expect(subscription.active?).to be false
+    end
+    
+    context 'with Free Access plan' do
+      it 'returns true when current_period_end is in the future' do
+        subscription = create(:subscription,
+          status: Subscription::STATUS_ACTIVE,
+          plan: free_plan,
+          current_period_end: 1.month.from_now
+        )
+        expect(subscription.active?).to be true
+      end
+      
+      it 'returns false when current_period_end is in the past' do
+        subscription = create(:subscription,
+          status: Subscription::STATUS_ACTIVE,
+          plan: free_plan,
+          current_period_end: 1.day.ago
+        )
+        expect(subscription.active?).to be false
+      end
+      
+      it 'returns true when current_period_end is nil' do
+        subscription = create(:subscription,
+          status: Subscription::STATUS_ACTIVE,
+          plan: free_plan,
+          current_period_end: nil
+        )
+        expect(subscription.active?).to be true
+      end
+    end
+    
+    context 'with paid plan' do
+      it 'returns true even if current_period_end is in the past (trusts Stripe status)' do
+        subscription = create(:subscription,
+          status: Subscription::STATUS_ACTIVE,
+          plan: paid_plan,
+          current_period_end: 1.day.ago  # Past date, but Stripe manages it
+        )
+        expect(subscription.active?).to be true
+      end
+      
+      it 'returns true when current_period_end is in the future' do
+        subscription = create(:subscription,
+          status: Subscription::STATUS_ACTIVE,
+          plan: paid_plan,
+          current_period_end: 1.month.from_now
+        )
+        expect(subscription.active?).to be true
+      end
     end
   end
 
