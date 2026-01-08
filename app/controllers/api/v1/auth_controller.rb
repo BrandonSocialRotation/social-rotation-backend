@@ -281,13 +281,14 @@ class Api::V1::AuthController < ApplicationController
       frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
       reset_url = "#{frontend_url.chomp('/')}/reset-password?token=#{user.password_reset_token}"
       
-      # TODO: Send email with reset link
-      # For now, log it (in production, you'd send an email)
-      Rails.logger.info "Password reset requested for #{email}"
-      Rails.logger.info "Reset URL: #{reset_url}"
-      
-      # In production, uncomment this to send email:
-      # PasswordResetMailer.reset_password_email(user, reset_url).deliver_now
+      # Send password reset email
+      begin
+        PasswordResetMailer.reset_password_email(user, reset_url).deliver_now
+        Rails.logger.info "Password reset email sent to #{email}"
+      rescue => e
+        Rails.logger.error "Failed to send password reset email to #{email}: #{e.message}"
+        # Still return success for security (don't reveal email delivery issues)
+      end
     end
     
     # Always return success for security (don't reveal if email exists)
