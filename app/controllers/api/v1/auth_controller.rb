@@ -287,6 +287,8 @@ class Api::V1::AuthController < ApplicationController
         Rails.logger.info "Password reset email sent to #{email}"
       rescue => e
         Rails.logger.error "Failed to send password reset email to #{email}: #{e.message}"
+        # Log the reset URL so it can be retrieved from logs if email isn't configured
+        Rails.logger.info "PASSWORD RESET URL for #{email}: #{reset_url}"
         # Still return success for security (don't reveal email delivery issues)
       end
     end

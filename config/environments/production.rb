@@ -77,9 +77,33 @@ Rails.application.configure do
 
   config.action_mailer.perform_caching = false
 
-  # Ignore bad email addresses and do not raise email delivery errors.
-  # Set this to true and configure the email server for immediate delivery to raise delivery errors.
-  # config.action_mailer.raise_delivery_errors = false
+  # Configure SMTP for email delivery
+  # Set environment variables: SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+  # For SendGrid: smtp.sendgrid.net, port 587
+  # For Mailgun: smtp.mailgun.org, port 587
+  # For Gmail: smtp.gmail.com, port 587
+  if ENV['SMTP_HOST'].present?
+    config.action_mailer.delivery_method = :smtp
+    config.action_mailer.smtp_settings = {
+      address: ENV['SMTP_HOST'],
+      port: ENV['SMTP_PORT']&.to_i || 587,
+      domain: ENV['SMTP_DOMAIN'] || 'socialrotation.app',
+      user_name: ENV['SMTP_USERNAME'],
+      password: ENV['SMTP_PASSWORD'],
+      authentication: ENV['SMTP_AUTH']&.to_sym || :plain,
+      enable_starttls_auto: ENV['SMTP_STARTTLS'] != 'false'
+    }
+    config.action_mailer.raise_delivery_errors = true
+    config.action_mailer.default_url_options = { host: ENV['FRONTEND_URL']&.gsub(/^https?:\/\//, '') || 'my.socialrotation.app', protocol: 'https' }
+  else
+    # Fallback to log delivery if SMTP not configured
+    config.action_mailer.delivery_method = :smtp
+    config.action_mailer.smtp_settings = {
+      address: 'localhost',
+      port: 25
+    }
+    config.action_mailer.raise_delivery_errors = false
+  end
 
   # Enable locale fallbacks for I18n (makes lookups for any locale fall back to
   # the I18n.default_locale when a translation cannot be found).
