@@ -47,13 +47,16 @@ class Account < ApplicationRecord
   end
   
   # Check if account has active subscription
-  # Subscription must be active AND not expired (current_period_end must be in the future)
+  # For Free Access plans: Also checks if current_period_end has passed
+  # For paid plans: Trusts Stripe subscription status (auto-renewed)
   def has_active_subscription?
     return false unless subscription
     return false unless subscription.active? rescue false
     
-    # Double-check: if subscription has an end date, it must be in the future
-    if subscription.current_period_end
+    # Additional check only for Free Access plans
+    # Paid plans are managed by Stripe and auto-renew, so we trust the status
+    is_free_plan = subscription.plan&.name == "Free Access"
+    if is_free_plan && subscription.current_period_end
       return false if subscription.current_period_end < Time.current
     end
     

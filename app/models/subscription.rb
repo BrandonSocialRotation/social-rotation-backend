@@ -26,13 +26,22 @@ class Subscription < ApplicationRecord
   STATUS_INCOMPLETE_EXPIRED = 'incomplete_expired'
   
   # Check if subscription is active
-  # Must have active status AND not be past the end date
+  # For Free Access plans: Must have active status AND not be past the end date
+  # For paid plans: Trust Stripe status (current_period_end is auto-updated by Stripe webhooks)
   def active?
     return false unless status == STATUS_ACTIVE || status == STATUS_TRIALING
-    return true unless current_period_end # If no end date, consider active
     
-    # Check if current_period_end has passed
-    current_period_end >= Time.current
+    # Only check expiration date for Free Access plans
+    # Paid plans have Stripe subscriptions that auto-renew, so we trust the status
+    is_free_plan = plan&.name == "Free Access"
+    
+    if is_free_plan && current_period_end
+      # For free plans, check if end date has passed
+      return current_period_end >= Time.current
+    end
+    
+    # For paid plans or plans without end date, trust the status
+    true
   end
   
   # Check if subscription is canceled
