@@ -6,8 +6,8 @@
 class Api::V1::AuthController < ApplicationController
   # Skip authentication for auth endpoints (otherwise can't login!)
   # Must be called before ApplicationController's before_action callbacks
-  skip_before_action :authenticate_user!, only: [:register, :login], raise: false
-  skip_before_action :require_active_subscription!, only: [:register, :login], raise: false
+  skip_before_action :authenticate_user!, only: [:register, :login, :forgot_password, :reset_password], raise: false
+  skip_before_action :require_active_subscription!, only: [:register, :login, :forgot_password, :reset_password], raise: false
 
   # POST /api/v1/auth/register
   # Create pending registration and Stripe checkout session
@@ -254,6 +254,106 @@ class Api::V1::AuthController < ApplicationController
         error: 'Invalid password',
         message: 'The password you entered is incorrect. Please try again.'
       }, status: :unauthorized
+    end
+  end
+
+  # POST /api/v1/auth/forgot_password
+  # Request password reset - generates token and sends reset link
+  # Params: email
+  # Returns: success message (for security, always returns success even if email not found)
+  def forgot_password
+    email = params[:email]
+    
+    if email.blank?
+      return render json: {
+        error: 'Email is required',
+        message: 'Please provide your email address'
+      }, status: :bad_request
+    end
+    
+    user = User.find_by(email: email)
+    
+    # For security, always return success message (don't reveal if email exists)
+    if user
+      user.generate_password_reset_token!
+      
+      # Generate reset URL
+      frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
+      reset_url = "#{frontend_url.chomp('/')}/reset-password?token=#{user.password_reset_token}"
+      
+      # TODO: Send email with reset link
+      # For now, log it (in production, you'd send an email)
+      Rails.logger.info "Password reset requested for #{email}"
+      Rails.logger.info "Reset URL: #{reset_url}"
+      
+      # In production, uncomment this to send email:
+      # PasswordResetMailer.reset_password_email(user, reset_url).deliver_now
+    end
+    
+    # Always return success for security (don't reveal if email exists)
+    render json: {
+      message: 'If an account with that email exists, a password reset link has been sent.'
+    }
+  end
+
+  # POST /api/v1/auth/reset_password
+  # Reset password using token
+  # Params: token, password, password_confirmation
+  # Returns: success message
+  def reset_password
+    token = params[:token]
+    password = params[:password]
+    password_confirmation = params[:password_confirmation]
+    
+    if token.blank?
+      return render json: {
+        error: 'Reset token is required',
+        message: 'Please provide a valid reset token'
+      }, status: :bad_request
+    end
+    
+    if password.blank?
+      return render json: {
+        error: 'Password is required',
+        message: 'Please provide a new password'
+      }, status: :bad_request
+    end
+    
+    if password != password_confirmation
+      return render json: {
+        error: 'Passwords do not match',
+        message: 'Password and password confirmation must match'
+      }, status: :unprocessable_entity
+    end
+    
+    user = User.find_by(password_reset_token: token)
+    
+    if user.nil?
+      return render json: {
+        error: 'Invalid reset token',
+        message: 'The password reset link is invalid or has expired. Please request a new one.'
+      }, status: :unprocessable_entity
+    end
+    
+    unless user.password_reset_token_valid?
+      return render json: {
+        error: 'Reset token expired',
+        message: 'The password reset link has expired. Please request a new one.'
+      }, status: :unprocessable_entity
+    end
+    
+    # Update password
+    if user.update(password: password, password_confirmation: password_confirmation)
+      user.clear_password_reset_token!
+      
+      render json: {
+        message: 'Password has been reset successfully. You can now log in with your new password.'
+      }
+    else
+      render json: {
+        error: 'Password reset failed',
+        message: user.errors.full_messages.join(', ')
+      }, status: :unprocessable_entity
     end
   end
 

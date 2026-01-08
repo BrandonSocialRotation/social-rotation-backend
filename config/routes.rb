@@ -28,6 +28,8 @@ Rails.application.routes.draw do
       post 'auth/register', to: 'auth#register'
       post 'auth/logout', to: 'auth#logout'
       post 'auth/refresh', to: 'auth#refresh'
+      post 'auth/forgot_password', to: 'auth#forgot_password'
+      post 'auth/reset_password', to: 'auth#reset_password'
       
       # OAuth routes
       get 'oauth/facebook/login', to: 'oauth#facebook_login'

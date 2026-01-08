@@ -171,6 +171,32 @@ class User < ApplicationRecord
   # Scope for active users
   scope :active, -> { where(status: 1) }
 
+  # PASSWORD RESET METHODS
+  
+  # Generate a secure password reset token
+  def generate_password_reset_token!
+    self.password_reset_token = SecureRandom.urlsafe_base64(32)
+    self.password_reset_sent_at = Time.current
+    save!(validate: false) # Skip validations to allow saving just the token
+  end
+  
+  # Check if password reset token is valid and not expired
+  # Tokens expire after 1 hour
+  def password_reset_token_valid?
+    return false unless password_reset_token.present?
+    return false unless password_reset_sent_at.present?
+    
+    # Token expires after 1 hour
+    password_reset_sent_at > 1.hour.ago
+  end
+  
+  # Clear password reset token after successful reset
+  def clear_password_reset_token!
+    self.password_reset_token = nil
+    self.password_reset_sent_at = nil
+    save!(validate: false)
+  end
+
   private
 
   # Caches Rails environment (development/test/production) to avoid repeated lookups
