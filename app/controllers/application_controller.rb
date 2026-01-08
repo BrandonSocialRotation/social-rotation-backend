@@ -73,7 +73,21 @@ class ApplicationController < ActionController::API
     account = @current_user&.account
     subscription = account&.subscription
     
-    if subscription && subscription.canceled?
+    # Check if free subscription expired
+    is_expired = subscription&.current_period_end && subscription.current_period_end < Time.current
+    is_free_plan = subscription&.plan&.name == "Free Access"
+    
+    if is_expired && is_free_plan
+      render json: {
+        error: 'Free trial expired',
+        message: 'Your free trial has ended. Payment information is needed for the app to continue.',
+        subscription_required: true,
+        subscription_status: 'expired',
+        redirect_to: '/profile',
+        payment_required: true
+      }, status: :forbidden
+      return
+    elsif subscription && subscription.canceled?
       render json: {
         error: 'Subscription needed to post',
         message: 'Subscription needed to post',
@@ -199,9 +213,26 @@ class ApplicationController < ActionController::API
     begin
       subscription = account.subscription
       if subscription
-        # If subscription exists but is not active (suspended/canceled), allow access but show warning
+        # Check if subscription is expired (past current_period_end)
+        is_expired = subscription.current_period_end && subscription.current_period_end < Time.current
+        is_free_plan = subscription.plan&.name == "Free Access"
+        
+        # If subscription exists but is not active (suspended/canceled, or expired)
         unless account.has_active_subscription?
-          # Add warning headers so frontend can display subscription status
+          # Special handling for expired free accounts - redirect to payment
+          if is_expired && is_free_plan
+            render json: {
+              error: 'Free trial expired',
+              message: 'Your free trial has ended. Payment information is needed for the app to continue.',
+              subscription_required: true,
+              subscription_status: 'expired',
+              redirect_to: '/profile', # Redirect to profile/subscription page
+              payment_required: true
+            }, status: :forbidden
+            return
+          end
+          
+          # For other inactive subscriptions, allow access but show warning
           response.headers['X-Subscription-Status'] = subscription.status || 'inactive'
           response.headers['X-Subscription-Message'] = 'Your subscription is not active. Please update your payment method to continue using the app.'
           return

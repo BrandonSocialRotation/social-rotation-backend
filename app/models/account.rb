@@ -47,9 +47,20 @@ class Account < ApplicationRecord
   end
   
   # Check if account has active subscription
+  # Subscription must be active AND not expired (current_period_end must be in the future)
   def has_active_subscription?
     return false unless subscription
-    subscription.active? rescue false
+    return false unless subscription.active? rescue false
+    
+    # Double-check: if subscription has an end date, it must be in the future
+    if subscription.current_period_end
+      return false if subscription.current_period_end < Time.current
+    end
+    
+    true
+  rescue => e
+    Rails.logger.error "Error checking subscription: #{e.message}"
+    false
   end
   
   # Get current subscription

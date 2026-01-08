@@ -26,8 +26,13 @@ class Subscription < ApplicationRecord
   STATUS_INCOMPLETE_EXPIRED = 'incomplete_expired'
   
   # Check if subscription is active
+  # Must have active status AND not be past the end date
   def active?
-    status == STATUS_ACTIVE || status == STATUS_TRIALING
+    return false unless status == STATUS_ACTIVE || status == STATUS_TRIALING
+    return true unless current_period_end # If no end date, consider active
+    
+    # Check if current_period_end has passed
+    current_period_end >= Time.current
   end
   
   # Check if subscription is canceled
