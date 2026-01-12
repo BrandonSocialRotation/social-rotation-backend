@@ -98,7 +98,9 @@ Rails.application.configure do
       authentication: ENV['SMTP_AUTH']&.to_sym || :plain,
       enable_starttls_auto: !use_ssl && ENV['SMTP_STARTTLS'] != 'false',
       enable_ssl: use_ssl,
-      openssl_verify_mode: 'none' # Some cPanel setups need this
+      openssl_verify_mode: 'none', # Some cPanel setups need this
+      read_timeout: 10, # Increase timeout to 10 seconds
+      open_timeout: 10  # Increase connection timeout to 10 seconds
     }
     config.action_mailer.raise_delivery_errors = true
     config.action_mailer.default_url_options = { host: ENV['FRONTEND_URL']&.gsub(/^https?:\/\//, '') || 'my.socialrotation.app', protocol: 'https' }
