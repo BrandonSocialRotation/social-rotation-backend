@@ -279,8 +279,8 @@ class Api::V1::AuthController < ApplicationController
       
       # Generate reset URL
       frontend_url = ENV['FRONTEND_URL'] || 'https://my.socialrotation.app'
-      # Remove trailing slash and ensure proper URL construction
-      base_url = frontend_url.to_s.chomp('/')
+      # Remove any trailing slashes and ensure proper URL construction
+      base_url = frontend_url.to_s.gsub(/\/+$/, '')
       reset_url = "#{base_url}/reset-password?token=#{user.password_reset_token}"
       
       # Send password reset email
