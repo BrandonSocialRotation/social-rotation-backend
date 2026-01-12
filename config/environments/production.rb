@@ -82,16 +82,23 @@ Rails.application.configure do
   # For SendGrid: smtp.sendgrid.net, port 587
   # For Mailgun: smtp.mailgun.org, port 587
   # For Gmail: smtp.gmail.com, port 587
+  # For cPanel: mail.yourdomain.com, port 465 (SSL) or 587 (STARTTLS)
   if ENV['SMTP_HOST'].present?
+    smtp_port = ENV['SMTP_PORT']&.to_i || 587
+    # Port 465 uses SSL/TLS directly, port 587 uses STARTTLS
+    use_ssl = smtp_port == 465
+    
     config.action_mailer.delivery_method = :smtp
     config.action_mailer.smtp_settings = {
       address: ENV['SMTP_HOST'],
-      port: ENV['SMTP_PORT']&.to_i || 587,
-      domain: ENV['SMTP_DOMAIN'] || 'socialrotation.app',
+      port: smtp_port,
+      domain: ENV['SMTP_DOMAIN'] || 'socialrotation.com',
       user_name: ENV['SMTP_USERNAME'],
       password: ENV['SMTP_PASSWORD'],
       authentication: ENV['SMTP_AUTH']&.to_sym || :plain,
-      enable_starttls_auto: ENV['SMTP_STARTTLS'] != 'false'
+      enable_starttls_auto: !use_ssl && ENV['SMTP_STARTTLS'] != 'false',
+      enable_ssl: use_ssl,
+      openssl_verify_mode: 'none' # Some cPanel setups need this
     }
     config.action_mailer.raise_delivery_errors = true
     config.action_mailer.default_url_options = { host: ENV['FRONTEND_URL']&.gsub(/^https?:\/\//, '') || 'my.socialrotation.app', protocol: 'https' }
