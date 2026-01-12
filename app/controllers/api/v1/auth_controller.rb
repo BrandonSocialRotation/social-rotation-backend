@@ -285,6 +285,8 @@ class Api::V1::AuthController < ApplicationController
       begin
         PasswordResetMailer.reset_password_email(user, reset_url).deliver_now
         Rails.logger.info "Password reset email sent to #{email}"
+        # Log reset URL for debugging (remove in production if security is a concern)
+        Rails.logger.info "PASSWORD RESET URL for #{email}: #{reset_url}"
       rescue => e
         Rails.logger.error "Failed to send password reset email to #{email}: #{e.message}"
         # Log the reset URL so it can be retrieved from logs if email isn't configured
