@@ -171,14 +171,13 @@ class ApplicationController < ActionController::API
   
   # Require active subscription for accessing the app
   # Returns 403 if account doesn't have an active subscription
-  # Allows users with existing accounts to log in even if subscription is suspended/canceled
-  # (so they can manage their subscription), but shows a warning message
+  # Super admins (account_id = 0) have full access forever
+  # Free accounts can access until expiration date
   def require_active_subscription!
     # Skip if no current user (authentication failed or not required)
     return if @current_user.nil?
     
-    # Super admin accounts (account_id = 0) bypass subscription check
-    # Note: account_id = 0 is the old format for personal accounts, should bypass check
+    # Super admin accounts (account_id = 0) bypass subscription check - full access forever
     if @current_user.account_id == 0
       return
     end
@@ -209,39 +208,51 @@ class ApplicationController < ActionController::API
     end
     
     # Check if account has active subscription
-    # Allow access but add warning headers for frontend to display
     begin
       subscription = account.subscription
+      
       if subscription
-        # Check if subscription is expired (past current_period_end)
-        is_expired = subscription.current_period_end && subscription.current_period_end < Time.current
         is_free_plan = subscription.plan&.name == "Free Access"
+        is_expired = subscription.current_period_end && subscription.current_period_end < Time.current
         
-        # If subscription exists but is not active (suspended/canceled, or expired)
-        unless account.has_active_subscription?
-          # Special handling for expired free accounts - redirect to payment
-          if is_expired && is_free_plan
+        # Free accounts: Allow access if not expired
+        if is_free_plan
+          if is_expired
+            # Free account expired - require payment
             render json: {
               error: 'Free trial expired',
               message: 'Your free trial has ended. Payment information is needed for the app to continue.',
               subscription_required: true,
               subscription_status: 'expired',
-              redirect_to: '/profile', # Redirect to profile/subscription page
+              redirect_to: '/profile',
               payment_required: true
             }, status: :forbidden
             return
+          else
+            # Free account still active - allow access
+            return
           end
-          
-          # For other inactive subscriptions, allow access but show warning
+        end
+        
+        # Paid accounts: Check if subscription is active
+        if account.has_active_subscription?
+          # Active subscription - allow access
+          return
+        else
+          # Inactive paid subscription - allow access but show warning
           response.headers['X-Subscription-Status'] = subscription.status || 'inactive'
           response.headers['X-Subscription-Message'] = 'Your subscription is not active. Please update your payment method to continue using the app.'
           return
         end
       else
-        # No subscription at all - allow access but show message
-        # This shouldn't happen with payment-first registration, but handle it
-        response.headers['X-Subscription-Status'] = 'missing'
-        response.headers['X-Subscription-Message'] = 'You need an active subscription to use this feature. Please subscribe to continue.'
+        # No subscription at all - require payment
+        render json: {
+          error: 'Subscription required',
+          message: 'You need an active subscription to use this app. Please subscribe to continue.',
+          subscription_required: true,
+          subscription_status: 'missing',
+          redirect_to: '/register'
+        }, status: :forbidden
         return
       end
     rescue => e
