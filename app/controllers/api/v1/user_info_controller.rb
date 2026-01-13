@@ -463,6 +463,9 @@ class Api::V1::UserInfoController < ApplicationController
       account_type: account_type,
       account_id: user.account_id,
       is_account_admin: user.is_account_admin,
+      super_admin: user.super_admin?,
+      role: user.role,
+      reseller: user.reseller?,
       # Social media connection status
       facebook_connected: user.fb_user_access_key.present?,
       twitter_connected: user.twitter_oauth_token.present?,
