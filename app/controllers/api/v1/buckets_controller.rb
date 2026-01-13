@@ -6,16 +6,27 @@ class Api::V1::BucketsController < ApplicationController
 
   # GET /api/v1/buckets
   def index
-    @buckets = current_user.buckets.includes(:bucket_images, :bucket_schedules)
+    # Get user's own buckets
+    user_buckets = current_user.buckets.user_owned.includes(:bucket_images, :bucket_schedules)
+    
+    # Get global buckets (available to all users)
+    global_buckets = Bucket.global.includes(:bucket_images, :bucket_schedules, :user)
+    
     render json: {
-      buckets: @buckets.map { |bucket| bucket_json(bucket) }
+      buckets: user_buckets.map { |bucket| bucket_json(bucket) },
+      global_buckets: global_buckets.map { |bucket| bucket_json(bucket, include_owner: true) }
     }
   end
 
   # GET /api/v1/buckets/:id
   def show
+    # Allow access to global buckets for all users, or user's own buckets
+    unless @bucket.is_global || @bucket.user_id == current_user.id
+      return render json: { error: 'Bucket not found' }, status: :not_found
+    end
+    
     render json: {
-      bucket: bucket_json(@bucket),
+      bucket: bucket_json(@bucket, include_owner: @bucket.is_global),
       bucket_images: @bucket.bucket_images.includes(:image).map { |bi| bucket_image_json(bi) },
       bucket_videos: @bucket.bucket_videos.includes(:video).map { |bv| bucket_video_json(bv) },
       bucket_schedules: @bucket.bucket_schedules.map { |bs| bucket_schedule_json(bs) }
@@ -25,6 +36,16 @@ class Api::V1::BucketsController < ApplicationController
   # POST /api/v1/buckets
   def create
     @bucket = current_user.buckets.build(bucket_params)
+    
+    # Only super admins can create global buckets
+    if params[:bucket][:is_global] == true || params[:bucket][:is_global] == 'true'
+      unless current_user.super_admin?
+        return render json: {
+          error: 'Only super admins can create global buckets'
+        }, status: :forbidden
+      end
+      @bucket.is_global = true
+    end
     
     if @bucket.save
       render json: {
@@ -40,9 +61,24 @@ class Api::V1::BucketsController < ApplicationController
 
   # PATCH/PUT /api/v1/buckets/:id
   def update
-    if @bucket.update(bucket_params)
+    # Only super admins can update global buckets, or users can update their own buckets
+    if @bucket.is_global && !current_user.super_admin?
+      return render json: { error: 'Only super admins can update global buckets' }, status: :forbidden
+    end
+    
+    unless @bucket.user_id == current_user.id || (@bucket.is_global && current_user.super_admin?)
+      return render json: { error: 'Bucket not found' }, status: :not_found
+    end
+    
+    # Only super admins can change is_global status
+    update_params = bucket_params
+    if params[:bucket][:is_global].present? && !current_user.super_admin?
+      update_params = update_params.except(:is_global)
+    end
+    
+    if @bucket.update(update_params)
       render json: {
-        bucket: bucket_json(@bucket),
+        bucket: bucket_json(@bucket, include_owner: @bucket.is_global),
         message: 'Bucket updated successfully'
       }
     else
@@ -54,6 +90,15 @@ class Api::V1::BucketsController < ApplicationController
 
   # DELETE /api/v1/buckets/:id
   def destroy
+    # Only super admins can delete global buckets, or users can delete their own buckets
+    if @bucket.is_global && !current_user.super_admin?
+      return render json: { error: 'Only super admins can delete global buckets' }, status: :forbidden
+    end
+    
+    unless @bucket.user_id == current_user.id || (@bucket.is_global && current_user.super_admin?)
+      return render json: { error: 'Bucket not found' }, status: :not_found
+    end
+    
     @bucket.destroy
     render json: { message: 'Bucket deleted successfully' }
   end
@@ -420,25 +465,51 @@ class Api::V1::BucketsController < ApplicationController
   def for_scheduling
     ignore_post_now = params[:ignore_post_now] == 'true'
     
+    # Get user's own buckets
+    user_buckets = current_user.buckets.user_owned
     if ignore_post_now
-      @buckets = current_user.buckets.where(post_once_bucket: false)
-    else
-      @buckets = current_user.buckets
+      user_buckets = user_buckets.where(post_once_bucket: false)
+    end
+    
+    # Get global buckets (available to all users)
+    global_buckets = Bucket.global
+    if ignore_post_now
+      global_buckets = global_buckets.where(post_once_bucket: false)
     end
 
     render json: {
-      buckets: @buckets.map { |bucket| bucket_json(bucket) }
+      buckets: user_buckets.map { |bucket| bucket_json(bucket) },
+      global_buckets: global_buckets.map { |bucket| bucket_json(bucket, include_owner: true) }
     }
   end
 
   private
 
   def set_bucket
-    @bucket = current_user.buckets.find(params[:id])
+    # Allow access to global buckets or user's own buckets
+    @bucket = Bucket.find_by(id: params[:id])
+    
+    unless @bucket && (@bucket.is_global || @bucket.user_id == current_user.id)
+      render json: { error: 'Bucket not found' }, status: :not_found
+    end
   end
 
   def set_bucket_for_image_actions
-    @bucket = current_user.buckets.find(params[:id])
+    # Only allow modifying images in user's own buckets or global buckets (if super admin)
+    @bucket = Bucket.find_by(id: params[:id])
+    
+    unless @bucket
+      return render json: { error: 'Bucket not found' }, status: :not_found
+    end
+    
+    # Users can only modify their own buckets, super admins can modify global buckets
+    if @bucket.is_global
+      unless current_user.super_admin?
+        return render json: { error: 'Only super admins can modify global buckets' }, status: :forbidden
+      end
+    elsif @bucket.user_id != current_user.id
+      return render json: { error: 'Bucket not found' }, status: :not_found
+    end
   end
 
   def set_bucket_image
@@ -446,26 +517,41 @@ class Api::V1::BucketsController < ApplicationController
   end
 
   def bucket_params
-    params.require(:bucket).permit(:name, :description, :use_watermark, :post_once_bucket)
+    # Only super admins can set is_global
+    permitted = [:name, :description, :use_watermark, :post_once_bucket]
+    permitted << :is_global if current_user&.super_admin?
+    params.require(:bucket).permit(*permitted)
   end
 
   def bucket_image_params
     params.require(:bucket_image).permit(:description, :twitter_description, :use_watermark, :force_send_date, :repeat, :post_to)
   end
 
-  def bucket_json(bucket)
-    {
+  def bucket_json(bucket, include_owner: false)
+    json = {
       id: bucket.id,
       user_id: bucket.user_id,
       name: bucket.name,
       description: bucket.description,
       use_watermark: bucket.use_watermark,
       post_once_bucket: bucket.post_once_bucket,
+      is_global: bucket.is_global || false,
       created_at: bucket.created_at,
       updated_at: bucket.updated_at,
       images_count: bucket.bucket_images.count,
       schedules_count: bucket.bucket_schedules.count
     }
+    
+    # Include owner info for global buckets
+    if include_owner && bucket.is_global && bucket.user
+      json[:owner] = {
+        id: bucket.user.id,
+        name: bucket.user.name,
+        email: bucket.user.email
+      }
+    end
+    
+    json
   end
 
   def bucket_image_json(bucket_image)

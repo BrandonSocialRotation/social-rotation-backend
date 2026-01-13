@@ -28,6 +28,10 @@ class Bucket < ApplicationRecord
   # SCOPES
   # Find marketplace buckets (account_id = 0 means it's for sale)
   scope :is_market, -> { where(account_id: 0) }
+  # Find global buckets (available to all users)
+  scope :global, -> { where(is_global: true) }
+  # Find user-owned buckets (not global)
+  scope :user_owned, -> { where(is_global: false) }
   
   # Check if this bucket is listed in marketplace
   # Returns: true if bucket is for sale, false otherwise
