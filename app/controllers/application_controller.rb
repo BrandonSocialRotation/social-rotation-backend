@@ -178,13 +178,22 @@ class ApplicationController < ActionController::API
     return if @current_user.nil?
     
     # Super admin accounts (account_id = 0) bypass subscription check - full access forever
-    if @current_user.account_id == 0
+    # Also check using the super_admin? method for safety
+    if @current_user.account_id == 0 || @current_user.super_admin?
+      Rails.logger.info "Super admin access granted for user #{@current_user.id} (#{@current_user.email})"
       return
     end
     
     # If user has no account yet (account_id = nil), they need to complete payment
     # This enforces payment-first registration - account only created after payment
+    # BUT: Skip this check if user is somehow a super admin (defensive check)
     if @current_user.account_id.nil?
+      # Double-check if this might be a super admin that wasn't set up correctly
+      if @current_user.email.in?(['jbickler4@gmail.com', 'bwolfe317@gmail.com', 'modonnell1915@gmail.com'])
+        Rails.logger.warn "Super admin user #{@current_user.email} has nil account_id - allowing access anyway"
+        return
+      end
+      
       render json: {
         error: 'Account not activated',
         message: 'Please complete payment to activate your account.',
