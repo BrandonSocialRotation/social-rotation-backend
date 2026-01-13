@@ -7,8 +7,11 @@ class Api::V1::UserInfoController < ApplicationController
       # Fetch YouTube channel name if missing (non-blocking)
       fetch_youtube_channel_name_if_missing(current_user)
       
+      user_data = user_json(current_user)
+      Rails.logger.info "UserInfoController#show - User #{current_user.id} (#{current_user.email}): account_id=#{current_user.account_id}, super_admin=#{user_data[:super_admin]}"
+      
       render json: {
-        user: user_json(current_user),
+        user: user_data,
         connected_accounts: get_connected_accounts
       }
     rescue => e
