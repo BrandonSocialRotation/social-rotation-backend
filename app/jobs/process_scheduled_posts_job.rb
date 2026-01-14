@@ -67,7 +67,10 @@ class ProcessScheduledPostsJob < ApplicationJob
     return false unless cron_string.present?
     
     parts = cron_string.split(' ')
-    return false unless parts.length == 5
+    unless parts.length == 5
+      Rails.logger.warn "Invalid cron format: #{cron_string} (expected 5 parts, got #{parts.length})"
+      return false
+    end
     
     minute, hour, day, month, weekday = parts
     
@@ -76,21 +79,33 @@ class ProcessScheduledPostsJob < ApplicationJob
     # Check minute (exact match or wildcard)
     # Handle leading zeros by converting to integer
     minute_val = minute == '*' ? '*' : minute.to_i
-    return false unless minute_val == '*' || minute_val == now.min
+    unless minute_val == '*' || minute_val == now.min
+      Rails.logger.debug "Cron minute mismatch: #{minute_val} != #{now.min} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      return false
+    end
     
     # Check hour (exact match or wildcard)
     hour_val = hour == '*' ? '*' : hour.to_i
-    return false unless hour_val == '*' || hour_val == now.hour
+    unless hour_val == '*' || hour_val == now.hour
+      Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{now.hour} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      return false
+    end
     
     # Check day of month (exact match or wildcard)
     # For rotation schedules, day is usually '*'
     day_val = day == '*' ? '*' : day.to_i
-    return false unless day_val == '*' || day_val == now.day
+    unless day_val == '*' || day_val == now.day
+      Rails.logger.debug "Cron day mismatch: #{day_val} != #{now.day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      return false
+    end
     
     # Check month (exact match or wildcard)
     # For rotation schedules, month is usually '*'
     month_val = month == '*' ? '*' : month.to_i
-    return false unless month_val == '*' || month_val == now.month
+    unless month_val == '*' || month_val == now.month
+      Rails.logger.debug "Cron month mismatch: #{month_val} != #{now.month} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      return false
+    end
     
     # Check weekday
     # Cron format: 0-6 (0=Sunday) or 1-7 (1=Monday) depending on system
@@ -100,10 +115,13 @@ class ProcessScheduledPostsJob < ApplicationJob
       weekdays = weekday.split(',').map(&:to_i)
       current_weekday = now.wday
       # Cron typically uses 0-6 where 0=Sunday, same as Rails
-      return false unless weekdays.include?(current_weekday)
+      unless weekdays.include?(current_weekday)
+        Rails.logger.debug "Cron weekday mismatch: #{weekdays.inspect} does not include #{current_weekday} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        return false
+      end
     end
     
-    Rails.logger.debug "Cron match: #{cron_string} matches current time #{now.strftime('%Y-%m-%d %H:%M:%S')}"
+    Rails.logger.info "✓ Cron match: #{cron_string} matches current time #{now.strftime('%Y-%m-%d %H:%M:%S')}"
     true
   end
 
@@ -164,19 +182,28 @@ class ProcessScheduledPostsJob < ApplicationJob
     return false unless schedule.bucket
     return false unless schedule.bucket.user
     
-    # Check if schedule item is due based on cron expression
-    return false unless cron_due?(item.schedule)
+    Rails.logger.debug "Checking schedule item #{item.id} (schedule: #{item.schedule})"
     
-    # Check if this item has already been sent (for once-type schedules)
-    # We'll track this via send history with schedule_item_id
+    # Check if schedule item is due based on cron expression
+    unless cron_due?(item.schedule)
+      Rails.logger.debug "Schedule item #{item.id} is not due yet"
+      return false
+    end
+    
+    # Check if this item has already been sent
+    # For MULTIPLE schedules, each item should post once at its scheduled time
+    # We track this via send history with schedule_item_id
     last_sent = schedule.bucket_send_histories
                        .where(bucket_image_id: item.bucket_image_id)
                        .where(schedule_item_id: item.id)
                        .exists?
     
-    # For ONCE schedules, don't re-post if already sent
-    return false if last_sent && schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_ONCE
+    if last_sent
+      Rails.logger.info "Schedule item #{item.id} has already been sent, skipping"
+      return false
+    end
     
+    Rails.logger.info "✓ Schedule item #{item.id} is due and ready to post"
     true
   end
   
