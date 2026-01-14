@@ -56,13 +56,24 @@ class Api::V1::BucketSchedulesController < ApplicationController
       # Create schedule_items if provided (for multiple images with different times)
       if params[:schedule_items].present? && params[:schedule_items].is_a?(Array)
         params[:schedule_items].each_with_index do |item_params, index|
-          @bucket_schedule.schedule_items.create!(
+          schedule_item = @bucket_schedule.schedule_items.create!(
             bucket_image_id: item_params[:bucket_image_id],
             schedule: item_params[:schedule] || @bucket_schedule.schedule,
             description: item_params[:description] || '',
             twitter_description: item_params[:twitter_description] || '',
             position: index
           )
+          
+          # Schedule the job to run at the exact time specified in the cron
+          scheduled_time = parse_cron_to_datetime(schedule_item.schedule)
+          if scheduled_time && scheduled_time > Time.current
+            PostScheduleItemJob.set(wait_until: scheduled_time).perform_later(schedule_item.id)
+            Rails.logger.info "Scheduled PostScheduleItemJob for schedule_item #{schedule_item.id} to run at #{scheduled_time}"
+          elsif scheduled_time && scheduled_time <= Time.current
+            Rails.logger.warn "Schedule item #{schedule_item.id} has a time in the past (#{scheduled_time}), not scheduling job"
+          else
+            Rails.logger.error "Could not parse cron string #{schedule_item.schedule} for schedule_item #{schedule_item.id}"
+          end
         end
       end
       
@@ -348,6 +359,43 @@ class Api::V1::BucketSchedulesController < ApplicationController
     end
     
     json
+  end
+
+  # Parse cron string to datetime
+  # Cron format: "minute hour day month weekday"
+  # For our use case: "30 14 15 1 *" means Jan 15 at 14:30
+  def parse_cron_to_datetime(cron_string)
+    return nil unless cron_string.present?
+    
+    parts = cron_string.split(' ')
+    return nil unless parts.length == 5
+    
+    minute, hour, day, month, weekday = parts
+    
+    # If any required part is a wildcard, we can't determine exact time
+    return nil if minute == '*' || hour == '*' || day == '*' || month == '*'
+    
+    begin
+      minute_val = minute.to_i
+      hour_val = hour.to_i
+      day_val = day.to_i
+      month_val = month.to_i
+      
+      # Get current year (or next year if date has passed)
+      now = Time.current
+      year = now.year
+      
+      # If the scheduled date is in the past for this year, use next year
+      scheduled_time = Time.new(year, month_val, day_val, hour_val, minute_val)
+      if scheduled_time < now
+        scheduled_time = Time.new(year + 1, month_val, day_val, hour_val, minute_val)
+      end
+      
+      scheduled_time
+    rescue => e
+      Rails.logger.error "Error parsing cron string #{cron_string}: #{e.message}"
+      nil
+    end
   end
 
   def send_history_json(send_history)
