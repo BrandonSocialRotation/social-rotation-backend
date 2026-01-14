@@ -53,6 +53,19 @@ class Api::V1::BucketSchedulesController < ApplicationController
     end
     
     if @bucket_schedule.save
+      # Create schedule_items if provided (for multiple images with different times)
+      if params[:schedule_items].present? && params[:schedule_items].is_a?(Array)
+        params[:schedule_items].each_with_index do |item_params, index|
+          @bucket_schedule.schedule_items.create!(
+            bucket_image_id: item_params[:bucket_image_id],
+            schedule: item_params[:schedule] || @bucket_schedule.schedule,
+            description: item_params[:description] || '',
+            twitter_description: item_params[:twitter_description] || '',
+            position: index
+          )
+        end
+      end
+      
       render json: {
         bucket_schedule: bucket_schedule_json(@bucket_schedule),
         message: 'Schedule created successfully'
@@ -292,7 +305,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
   end
 
   def bucket_schedule_json(bucket_schedule)
-    {
+    json = {
       id: bucket_schedule.id,
       schedule: bucket_schedule.schedule,
       schedule_type: bucket_schedule.schedule_type,
@@ -315,6 +328,26 @@ class Api::V1::BucketSchedulesController < ApplicationController
       created_at: bucket_schedule.created_at,
       updated_at: bucket_schedule.updated_at
     }
+    
+    # Include schedule_items if they exist
+    if bucket_schedule.schedule_items.any?
+      json[:schedule_items] = bucket_schedule.schedule_items.ordered.map do |item|
+        {
+          id: item.id,
+          bucket_image_id: item.bucket_image_id,
+          schedule: item.schedule,
+          description: item.description,
+          twitter_description: item.twitter_description,
+          position: item.position,
+          bucket_image: item.bucket_image ? {
+            id: item.bucket_image.id,
+            friendly_name: item.bucket_image.friendly_name
+          } : nil
+        }
+      end
+    end
+    
+    json
   end
 
   def send_history_json(send_history)

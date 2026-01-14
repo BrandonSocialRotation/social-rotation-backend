@@ -106,6 +106,7 @@ Rails.application.routes.draw do
           post 'rotation_create', to: 'bucket_schedules#rotation_create'
           post 'date_create', to: 'bucket_schedules#date_create'
         end
+        resources :schedule_items, only: [:create, :update, :destroy]
       end
 
       # Scheduler routes
