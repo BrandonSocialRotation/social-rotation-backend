@@ -85,35 +85,41 @@ class ProcessScheduledPostsJob < ApplicationJob
     minute, hour, day, month, weekday = parts
     
     now = Time.current
+    current_minute = now.min
+    current_hour = now.hour
+    current_day = now.day
+    current_month = now.month
     
-    # Check minute (exact match or wildcard)
-    # Handle leading zeros by converting to integer
+    Rails.logger.debug "Checking cron: #{cron_string} against current time: #{now.strftime('%Y-%m-%d %H:%M:%S')} (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
+    
+    # Check minute - allow match within the current minute (since scheduler runs every minute)
+    # This handles the case where scheduler runs at 14:55:30 and we're checking for 14:55
     minute_val = minute == '*' ? '*' : minute.to_i
-    unless minute_val == '*' || minute_val == now.min
-      Rails.logger.debug "Cron minute mismatch: #{minute_val} != #{now.min} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+    unless minute_val == '*' || minute_val == current_minute
+      Rails.logger.debug "Cron minute mismatch: #{minute_val} != #{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
       return false
     end
     
     # Check hour (exact match or wildcard)
     hour_val = hour == '*' ? '*' : hour.to_i
-    unless hour_val == '*' || hour_val == now.hour
-      Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{now.hour} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+    unless hour_val == '*' || hour_val == current_hour
+      Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{current_hour} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
       return false
     end
     
     # Check day of month (exact match or wildcard)
     # For rotation schedules, day is usually '*'
     day_val = day == '*' ? '*' : day.to_i
-    unless day_val == '*' || day_val == now.day
-      Rails.logger.debug "Cron day mismatch: #{day_val} != #{now.day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+    unless day_val == '*' || day_val == current_day
+      Rails.logger.debug "Cron day mismatch: #{day_val} != #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
       return false
     end
     
     # Check month (exact match or wildcard)
     # For rotation schedules, month is usually '*'
     month_val = month == '*' ? '*' : month.to_i
-    unless month_val == '*' || month_val == now.month
-      Rails.logger.debug "Cron month mismatch: #{month_val} != #{now.month} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+    unless month_val == '*' || month_val == current_month
+      Rails.logger.debug "Cron month mismatch: #{month_val} != #{current_month} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
       return false
     end
     
