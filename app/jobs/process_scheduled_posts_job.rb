@@ -5,14 +5,18 @@ class ProcessScheduledPostsJob < ApplicationJob
   queue_as :default
 
   def perform
+    # Use STDOUT to ensure logs are visible in cron job output
+    puts "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} ==="
     Rails.logger.info "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} ==="
     
     # Get all active schedules
     schedules = BucketSchedule.includes(:bucket, :bucket_image, :bucket_send_histories, schedule_items: :bucket_image)
     total_count = schedules.count
+    puts "Found #{total_count} total schedules to check"
     Rails.logger.info "Found #{total_count} total schedules to check"
     
     if total_count == 0
+      puts "No schedules found, exiting"
       Rails.logger.info "No schedules found, exiting"
       return
     end
@@ -24,7 +28,8 @@ class ProcessScheduledPostsJob < ApplicationJob
         schedule.schedule_items.ordered.find_each do |item|
           if schedule_item_should_run?(item, schedule)
             begin
-              Rails.logger.info "Processing schedule item #{item.id} for schedule #{schedule.id}"
+              puts "Processing schedule item #{item.id} for schedule #{schedule.id}"
+    Rails.logger.info "Processing schedule item #{item.id} for schedule #{schedule.id}"
               process_schedule_item(item, schedule)
             rescue => e
               Rails.logger.error "Error processing schedule item #{item.id}: #{e.message}"
@@ -46,6 +51,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       end
     end
     
+    puts "Finished processing scheduled posts"
     Rails.logger.info "Finished processing scheduled posts"
   end
 
@@ -137,6 +143,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       end
     end
     
+    puts "✓ Cron match: #{cron_string} matches current time #{now.strftime('%Y-%m-%d %H:%M:%S')}"
     Rails.logger.info "✓ Cron match: #{cron_string} matches current time #{now.strftime('%Y-%m-%d %H:%M:%S')}"
     true
   end
@@ -226,6 +233,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       return false
     end
     
+    puts "✓ Schedule item #{item.id} is due and ready to post (cron: #{item.schedule})"
     Rails.logger.info "✓ Schedule item #{item.id} is due and ready to post (cron: #{item.schedule})"
     true
   end
@@ -271,6 +279,7 @@ class ProcessScheduledPostsJob < ApplicationJob
     # Update schedule
     schedule.increment!(:times_sent)
     
+    puts "Successfully posted schedule item #{item.id} (schedule #{schedule.id}) to social media"
     Rails.logger.info "Successfully posted schedule item #{item.id} (schedule #{schedule.id}) to social media"
   rescue => e
     Rails.logger.error "Failed to post schedule item #{item.id}: #{e.message}"
