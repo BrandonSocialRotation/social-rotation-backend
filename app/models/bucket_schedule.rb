@@ -20,6 +20,7 @@ class BucketSchedule < ApplicationRecord
   belongs_to :bucket
   belongs_to :bucket_image, optional: true
   has_many :bucket_send_histories, dependent: :destroy
+  has_many :schedule_items, dependent: :destroy
   
   # Validations
   validates :schedule, presence: true
