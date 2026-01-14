@@ -24,7 +24,8 @@ class ProcessScheduledPostsJob < ApplicationJob
     schedules.find_each do |schedule|
       # Process schedule items if they exist (new multi-image feature)
       if schedule.schedule_items.any?
-        Rails.logger.debug "Processing schedule #{schedule.id} with #{schedule.schedule_items.count} schedule_items"
+        puts "Processing schedule #{schedule.id} with #{schedule.schedule_items.count} schedule_items"
+        Rails.logger.info "Processing schedule #{schedule.id} with #{schedule.schedule_items.count} schedule_items"
         schedule.schedule_items.ordered.find_each do |item|
           if schedule_item_should_run?(item, schedule)
             begin
@@ -96,7 +97,9 @@ class ProcessScheduledPostsJob < ApplicationJob
     current_day = now.day
     current_month = now.month
     
-    Rails.logger.debug "Checking cron: #{cron_string} against current time: #{now.strftime('%Y-%m-%d %H:%M:%S')} (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
+    # Log at INFO level so it's visible in production logs
+    Rails.logger.info "Checking cron: #{cron_string} against current time: #{now.strftime('%Y-%m-%d %H:%M:%S')} (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
+    puts "Checking cron: #{cron_string} against current time: #{now.strftime('%Y-%m-%d %H:%M:%S')} (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
     
     # Check minute - allow match within the current minute (since scheduler runs every minute)
     # This handles the case where scheduler runs at 14:55:30 and we're checking for 14:55
@@ -212,7 +215,8 @@ class ProcessScheduledPostsJob < ApplicationJob
       return false
     end
     
-    Rails.logger.debug "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{Time.current.strftime('%Y-%m-%d %H:%M:%S')})"
+    puts "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{Time.current.strftime('%Y-%m-%d %H:%M:%S')})"
+    Rails.logger.info "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{Time.current.strftime('%Y-%m-%d %H:%M:%S')})"
     
     # Check if schedule item is due based on cron expression
     unless cron_due?(item.schedule)
