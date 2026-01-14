@@ -3,6 +3,7 @@ class BucketSchedule < ApplicationRecord
   SCHEDULE_TYPE_ROTATION = 1
   SCHEDULE_TYPE_ONCE = 2
   SCHEDULE_TYPE_ANNUALLY = 3
+  SCHEDULE_TYPE_MULTIPLE = 4
   
   # Social media platform bit flags
   BIT_FACEBOOK = 1
@@ -24,7 +25,7 @@ class BucketSchedule < ApplicationRecord
   
   # Validations
   validates :schedule, presence: true
-  validates :schedule_type, presence: true, inclusion: { in: [SCHEDULE_TYPE_ROTATION, SCHEDULE_TYPE_ONCE, SCHEDULE_TYPE_ANNUALLY] }
+  validates :schedule_type, presence: true, inclusion: { in: [SCHEDULE_TYPE_ROTATION, SCHEDULE_TYPE_ONCE, SCHEDULE_TYPE_ANNUALLY, SCHEDULE_TYPE_MULTIPLE] }
   validate :valid_cron_format
   
   # Methods from original PHP
