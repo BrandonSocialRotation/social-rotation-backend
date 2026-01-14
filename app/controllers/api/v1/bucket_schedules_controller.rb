@@ -5,7 +5,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
   # GET /api/v1/bucket_schedules
   def index
     @bucket_schedules = current_user.bucket_schedules
-                                   .includes(:bucket, :bucket_image)
+                                   .includes(:bucket, :bucket_image, schedule_items: :bucket_image)
                                    .order(:created_at)
 
     render json: {
