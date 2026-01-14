@@ -64,16 +64,10 @@ class Api::V1::BucketSchedulesController < ApplicationController
             position: index
           )
           
-          # Schedule the job to run at the exact time specified in the cron
-          scheduled_time = parse_cron_to_datetime(schedule_item.schedule)
-          if scheduled_time && scheduled_time > Time.current
-            PostScheduleItemJob.set(wait_until: scheduled_time).perform_later(schedule_item.id)
-            Rails.logger.info "Scheduled PostScheduleItemJob for schedule_item #{schedule_item.id} to run at #{scheduled_time}"
-          elsif scheduled_time && scheduled_time <= Time.current
-            Rails.logger.warn "Schedule item #{schedule_item.id} has a time in the past (#{scheduled_time}), not scheduling job"
-          else
-            Rails.logger.error "Could not parse cron string #{schedule_item.schedule} for schedule_item #{schedule_item.id}"
-          end
+          # Log the schedule item creation
+          Rails.logger.info "Created schedule_item #{schedule_item.id} with schedule: #{schedule_item.schedule}"
+          # Note: Jobs will be processed by ProcessScheduledPostsJob which runs every minute
+          # The job will check if the cron time matches and post accordingly
         end
       end
       

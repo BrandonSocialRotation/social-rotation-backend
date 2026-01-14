@@ -13,25 +13,28 @@ class ProcessScheduledPostsJob < ApplicationJob
     schedules.find_each do |schedule|
       # Process schedule items if they exist (new multi-image feature)
       if schedule.schedule_items.any?
+        Rails.logger.debug "Processing schedule #{schedule.id} with #{schedule.schedule_items.count} schedule_items"
         schedule.schedule_items.ordered.find_each do |item|
-          next unless schedule_item_should_run?(item, schedule)
-          
-          begin
-            process_schedule_item(item, schedule)
-          rescue => e
-            Rails.logger.error "Error processing schedule item #{item.id}: #{e.message}"
-            Rails.logger.error e.backtrace.join("\n")
+          if schedule_item_should_run?(item, schedule)
+            begin
+              Rails.logger.info "Processing schedule item #{item.id} for schedule #{schedule.id}"
+              process_schedule_item(item, schedule)
+            rescue => e
+              Rails.logger.error "Error processing schedule item #{item.id}: #{e.message}"
+              Rails.logger.error e.backtrace.join("\n")
+            end
           end
         end
       else
         # Legacy: process schedule directly (single image or rotation)
-        next unless schedule_should_run?(schedule)
-        
-        begin
-          process_schedule(schedule)
-        rescue => e
-          Rails.logger.error "Error processing schedule #{schedule.id}: #{e.message}"
-          Rails.logger.error e.backtrace.join("\n")
+        if schedule_should_run?(schedule)
+          begin
+            Rails.logger.info "Processing legacy schedule #{schedule.id}"
+            process_schedule(schedule)
+          rescue => e
+            Rails.logger.error "Error processing schedule #{schedule.id}: #{e.message}"
+            Rails.logger.error e.backtrace.join("\n")
+          end
         end
       end
     end
