@@ -8,8 +8,14 @@ class ProcessScheduledPostsJob < ApplicationJob
     Rails.logger.info "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} ==="
     
     # Get all active schedules
-    schedules = BucketSchedule.includes(:bucket, :bucket_image, :bucket_send_histories, :schedule_items)
-    Rails.logger.info "Found #{schedules.count} total schedules to check"
+    schedules = BucketSchedule.includes(:bucket, :bucket_image, :bucket_send_histories, schedule_items: :bucket_image)
+    total_count = schedules.count
+    Rails.logger.info "Found #{total_count} total schedules to check"
+    
+    if total_count == 0
+      Rails.logger.info "No schedules found, exiting"
+      return
+    end
     
     schedules.find_each do |schedule|
       # Process schedule items if they exist (new multi-image feature)

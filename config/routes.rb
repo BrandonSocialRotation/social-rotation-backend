@@ -116,6 +116,7 @@ Rails.application.routes.draw do
       post 'scheduler/skip_image/:id', to: 'scheduler#skip_image'
       post 'scheduler/skip_image_single/:id', to: 'scheduler#skip_image_single'
       get 'scheduler/open_graph', to: 'scheduler#open_graph'
+      post 'scheduler/process_now', to: 'scheduler#process_now' # Manual trigger for testing
 
       # Sub-account management routes
       resources :sub_accounts, only: [:index, :create, :show, :update, :destroy] do
