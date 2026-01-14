@@ -182,14 +182,21 @@ class ProcessScheduledPostsJob < ApplicationJob
   end
   
   def schedule_item_should_run?(item, schedule)
-    return false unless schedule.bucket
-    return false unless schedule.bucket.user
+    unless schedule.bucket
+      Rails.logger.debug "Schedule item #{item.id}: schedule has no bucket"
+      return false
+    end
     
-    Rails.logger.debug "Checking schedule item #{item.id} (schedule: #{item.schedule})"
+    unless schedule.bucket.user
+      Rails.logger.debug "Schedule item #{item.id}: bucket has no user"
+      return false
+    end
+    
+    Rails.logger.debug "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{Time.current.strftime('%Y-%m-%d %H:%M:%S')})"
     
     # Check if schedule item is due based on cron expression
     unless cron_due?(item.schedule)
-      Rails.logger.debug "Schedule item #{item.id} is not due yet"
+      Rails.logger.debug "Schedule item #{item.id} is not due yet (cron: #{item.schedule})"
       return false
     end
     
@@ -206,7 +213,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       return false
     end
     
-    Rails.logger.info "✓ Schedule item #{item.id} is due and ready to post"
+    Rails.logger.info "✓ Schedule item #{item.id} is due and ready to post (cron: #{item.schedule})"
     true
   end
   
