@@ -5,10 +5,11 @@ class ProcessScheduledPostsJob < ApplicationJob
   queue_as :default
 
   def perform
-    Rails.logger.info "Processing scheduled posts..."
+    Rails.logger.info "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} ==="
     
     # Get all active schedules
     schedules = BucketSchedule.includes(:bucket, :bucket_image, :bucket_send_histories, :schedule_items)
+    Rails.logger.info "Found #{schedules.count} total schedules to check"
     
     schedules.find_each do |schedule|
       # Process schedule items if they exist (new multi-image feature)
