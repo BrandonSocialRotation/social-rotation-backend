@@ -59,16 +59,23 @@ class ProcessScheduledPostsJob < ApplicationJob
     now = Time.current
     
     # Check minute (exact match or wildcard)
-    return false unless minute == '*' || minute.to_i == now.min
+    # Handle leading zeros by converting to integer
+    minute_val = minute == '*' ? '*' : minute.to_i
+    return false unless minute_val == '*' || minute_val == now.min
     
     # Check hour (exact match or wildcard)
-    return false unless hour == '*' || hour.to_i == now.hour
+    hour_val = hour == '*' ? '*' : hour.to_i
+    return false unless hour_val == '*' || hour_val == now.hour
     
     # Check day of month (exact match or wildcard)
-    return false unless day == '*' || day.to_i == now.day
+    # For rotation schedules, day is usually '*'
+    day_val = day == '*' ? '*' : day.to_i
+    return false unless day_val == '*' || day_val == now.day
     
     # Check month (exact match or wildcard)
-    return false unless month == '*' || month.to_i == now.month
+    # For rotation schedules, month is usually '*'
+    month_val = month == '*' ? '*' : month.to_i
+    return false unless month_val == '*' || month_val == now.month
     
     # Check weekday
     # Cron format: 0-6 (0=Sunday) or 1-7 (1=Monday) depending on system
@@ -81,6 +88,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       return false unless weekdays.include?(current_weekday)
     end
     
+    Rails.logger.debug "Cron match: #{cron_string} matches current time #{now.strftime('%Y-%m-%d %H:%M:%S')}"
     true
   end
 
