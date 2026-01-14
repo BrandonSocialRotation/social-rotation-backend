@@ -153,6 +153,27 @@ class Api::V1::SchedulerController < ApplicationController
     }
   end
 
+  # POST /api/v1/scheduler/process_now
+  # Manually trigger the scheduler to process all due posts
+  # Useful for testing and debugging
+  def process_now
+    begin
+      Rails.logger.info "Manual scheduler trigger requested by user #{current_user.id}"
+      ProcessScheduledPostsJob.perform_now
+      render json: {
+        message: 'Scheduler processed successfully',
+        timestamp: Time.current.iso8601
+      }
+    rescue => e
+      Rails.logger.error "Error in manual scheduler trigger: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: {
+        error: 'Scheduler processing failed',
+        message: e.message
+      }, status: :internal_server_error
+    end
+  end
+
   private
 
   def set_bucket_schedule
@@ -331,26 +352,5 @@ class Api::V1::SchedulerController < ApplicationController
       created_at: bucket_schedule.created_at,
       updated_at: bucket_schedule.updated_at
     }
-  end
-
-  # POST /api/v1/scheduler/process_now
-  # Manually trigger the scheduler to process all due posts
-  # Useful for testing and debugging
-  def process_now
-    begin
-      Rails.logger.info "Manual scheduler trigger requested by user #{current_user.id}"
-      ProcessScheduledPostsJob.perform_now
-      render json: {
-        message: 'Scheduler processed successfully',
-        timestamp: Time.current.iso8601
-      }
-    rescue => e
-      Rails.logger.error "Error in manual scheduler trigger: #{e.message}"
-      Rails.logger.error e.backtrace.join("\n")
-      render json: {
-        error: 'Scheduler processing failed',
-        message: e.message
-      }, status: :internal_server_error
-    end
   end
 end
