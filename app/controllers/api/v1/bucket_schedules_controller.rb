@@ -92,7 +92,45 @@ class Api::V1::BucketSchedulesController < ApplicationController
       update_params = update_params.except(:name)
     end
     
+    # Handle schedule_items updates if provided
+    schedule_items_params = params[:schedule_items] || params.dig(:bucket_schedule, :schedule_items)
+    
     if @bucket_schedule.update(update_params)
+      # Update schedule_items if provided
+      if schedule_items_params.present? && schedule_items_params.is_a?(Array)
+        # Get existing item IDs
+        existing_item_ids = schedule_items_params.map { |item| item[:id] }.compact
+        
+        # Delete items that are no longer in the list
+        @bucket_schedule.schedule_items.where.not(id: existing_item_ids).destroy_all
+        
+        # Update or create items
+        schedule_items_params.each_with_index do |item_params, index|
+          if item_params[:id].present?
+            # Update existing item
+            schedule_item = @bucket_schedule.schedule_items.find_by(id: item_params[:id])
+            if schedule_item
+              schedule_item.update!(
+                bucket_image_id: item_params[:bucket_image_id],
+                schedule: item_params[:schedule] || @bucket_schedule.schedule,
+                description: item_params[:description] || '',
+                twitter_description: item_params[:twitter_description] || '',
+                position: index
+              )
+            end
+          else
+            # Create new item
+            @bucket_schedule.schedule_items.create!(
+              bucket_image_id: item_params[:bucket_image_id],
+              schedule: item_params[:schedule] || @bucket_schedule.schedule,
+              description: item_params[:description] || '',
+              twitter_description: item_params[:twitter_description] || '',
+              position: index
+            )
+          end
+        end
+      end
+      
       render json: {
         bucket_schedule: bucket_schedule_json(@bucket_schedule),
         message: 'Schedule updated successfully'
@@ -322,6 +360,9 @@ class Api::V1::BucketSchedulesController < ApplicationController
       bucket_id: bucket_schedule.bucket_id,
       bucket_image_id: bucket_schedule.bucket_image_id,
       name: bucket_schedule.respond_to?(:name) ? bucket_schedule.name : nil,
+      facebook_page_id: bucket_schedule.respond_to?(:facebook_page_id) ? bucket_schedule.facebook_page_id : nil,
+      linkedin_organization_urn: bucket_schedule.respond_to?(:linkedin_organization_urn) ? bucket_schedule.linkedin_organization_urn : nil,
+      bucket_name: bucket_schedule.bucket ? bucket_schedule.bucket.name : nil,
       bucket: bucket_schedule.bucket ? {
         id: bucket_schedule.bucket.id,
         name: bucket_schedule.bucket.name

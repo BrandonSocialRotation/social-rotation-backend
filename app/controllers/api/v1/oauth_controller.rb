@@ -298,7 +298,7 @@ class Api::V1::OauthController < ApplicationController
     if current_user.instagram_business_id.present?
       render json: { success: true, message: 'Instagram connected successfully', instagram_business_id: current_user.instagram_business_id, instagram_account: instagram_info }
     else
-      render json: { error: 'Instagram account not found', message: 'No Instagram Business account found' }, status: :not_found
+      render json: { error: 'Instagram account not found', message: 'No Instagram Business or Creator account found. Instagram posting requires a Business/Creator account linked to a Facebook Page. Personal accounts cannot be used.' }, status: :not_found
     end
   rescue => e
     Rails.logger.error "Instagram connect error: #{e.message}"
