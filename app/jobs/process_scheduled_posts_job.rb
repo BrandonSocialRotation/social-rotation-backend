@@ -6,14 +6,20 @@ class ProcessScheduledPostsJob < ApplicationJob
 
   def perform
     # Use STDOUT to ensure logs are visible in cron job output
-    puts "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} ==="
-    Rails.logger.info "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} ==="
+    puts "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} UTC ==="
+    Rails.logger.info "=== Processing scheduled posts at #{Time.current.strftime('%Y-%m-%d %H:%M:%S')} UTC ==="
     
     # Get all active schedules
     schedules = BucketSchedule.includes(:bucket, :bucket_image, :bucket_send_histories, schedule_items: :bucket_image)
     total_count = schedules.count
     puts "Found #{total_count} total schedules to check"
     Rails.logger.info "Found #{total_count} total schedules to check"
+    
+    if total_count == 0
+      puts "No schedules found, exiting"
+      Rails.logger.info "No schedules found, exiting"
+      return
+    end
     
     if total_count == 0
       puts "No schedules found, exiting"
