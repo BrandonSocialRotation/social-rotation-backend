@@ -62,8 +62,9 @@ class ProcessScheduledPostsJob < ApplicationJob
     return false unless schedule.bucket
     return false unless schedule.bucket.user
     
-    # Check if schedule is due based on cron expression
-    return false unless cron_due?(schedule.schedule)
+    user = schedule.bucket.user
+    # Check if schedule is due based on cron expression, using user's timezone
+    return false unless cron_due?(schedule.schedule, user.timezone)
     
     # For ONCE schedules, check if already sent
     if schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_ONCE
@@ -80,7 +81,7 @@ class ProcessScheduledPostsJob < ApplicationJob
     true
   end
 
-  def cron_due?(cron_string)
+  def cron_due?(cron_string, user_timezone = nil)
     return false unless cron_string.present?
     
     parts = cron_string.split(' ')
@@ -91,7 +92,12 @@ class ProcessScheduledPostsJob < ApplicationJob
     
     minute, hour, day, month, weekday = parts
     
-    now = Time.current
+    # Use user's timezone if provided, otherwise use UTC
+    if user_timezone.present?
+      now = Time.current.in_time_zone(user_timezone)
+    else
+      now = Time.current
+    end
     current_minute = now.min
     current_hour = now.hour
     current_day = now.day
@@ -215,11 +221,13 @@ class ProcessScheduledPostsJob < ApplicationJob
       return false
     end
     
-    puts "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{Time.current.strftime('%Y-%m-%d %H:%M:%S')})"
-    Rails.logger.info "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{Time.current.strftime('%Y-%m-%d %H:%M:%S')})"
+    user = schedule.bucket.user
+    current_time = user&.timezone ? Time.current.in_time_zone(user.timezone) : Time.current
+    puts "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S')})"
+    Rails.logger.info "Checking schedule item #{item.id} (cron: #{item.schedule}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S')})"
     
-    # Check if schedule item is due based on cron expression
-    unless cron_due?(item.schedule)
+    # Check if schedule item is due based on cron expression, using user's timezone
+    unless cron_due?(item.schedule, user&.timezone)
       Rails.logger.debug "Schedule item #{item.id} is not due yet (cron: #{item.schedule})"
       return false
     end
