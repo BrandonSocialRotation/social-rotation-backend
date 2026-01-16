@@ -130,19 +130,17 @@ class ProcessScheduledPostsJob < ApplicationJob
     if minute_val != '*'
       minute_diff = current_minute - minute_val
       
-      # Handle hour rollover (e.g., scheduled for 59, current is 2)
+      # If negative, scheduled time is in the future (reject)
+      # If positive and <= 5, scheduled time is current or within last 5 minutes (accept)
+      # If positive and > 5, scheduled time is too far in past (reject)
       if minute_diff < 0
-        minute_diff += 60
-      end
-      
-      if minute_diff > 5
+        Rails.logger.debug "Cron minute in future: scheduled #{minute_val}, current #{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        return false
+      elsif minute_diff > 5
         Rails.logger.debug "Cron minute too far in past: #{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
         return false
-      elsif minute_diff < 0
-        Rails.logger.debug "Cron minute in future: #{minute_val} > #{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-        return false
       end
-      # minute_val matches or is within last 5 minutes
+      # minute_val matches or is within last 5 minutes (0 <= minute_diff <= 5)
       Rails.logger.info "Cron minute match: #{minute_val} is within 5 minutes of #{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
     end
     
