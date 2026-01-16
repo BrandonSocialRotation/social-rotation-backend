@@ -33,15 +33,6 @@ fi
 
 # Start scheduler in background (runs every minute)
 echo "Starting scheduler..."
-while true; do
-  bundle exec rails scheduler:process 2>&1 | head -20
-  sleep 60  # Wait 60 seconds before next run
-done &
-SCHEDULER_PID=$!
-echo "Scheduler started with PID: $SCHEDULER_PID"
-
-# Start scheduler in background (runs every minute)
-echo "Starting scheduler..."
 (
   while true; do
     bundle exec rails scheduler:process 2>&1 | head -20
