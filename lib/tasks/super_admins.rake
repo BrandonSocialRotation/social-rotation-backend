@@ -174,4 +174,33 @@ namespace :super_admins do
     puts "\nAll three accounts have free access forever (account_id = 0)"
     puts "They bypass all subscription checks and can use all features."
   end
+  
+  desc "Add Cory and Profjwells as super admins"
+  task add_new_admins: :environment do
+    new_admins = [
+      'cory@socialrotation.com',
+      'profjwells@gmail.com'
+    ]
+    
+    puts "\n=== Adding New Super Admins ==="
+    
+    new_admins.each do |email|
+      user = User.find_by(email: email)
+      
+      if user.nil?
+        puts "❌ User with email '#{email}' not found. They need to create an account first."
+        next
+      end
+      
+      if user.account_id == 0
+        puts "✓ User '#{user.name}' (#{email}) is already a super admin"
+      else
+        old_account_id = user.account_id
+        user.update!(account_id: 0)
+        puts "✓ Set user '#{user.name}' (#{email}) as super admin (was account_id: #{old_account_id})"
+      end
+    end
+    
+    puts "\n✅ New super admin setup complete!"
+  end
 end
