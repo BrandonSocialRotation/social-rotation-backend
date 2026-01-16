@@ -35,12 +35,17 @@ fi
 echo "Starting scheduler..."
 (
   while true; do
-    bundle exec rails scheduler:process 2>&1 | head -20
+    echo "[$(date)] Running scheduler..."
+    bundle exec rails scheduler:process 2>&1
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+      echo "[$(date)] Scheduler exited with code $EXIT_CODE"
+    fi
     sleep 60  # Wait 60 seconds before next run
   done
-) &
+) >> /tmp/scheduler.log 2>&1 &
 SCHEDULER_PID=$!
-echo "Scheduler started with PID: $SCHEDULER_PID"
+echo "Scheduler started with PID: $SCHEDULER_PID (logs: /tmp/scheduler.log)"
 
 # Start the server
 echo "Starting Rails server on port ${PORT:-8080}..."

@@ -153,7 +153,8 @@ class ProcessScheduledPostsJob < ApplicationJob
     # For rotation schedules, day is usually '*'
     day_val = day == '*' ? '*' : day.to_i
     unless day_val == '*' || day_val == current_day
-      Rails.logger.debug "Cron day mismatch: #{day_val} != #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      Rails.logger.info "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      puts "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
       return false
     end
     
