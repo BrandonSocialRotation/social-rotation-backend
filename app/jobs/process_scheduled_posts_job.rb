@@ -6,11 +6,14 @@ class ProcessScheduledPostsJob < ApplicationJob
 
   def perform
     # Use STDOUT to ensure logs are visible in cron job output
-    utc_now = Time.current
-    puts "=== Processing scheduled posts at #{utc_now.strftime('%Y-%m-%d %H:%M:%S %Z')} ==="
-    puts "=== Server system timezone: #{Time.zone.name} | UTC offset: #{utc_now.utc_offset / 3600} hours ==="
-    Rails.logger.info "=== Processing scheduled posts at #{utc_now.strftime('%Y-%m-%d %H:%M:%S %Z')} ==="
-    Rails.logger.info "=== Server system timezone: #{Time.zone.name} | UTC offset: #{utc_now.utc_offset / 3600} hours ==="
+    # Always use UTC - Rails default timezone
+    utc_now = Time.current.utc
+    system_time = Time.now  # System time (may be wrong if server clock is off)
+    
+    puts "=== Processing scheduled posts at #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} UTC ==="
+    puts "=== Server system time: #{system_time.strftime('%Y-%m-%d %H:%M:%S')} | Rails timezone: #{Time.zone.name} ==="
+    Rails.logger.info "=== Processing scheduled posts at #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} UTC ==="
+    Rails.logger.info "=== Server system time: #{system_time.strftime('%Y-%m-%d %H:%M:%S')} | Rails timezone: #{Time.zone.name} ==="
     
     # Get all active schedules
     schedules = BucketSchedule.includes(:bucket, :bucket_image, :bucket_send_histories, schedule_items: :bucket_image)
@@ -101,11 +104,14 @@ class ProcessScheduledPostsJob < ApplicationJob
     
     minute, hour, day, month, weekday = parts
     
+    # Always get current time in UTC first (Rails default)
+    utc_now = Time.current.utc
+    
     # Use user's timezone if provided, otherwise use UTC
     if user_timezone.present?
-      now = Time.current.in_time_zone(user_timezone)
+      now = utc_now.in_time_zone(user_timezone)
     else
-      now = Time.current
+      now = utc_now
     end
     current_minute = now.min
     current_hour = now.hour
@@ -113,10 +119,9 @@ class ProcessScheduledPostsJob < ApplicationJob
     current_month = now.month
     
     # Log at INFO level so it's visible in production logs
-    utc_now = Time.current
     timezone_info = user_timezone.present? ? "user timezone: #{user_timezone}" : "UTC (no user timezone)"
-    Rails.logger.info "Checking cron: #{cron_string} | #{timezone_info} | UTC: #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} | Local: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')} | (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
-    puts "Checking cron: #{cron_string} | #{timezone_info} | UTC: #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} | Local: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')} | (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
+    Rails.logger.info "Checking cron: #{cron_string} | #{timezone_info} | Server UTC: #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} | User Local: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')} | (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
+    puts "Checking cron: #{cron_string} | #{timezone_info} | Server UTC: #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} | User Local: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')} | (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
     
     # Check minute - allow match if scheduled minute is current or within last 5 minutes
     # This handles cases where scheduler runs slightly late or you test manually
