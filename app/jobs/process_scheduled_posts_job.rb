@@ -62,8 +62,6 @@ class ProcessScheduledPostsJob < ApplicationJob
     Rails.logger.info "Finished processing scheduled posts"
   end
 
-  private
-
   def schedule_should_run?(schedule)
     return false unless schedule.bucket
     return false unless schedule.bucket.user
