@@ -63,9 +63,10 @@ class Api::V1::BucketSchedulesController < ApplicationController
     
     if @bucket_schedule.save
       # Create schedule_items if provided (for multiple images with different times)
-      if params[:schedule_items].present? && params[:schedule_items].is_a?(Array)
+      schedule_items_params = params[:schedule_items] || params.dig(:bucket_schedule, :schedule_items)
+      if schedule_items_params.present? && schedule_items_params.is_a?(Array)
         schedule_item_has_timezone = ScheduleItem.column_names.include?('timezone')
-        params[:schedule_items].each_with_index do |item_params, index|
+        schedule_items_params.each_with_index do |item_params, index|
           item_attrs = {
             bucket_image_id: item_params[:bucket_image_id],
             schedule: item_params[:schedule] || @bucket_schedule.schedule,
