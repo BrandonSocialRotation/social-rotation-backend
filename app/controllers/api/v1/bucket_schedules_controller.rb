@@ -36,9 +36,12 @@ class Api::V1::BucketSchedulesController < ApplicationController
       )
     end
     
-    # Remove name if column doesn't exist yet (for production migration compatibility)
+    # Remove columns if they don't exist yet (for production migration compatibility)
     unless BucketSchedule.column_names.include?('name')
       schedule_params = schedule_params.except(:name)
+    end
+    unless BucketSchedule.column_names.include?('timezone')
+      schedule_params = schedule_params.except(:timezone)
     end
     
     @bucket_schedule = @bucket.bucket_schedules.build(schedule_params)
@@ -55,15 +58,20 @@ class Api::V1::BucketSchedulesController < ApplicationController
     if @bucket_schedule.save
       # Create schedule_items if provided (for multiple images with different times)
       if params[:schedule_items].present? && params[:schedule_items].is_a?(Array)
+        schedule_item_has_timezone = ScheduleItem.column_names.include?('timezone')
         params[:schedule_items].each_with_index do |item_params, index|
-          schedule_item = @bucket_schedule.schedule_items.create!(
+          item_attrs = {
             bucket_image_id: item_params[:bucket_image_id],
             schedule: item_params[:schedule] || @bucket_schedule.schedule,
             description: item_params[:description] || '',
             twitter_description: item_params[:twitter_description] || '',
-            timezone: item_params[:timezone] || @bucket_schedule.timezone,
             position: index
-          )
+          }
+          # Only set timezone if column exists
+          if schedule_item_has_timezone
+            item_attrs[:timezone] = item_params[:timezone] || (@bucket_schedule.respond_to?(:timezone) ? @bucket_schedule.timezone : nil)
+          end
+          schedule_item = @bucket_schedule.schedule_items.create!(item_attrs)
           
           # Log the schedule item creation
           Rails.logger.info "Created schedule_item #{schedule_item.id} with schedule: #{schedule_item.schedule}"
@@ -88,9 +96,12 @@ class Api::V1::BucketSchedulesController < ApplicationController
     require_active_subscription_for_action!
     
     update_params = bucket_schedule_params
-    # Remove name if column doesn't exist yet (for production migration compatibility)
+    # Remove columns if they don't exist yet (for production migration compatibility)
     unless BucketSchedule.column_names.include?('name')
       update_params = update_params.except(:name)
+    end
+    unless BucketSchedule.column_names.include?('timezone')
+      update_params = update_params.except(:timezone)
     end
     
     # Handle schedule_items updates if provided
@@ -106,30 +117,29 @@ class Api::V1::BucketSchedulesController < ApplicationController
         @bucket_schedule.schedule_items.where.not(id: existing_item_ids).destroy_all
         
         # Update or create items
+        schedule_item_has_timezone = ScheduleItem.column_names.include?('timezone')
         schedule_items_params.each_with_index do |item_params, index|
+          item_attrs = {
+            bucket_image_id: item_params[:bucket_image_id],
+            schedule: item_params[:schedule] || @bucket_schedule.schedule,
+            description: item_params[:description] || '',
+            twitter_description: item_params[:twitter_description] || '',
+            position: index
+          }
+          # Only set timezone if column exists
+          if schedule_item_has_timezone
+            item_attrs[:timezone] = item_params[:timezone] || (@bucket_schedule.respond_to?(:timezone) ? @bucket_schedule.timezone : nil)
+          end
+          
           if item_params[:id].present?
             # Update existing item
             schedule_item = @bucket_schedule.schedule_items.find_by(id: item_params[:id])
             if schedule_item
-              schedule_item.update!(
-                bucket_image_id: item_params[:bucket_image_id],
-                schedule: item_params[:schedule] || @bucket_schedule.schedule,
-                description: item_params[:description] || '',
-                twitter_description: item_params[:twitter_description] || '',
-                timezone: item_params[:timezone] || @bucket_schedule.timezone,
-                position: index
-              )
+              schedule_item.update!(item_attrs)
             end
           else
             # Create new item
-            @bucket_schedule.schedule_items.create!(
-              bucket_image_id: item_params[:bucket_image_id],
-              schedule: item_params[:schedule] || @bucket_schedule.schedule,
-              description: item_params[:description] || '',
-              twitter_description: item_params[:twitter_description] || '',
-              timezone: item_params[:timezone] || @bucket_schedule.timezone,
-              position: index
-            )
+            @bucket_schedule.schedule_items.create!(item_attrs)
           end
         end
       end
