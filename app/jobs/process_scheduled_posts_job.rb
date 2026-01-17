@@ -70,13 +70,15 @@ class ProcessScheduledPostsJob < ApplicationJob
     
     user = schedule.bucket.user
     
-    # Warn if user doesn't have timezone set
-    unless user.timezone.present?
-      Rails.logger.warn "User #{user.id} (#{user.email}) has no timezone set - using UTC for schedule #{schedule.id}"
+    # Use schedule's timezone if set, otherwise fall back to user's profile timezone
+    schedule_timezone = schedule.timezone.presence || user.timezone
+    
+    unless schedule_timezone.present?
+      Rails.logger.warn "No timezone set for schedule #{schedule.id} or user #{user.id} (#{user.email}) - using UTC"
     end
     
-    # Check if schedule is due based on cron expression, using user's timezone
-    return false unless cron_due?(schedule.schedule, user.timezone)
+    # Check if schedule is due based on cron expression, using schedule's timezone (or user's as fallback)
+    return false unless cron_due?(schedule.schedule, schedule_timezone)
     
     # For ONCE schedules, check if already sent
     if schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_ONCE
@@ -256,17 +258,19 @@ class ProcessScheduledPostsJob < ApplicationJob
     
     user = schedule.bucket.user
     
-    # Warn if user doesn't have timezone set
-    unless user.timezone.present?
-      Rails.logger.warn "User #{user.id} (#{user.email}) has no timezone set - using UTC for schedule item #{item.id}"
+    # Use schedule_item's timezone if set, otherwise use schedule's timezone, then fall back to user's profile timezone
+    item_timezone = item.timezone.presence || schedule.timezone.presence || user.timezone
+    
+    unless item_timezone.present?
+      Rails.logger.warn "No timezone set for schedule item #{item.id} - using UTC"
     end
     
-    current_time = user&.timezone ? Time.current.in_time_zone(user.timezone) : Time.current
-    puts "Checking schedule item #{item.id} (cron: #{item.schedule}, user timezone: #{user.timezone || 'UTC'}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
-    Rails.logger.info "Checking schedule item #{item.id} (cron: #{item.schedule}, user timezone: #{user.timezone || 'UTC'}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+    current_time = item_timezone ? Time.current.in_time_zone(item_timezone) : Time.current
+    puts "Checking schedule item #{item.id} (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+    Rails.logger.info "Checking schedule item #{item.id} (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
     
-    # Check if schedule item is due based on cron expression, using user's timezone
-    unless cron_due?(item.schedule, user&.timezone)
+    # Check if schedule item is due based on cron expression, using item's timezone (or schedule/user's as fallback)
+    unless cron_due?(item.schedule, item_timezone)
       Rails.logger.debug "Schedule item #{item.id} is not due yet (cron: #{item.schedule})"
       return false
     end

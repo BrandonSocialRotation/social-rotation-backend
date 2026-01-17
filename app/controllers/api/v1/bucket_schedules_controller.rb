@@ -32,7 +32,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
     if params[:bucket_schedule].present?
       schedule_params = params.require(:bucket_schedule).permit(
         :schedule, :schedule_type, :post_to, :description, :twitter_description,
-        :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name
+        :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name, :timezone
       )
     end
     
@@ -61,6 +61,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
             schedule: item_params[:schedule] || @bucket_schedule.schedule,
             description: item_params[:description] || '',
             twitter_description: item_params[:twitter_description] || '',
+            timezone: item_params[:timezone] || @bucket_schedule.timezone,
             position: index
           )
           
@@ -115,6 +116,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
                 schedule: item_params[:schedule] || @bucket_schedule.schedule,
                 description: item_params[:description] || '',
                 twitter_description: item_params[:twitter_description] || '',
+                timezone: item_params[:timezone] || @bucket_schedule.timezone,
                 position: index
               )
             end
@@ -125,6 +127,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
               schedule: item_params[:schedule] || @bucket_schedule.schedule,
               description: item_params[:description] || '',
               twitter_description: item_params[:twitter_description] || '',
+              timezone: item_params[:timezone] || @bucket_schedule.timezone,
               position: index
             )
           end
@@ -324,7 +327,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
   def bucket_schedule_params
     params.require(:bucket_schedule).permit(
       :schedule, :schedule_type, :post_to, :description, :twitter_description,
-      :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name
+      :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name, :timezone
     )
   end
 
@@ -360,6 +363,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
       bucket_id: bucket_schedule.bucket_id,
       bucket_image_id: bucket_schedule.bucket_image_id,
       name: bucket_schedule.respond_to?(:name) ? bucket_schedule.name : nil,
+      timezone: bucket_schedule.respond_to?(:timezone) ? bucket_schedule.timezone : nil,
       facebook_page_id: bucket_schedule.respond_to?(:facebook_page_id) ? bucket_schedule.facebook_page_id : nil,
       linkedin_organization_urn: bucket_schedule.respond_to?(:linkedin_organization_urn) ? bucket_schedule.linkedin_organization_urn : nil,
       bucket_name: bucket_schedule.bucket ? bucket_schedule.bucket.name : nil,
@@ -384,6 +388,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
           schedule: item.schedule,
           description: item.description,
           twitter_description: item.twitter_description,
+          timezone: item.respond_to?(:timezone) ? item.timezone : nil,
           position: item.position,
           bucket_image: item.bucket_image ? {
             id: item.bucket_image.id,
