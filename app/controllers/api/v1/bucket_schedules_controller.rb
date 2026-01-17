@@ -40,8 +40,14 @@ class Api::V1::BucketSchedulesController < ApplicationController
     unless BucketSchedule.column_names.include?('name')
       schedule_params = schedule_params.except(:name)
     end
+    
+    # Debug: Log available columns and check for timezone
+    Rails.logger.info "BucketSchedule columns: #{BucketSchedule.column_names.inspect}"
     unless BucketSchedule.column_names.include?('timezone')
+      Rails.logger.warn "Timezone column not found in BucketSchedule table. Available columns: #{BucketSchedule.column_names.inspect}"
       schedule_params = schedule_params.except(:timezone)
+    else
+      Rails.logger.info "Timezone column found - will save timezone: #{schedule_params[:timezone]}"
     end
     
     @bucket_schedule = @bucket.bucket_schedules.build(schedule_params)
