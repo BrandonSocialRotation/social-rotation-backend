@@ -126,32 +126,56 @@ class ProcessScheduledPostsJob < ApplicationJob
     # Check minute - allow match if scheduled minute is current or within last 5 minutes
     # This handles cases where scheduler runs slightly late or you test manually
     # The duplicate check (via send history) prevents posting the same item twice
-    # Check hour first (exact match or wildcard)
-    hour_val = hour == '*' ? '*' : hour.to_i
-    unless hour_val == '*' || hour_val == current_hour
-      Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{current_hour} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-      return false
-    end
-    
-    # Check minute - allow match if scheduled minute is current or within last 5 minutes
-    # This handles cases where scheduler runs slightly late or you test manually
-    # The duplicate check (via send history) prevents posting the same item twice
     minute_val = minute == '*' ? '*' : minute.to_i
-    if minute_val != '*'
+    hour_val = hour == '*' ? '*' : hour.to_i
+    
+    if minute_val != '*' && hour_val != '*'
+      # Calculate minute difference accounting for hour rollover
       minute_diff = current_minute - minute_val
       
-      # If negative, scheduled time is in the future (reject)
-      # If positive and <= 5, scheduled time is current or within last 5 minutes (accept)
-      # If positive and > 5, scheduled time is too far in past (reject)
-      if minute_diff < 0
-        Rails.logger.debug "Cron minute in future: scheduled #{minute_val}, current #{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      # Check if we need to account for hour rollover (e.g., scheduled 13:57, current 14:02)
+      # If current minute is small (< 5) and scheduled minute is large (> 55), might be previous hour
+      if minute_diff < -50
+        # Hour rollover backward (e.g., scheduled 13:57, current 14:02 -> 57 - 2 + 60 = 115 minutes, but means 5 min past)
+        hour_diff = current_hour - hour_val
+        if hour_diff == 1
+          minute_diff = minute_diff + 60  # Adjust for previous hour
+        end
+      elsif minute_diff < 0
+        # Scheduled time is in the future within same hour (reject)
+        Rails.logger.debug "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
         return false
       elsif minute_diff > 5
-        Rails.logger.debug "Cron minute too far in past: #{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        # Check if it's from previous hour (within 5 minute window)
+        hour_diff = current_hour - hour_val
+        if hour_diff == 1 && minute_diff > 55
+          # It's from previous hour, recalculate: (60 - scheduled_minute) + current_minute
+          minute_diff = (60 - minute_val) + current_minute
+          if minute_diff > 5
+            Rails.logger.debug "Cron too far in past (crossed hour): #{hour_val}:#{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+            return false
+          end
+        else
+          # Too far in past, reject
+          Rails.logger.debug "Cron minute too far in past: #{hour_val}:#{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          return false
+        end
+      end
+      
+      # Now check hour (allow current hour or previous hour if within 5 minute window)
+      unless hour_val == '*' || hour_val == current_hour || (hour_val == current_hour - 1 && minute_diff > 55)
+        Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{current_hour} and not previous hour within window (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
         return false
       end
+      
       # minute_val matches or is within last 5 minutes (0 <= minute_diff <= 5)
-      Rails.logger.info "Cron minute match: #{minute_val} is within 5 minutes of #{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      Rails.logger.info "Cron minute match: #{hour_val}:#{minute_val} is within 5 minutes of #{current_hour}:#{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+    elsif hour_val != '*'
+      # Hour specified but minute is wildcard - just check hour
+      unless hour_val == current_hour
+        Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{current_hour} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        return false
+      end
     end
     
     # Check day of month (exact match or wildcard)
