@@ -33,19 +33,18 @@ fi
 
 # Start scheduler in background (runs every minute)
 echo "Starting scheduler..."
-(
-  while true; do
-    echo "[$(date)] Running scheduler..."
-    bundle exec rails scheduler:process 2>&1
-    EXIT_CODE=$?
-    if [ $EXIT_CODE -ne 0 ]; then
-      echo "[$(date)] Scheduler exited with code $EXIT_CODE"
-    fi
-    sleep 60  # Wait 60 seconds before next run
-  done
-) >> /tmp/scheduler.log 2>&1 &
+# Create log directory if it doesn't exist
+mkdir -p /tmp
+# Start scheduler in background with nohup so it persists
+nohup bash -c "while true; do
+  echo \"[$(date)] Running scheduler...\" | tee -a /tmp/scheduler.log
+  bundle exec rails scheduler:process 2>&1 | tee -a /tmp/scheduler.log
+  echo \"[$(date)] Scheduler completed, waiting 60 seconds...\" | tee -a /tmp/scheduler.log
+  sleep 60
+done" > /dev/null 2>&1 &
 SCHEDULER_PID=$!
-echo "Scheduler started with PID: $SCHEDULER_PID (logs: /tmp/scheduler.log)"
+echo "Scheduler started with PID: $SCHEDULER_PID"
+echo "Check logs with: tail -f /tmp/scheduler.log"
 
 # Start the server
 echo "Starting Rails server on port ${PORT:-8080}..."
