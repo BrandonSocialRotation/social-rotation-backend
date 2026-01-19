@@ -222,8 +222,8 @@ class ProcessScheduledPostsJob < ApplicationJob
   def process_schedule(schedule)
     user = schedule.bucket.user
     
-    # Check if user has active subscription
-    return unless user.account&.has_active_subscription?
+    # Check if user has active subscription (super admins bypass this check)
+    return unless user.super_admin? || user.account&.has_active_subscription?
     
     # Get the image to post
     bucket_image = if schedule.bucket_image_id.present?
@@ -323,8 +323,8 @@ class ProcessScheduledPostsJob < ApplicationJob
   def process_schedule_item(item, schedule)
     user = schedule.bucket.user
     
-    # Check if user has active subscription
-    unless user.account&.has_active_subscription?
+    # Check if user has active subscription (super admins bypass this check)
+    unless user.super_admin? || user.account&.has_active_subscription?
       Rails.logger.warn "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
       puts "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
       return
