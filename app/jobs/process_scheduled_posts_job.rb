@@ -187,6 +187,11 @@ class ProcessScheduledPostsJob < ApplicationJob
       return false
     end
     
+    # If we get here, minute/hour/day/month all match - log it
+    if minute_val != '*' && hour_val != '*'
+      Rails.logger.info "✓ Cron time match: #{hour_val}:#{minute_val} matches #{current_hour}:#{current_minute}"
+    end
+    
     # Check month (exact match or wildcard)
     # For rotation schedules, month is usually '*'
     month_val = month == '*' ? '*' : month.to_i
@@ -319,10 +324,21 @@ class ProcessScheduledPostsJob < ApplicationJob
     user = schedule.bucket.user
     
     # Check if user has active subscription
-    return unless user.account&.has_active_subscription?
+    unless user.account&.has_active_subscription?
+      Rails.logger.warn "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
+      puts "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
+      return
+    end
     
     bucket_image = item.bucket_image
-    return unless bucket_image
+    unless bucket_image
+      Rails.logger.warn "Cannot post schedule item #{item.id}: bucket_image is missing"
+      puts "Cannot post schedule item #{item.id}: bucket_image is missing"
+      return
+    end
+    
+    Rails.logger.info "Starting to post schedule item #{item.id} (bucket_image_id: #{bucket_image.id})"
+    puts "Starting to post schedule item #{item.id} (bucket_image_id: #{bucket_image.id})"
     
     # Get descriptions (item description overrides schedule description)
     description = item.description.presence || schedule.description.presence || bucket_image.description.presence || ''
