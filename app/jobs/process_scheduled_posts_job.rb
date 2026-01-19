@@ -246,8 +246,8 @@ class ProcessScheduledPostsJob < ApplicationJob
       schedule.post_to,
       description,
       twitter_description,
-      schedule.facebook_page_id,
-      schedule.linkedin_organization_urn
+      facebook_page_id: schedule.facebook_page_id,
+      linkedin_organization_urn: schedule.linkedin_organization_urn
     )
     
     results = poster.post_to_all
@@ -356,8 +356,8 @@ class ProcessScheduledPostsJob < ApplicationJob
       schedule.post_to,
       description,
       twitter_description,
-      schedule.facebook_page_id,
-      schedule.linkedin_organization_urn
+      facebook_page_id: schedule.facebook_page_id,
+      linkedin_organization_urn: schedule.linkedin_organization_urn
     )
     
     results = poster.post_to_all
