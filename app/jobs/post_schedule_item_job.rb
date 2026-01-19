@@ -50,9 +50,9 @@ class PostScheduleItemJob < ApplicationJob
       bucket_image,
       schedule.post_to,
       description,
-      twitter_description,
-      schedule.facebook_page_id,
-      schedule.linkedin_organization_urn
+      twitter_description: twitter_description,
+      facebook_page_id: schedule.facebook_page_id,
+      linkedin_organization_urn: schedule.linkedin_organization_urn
     )
     
     results = poster.post_to_all

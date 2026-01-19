@@ -73,7 +73,7 @@ class Api::V1::SchedulerController < ApplicationController
         bucket_image,
         @bucket_schedule.post_to,
         description,
-        twitter_description
+        twitter_description: twitter_description
       )
       
       results = poster.post_to_all

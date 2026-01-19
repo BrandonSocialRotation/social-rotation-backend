@@ -7,7 +7,7 @@ class SocialMediaPosterService
   BIT_GMB = 16
   BIT_PINTEREST = 32
   
-  def initialize(user, bucket_image, post_to_flags, description, twitter_description = nil, facebook_page_id: nil, linkedin_organization_urn: nil)
+  def initialize(user, bucket_image, post_to_flags, description, twitter_description: nil, facebook_page_id: nil, linkedin_organization_urn: nil)
     @user = user
     @bucket_image = bucket_image
     @post_to = post_to_flags

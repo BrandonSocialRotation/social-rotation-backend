@@ -131,40 +131,34 @@ class ProcessScheduledPostsJob < ApplicationJob
     
     if minute_val != '*' && hour_val != '*'
       # Calculate minute difference accounting for hour rollover
-      minute_diff = current_minute - minute_val
+      # Allow matches within a 5-minute window (0-5 minutes past the scheduled time)
+      hour_diff = current_hour - hour_val
+      minute_diff = nil
       
-      # Check if we need to account for hour rollover (e.g., scheduled 13:57, current 14:02)
-      # If current minute is small (< 5) and scheduled minute is large (> 55), might be previous hour
-      if minute_diff < -50
-        # Hour rollover backward (e.g., scheduled 13:57, current 14:02 -> 57 - 2 + 60 = 115 minutes, but means 5 min past)
-        hour_diff = current_hour - hour_val
-        if hour_diff == 1
-          minute_diff = minute_diff + 60  # Adjust for previous hour
-        end
-      elsif minute_diff < 0
-        # Scheduled time is in the future within same hour (reject)
-        Rails.logger.debug "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-        return false
-      elsif minute_diff > 5
-        # Check if it's from previous hour (within 5 minute window)
-        hour_diff = current_hour - hour_val
-        if hour_diff == 1 && minute_diff > 55
-          # It's from previous hour, recalculate: (60 - scheduled_minute) + current_minute
-          minute_diff = (60 - minute_val) + current_minute
-          if minute_diff > 5
-            Rails.logger.debug "Cron too far in past (crossed hour): #{hour_val}:#{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-            return false
-          end
-        else
+      if hour_diff == 0
+        # Same hour: simple difference
+        minute_diff = current_minute - minute_val
+        if minute_diff < 0
+          # Scheduled time is in the future within same hour (reject)
+          Rails.logger.debug "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          return false
+        elsif minute_diff > 5
           # Too far in past, reject
           Rails.logger.debug "Cron minute too far in past: #{hour_val}:#{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
           return false
         end
-      end
-      
-      # Now check hour (allow current hour or previous hour if within 5 minute window)
-      unless hour_val == '*' || hour_val == current_hour || (hour_val == current_hour - 1 && minute_diff > 55)
-        Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{current_hour} and not previous hour within window (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      elsif hour_diff == 1
+        # Previous hour: check if within 5-minute window
+        # e.g., scheduled 13:57, current 14:02 -> diff = (60 - 57) + 2 = 5 minutes
+        minute_diff = (60 - minute_val) + current_minute
+        if minute_diff > 5
+          # Too far in past, reject
+          Rails.logger.debug "Cron too far in past (crossed hour): #{hour_val}:#{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          return false
+        end
+      else
+        # Different hour (not current or previous)
+        Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{current_hour} and not previous hour (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
         return false
       end
       
@@ -245,7 +239,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       bucket_image,
       schedule.post_to,
       description,
-      twitter_description,
+      twitter_description: twitter_description,
       facebook_page_id: schedule.facebook_page_id,
       linkedin_organization_urn: schedule.linkedin_organization_urn
     )
@@ -355,7 +349,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       bucket_image,
       schedule.post_to,
       description,
-      twitter_description,
+      twitter_description: twitter_description,
       facebook_page_id: schedule.facebook_page_id,
       linkedin_organization_urn: schedule.linkedin_organization_urn
     )
