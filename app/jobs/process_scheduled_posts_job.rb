@@ -324,7 +324,12 @@ class ProcessScheduledPostsJob < ApplicationJob
     user = schedule.bucket.user
     
     # Check if user has active subscription (super admins bypass this check)
-    unless user.super_admin? || user.account&.has_active_subscription?
+    if user.super_admin?
+      Rails.logger.info "Super admin bypass: user #{user.id} (#{user.email}) is a super admin - skipping subscription check"
+      puts "Super admin bypass: user #{user.id} (#{user.email}) is a super admin - skipping subscription check"
+    elsif user.account&.has_active_subscription?
+      Rails.logger.info "User #{user.id} (#{user.email}) has active subscription"
+    else
       Rails.logger.warn "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
       puts "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
       return
