@@ -31,20 +31,8 @@ else
   echo "Attempting to continue anyway..."
 fi
 
-# Start scheduler in background (runs every minute)
-echo "Starting scheduler..."
-# Create log directory if it doesn't exist
-mkdir -p /tmp
-# Start scheduler in background with nohup so it persists
-nohup bash -c "while true; do
-  echo \"[$(date)] Running scheduler...\" | tee -a /tmp/scheduler.log
-  bundle exec rails scheduler:process 2>&1 | tee -a /tmp/scheduler.log
-  echo \"[$(date)] Scheduler completed, waiting 60 seconds...\" | tee -a /tmp/scheduler.log
-  sleep 60
-done" > /dev/null 2>&1 &
-SCHEDULER_PID=$!
-echo "Scheduler started with PID: $SCHEDULER_PID"
-echo "Check logs with: tail -f /tmp/scheduler.log"
+# Scheduler now runs inside Puma worker (see config/puma.rb)
+echo "Scheduler will start automatically in Puma worker"
 
 # Start the server
 echo "Starting Rails server on port ${PORT:-8080}..."

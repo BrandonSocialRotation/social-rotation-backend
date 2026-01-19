@@ -42,3 +42,19 @@ pidfile ENV.fetch("PIDFILE") { "tmp/pids/server.pid" }
 
 # Allow puma to be restarted by `bin/rails restart` command.
 plugin :tmp_restart
+
+# Start scheduler thread that runs every minute
+on_worker_boot do
+  Thread.new do
+    loop do
+      begin
+        sleep 60  # Wait 60 seconds between runs
+        ProcessScheduledPostsJob.perform_now
+      rescue => e
+        Rails.logger.error "Scheduler thread error: #{e.message}"
+        Rails.logger.error e.backtrace.first(5).join("\n")
+      end
+    end
+  end
+  Rails.logger.info "Scheduler thread started in worker"
+end
