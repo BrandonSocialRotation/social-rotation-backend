@@ -99,6 +99,7 @@ Rails.application.routes.draw do
           post 'skip_image', to: 'bucket_schedules#skip_image'
           post 'skip_image_single', to: 'bucket_schedules#skip_image_single'
           get 'history', to: 'bucket_schedules#history'
+          get 'diagnose', to: 'bucket_schedules#diagnose'
         end
         collection do
           post 'bulk_update', to: 'bucket_schedules#bulk_update'

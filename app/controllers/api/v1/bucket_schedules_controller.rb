@@ -1,6 +1,6 @@
 class Api::V1::BucketSchedulesController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_bucket_schedule, only: [:show, :update, :destroy, :post_now, :skip_image, :skip_image_single, :history]
+  before_action :set_bucket_schedule, only: [:show, :update, :destroy, :post_now, :skip_image, :skip_image_single, :history, :diagnose]
 
   # GET /api/v1/bucket_schedules
   def index
@@ -344,6 +344,73 @@ class Api::V1::BucketSchedulesController < ApplicationController
 
   def set_bucket_schedule
     @bucket_schedule = current_user.bucket_schedules.find(params[:id])
+  end
+
+  # GET /api/v1/bucket_schedules/:id/diagnose
+  # Diagnostic endpoint to show what time a cron string represents
+  def diagnose
+    schedule = current_user.bucket_schedules.find(params[:id])
+    
+    cron_string = schedule.schedule
+    timezone = schedule.timezone || schedule.bucket.user.timezone || 'UTC'
+    
+    parts = cron_string.split(' ')
+    if parts.length != 5
+      return render json: { error: 'Invalid cron format' }, status: :bad_request
+    end
+    
+    minute, hour, day, month, weekday = parts
+    minute_val = minute == '*' ? nil : minute.to_i
+    hour_val = hour == '*' ? nil : hour.to_i
+    day_val = day == '*' ? nil : day.to_i
+    month_val = month == '*' ? nil : month.to_i
+    
+    # Get current year
+    year = Time.current.year
+    
+    # Try to create a time representing the scheduled time
+    scheduled_times = {}
+    
+    if hour_val && minute_val && day_val && month_val
+      begin
+        # Create time in the schedule's timezone
+        scheduled_local = Time.zone.parse("#{year}-#{month_val}-#{day_val} #{hour_val}:#{minute_val}:00")
+        scheduled_in_tz = scheduled_local.in_time_zone(timezone)
+        
+        scheduled_times[:in_schedule_timezone] = scheduled_in_tz.strftime('%Y-%m-%d %H:%M:%S %Z')
+        scheduled_times[:in_utc] = scheduled_in_tz.utc.strftime('%Y-%m-%d %H:%M:%S UTC')
+        
+        # Show what time it is now in both timezones
+        now_utc = Time.current.utc
+        now_in_tz = now_utc.in_time_zone(timezone)
+        
+        scheduled_times[:current_utc] = now_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
+        scheduled_times[:current_in_timezone] = now_in_tz.strftime('%Y-%m-%d %H:%M:%S %Z')
+        
+        # Calculate time until scheduled time
+        time_until = scheduled_in_tz.utc - now_utc
+        hours_until = (time_until / 3600).round(2)
+        scheduled_times[:hours_until] = hours_until
+        scheduled_times[:status] = hours_until > 0 ? 'future' : (hours_until.abs < 0.1 ? 'now' : 'past')
+        
+      rescue => e
+        scheduled_times[:error] = e.message
+      end
+    end
+    
+    render json: {
+      schedule_id: schedule.id,
+      cron_string: cron_string,
+      timezone: timezone,
+      parsed: {
+        minute: minute_val,
+        hour: hour_val,
+        day: day_val,
+        month: month_val,
+        weekday: weekday
+      },
+      scheduled_times: scheduled_times
+    }
   end
 
   def bucket_schedule_params

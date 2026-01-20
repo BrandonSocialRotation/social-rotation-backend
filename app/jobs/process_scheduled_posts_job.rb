@@ -182,7 +182,8 @@ class ProcessScheduledPostsJob < ApplicationJob
       end
       
       # minute_val matches or is within last 5 minutes (0 <= minute_diff <= 5)
-      Rails.logger.info "Cron minute match: #{hour_val}:#{minute_val} is within 5 minutes of #{current_hour}:#{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      Rails.logger.info "✓✓✓ Cron minute match: #{hour_val}:#{minute_val} is within 5 minutes of #{current_hour}:#{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+      puts "✓✓✓ Cron minute match: #{hour_val}:#{minute_val} is within 5 minutes of #{current_hour}:#{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
     elsif hour_val != '*'
       # Hour specified but minute is wildcard - just check hour
       unless hour_val == current_hour
@@ -194,7 +195,8 @@ class ProcessScheduledPostsJob < ApplicationJob
     # Day check already happened above, before hour/minute check
     # If we get here, minute/hour/day/month all match - log it
     if minute_val != '*' && hour_val != '*'
-      Rails.logger.info "✓ Cron time match: #{hour_val}:#{minute_val} matches #{current_hour}:#{current_minute}"
+      Rails.logger.info "✓✓✓✓✓ FULL CRON MATCH: #{hour_val}:#{minute_val} matches #{current_hour}:#{current_minute} on day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+      puts "✓✓✓✓✓ FULL CRON MATCH: #{hour_val}:#{minute_val} matches #{current_hour}:#{current_minute} on day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
     end
     
     # Check month (exact match or wildcard)
