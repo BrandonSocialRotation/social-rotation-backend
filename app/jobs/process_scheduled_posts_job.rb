@@ -140,11 +140,13 @@ class ProcessScheduledPostsJob < ApplicationJob
         minute_diff = current_minute - minute_val
         if minute_diff < 0
           # Scheduled time is in the future within same hour (reject)
-          Rails.logger.debug "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          Rails.logger.info "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          puts "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
           return false
         elsif minute_diff > 5
           # Too far in past, reject
-          Rails.logger.debug "Cron minute too far in past: #{hour_val}:#{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          Rails.logger.info "Cron minute too far in past: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          puts "Cron minute too far in past: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
           return false
         end
       elsif hour_diff == 1
@@ -153,12 +155,14 @@ class ProcessScheduledPostsJob < ApplicationJob
         minute_diff = (60 - minute_val) + current_minute
         if minute_diff > 5
           # Too far in past, reject
-          Rails.logger.debug "Cron too far in past (crossed hour): #{hour_val}:#{minute_val} is #{minute_diff} minutes ago (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          Rails.logger.info "Cron too far in past (crossed hour): scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          puts "Cron too far in past (crossed hour): scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
           return false
         end
       else
         # Different hour (not current or previous)
-        Rails.logger.debug "Cron hour mismatch: #{hour_val} != #{current_hour} and not previous hour (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        Rails.logger.info "Cron hour mismatch: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (hour_diff: #{hour_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        puts "Cron hour mismatch: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (hour_diff: #{hour_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
         return false
       end
       
