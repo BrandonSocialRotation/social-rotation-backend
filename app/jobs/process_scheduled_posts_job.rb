@@ -161,8 +161,14 @@ class ProcessScheduledPostsJob < ApplicationJob
         end
       else
         # Different hour (not current or previous)
-        Rails.logger.info "Cron hour mismatch: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (hour_diff: #{hour_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-        puts "Cron hour mismatch: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (hour_diff: #{hour_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        # This could mean the scheduled time is in the past (more than 1 hour ago) or future (more than 1 hour away)
+        if hour_diff > 1
+          Rails.logger.info "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          puts "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        else
+          Rails.logger.info "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          puts "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        end
         return false
       end
       
