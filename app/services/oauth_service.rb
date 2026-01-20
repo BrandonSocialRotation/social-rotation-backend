@@ -15,7 +15,7 @@ class OauthService
       env_callback: 'LINKEDIN_CALLBACK',
       auth_url: 'https://www.linkedin.com/oauth/v2/authorization',
       token_url: 'https://www.linkedin.com/oauth/v2/accessToken',
-      scopes: 'w_member_social r_organization_social openid profile email',
+      scopes: 'w_member_social openid profile email',
       callback_path: '/api/v1/oauth/linkedin/callback'
     },
     google: {
