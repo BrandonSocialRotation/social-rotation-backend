@@ -237,15 +237,26 @@ class Api::V1::BucketsController < ApplicationController
   end
 
   # POST /api/v1/buckets/:id/images/upload
-  # Uploads an image to a bucket
-  # Creates both an Image record and a BucketImage record
+  # Uploads an image or ZIP file of images to a bucket
+  # Creates both an Image record and a BucketImage record for each image
   def upload_image
     if params[:file].blank?
       return render json: { error: 'No file provided' }, status: :bad_request
     end
 
     uploaded_file = params[:file]
+    file_extension = File.extname(uploaded_file.original_filename).downcase
     
+    # Check if it's a ZIP file
+    if file_extension == '.zip'
+      upload_zip_file(uploaded_file)
+    else
+      upload_single_image(uploaded_file)
+    end
+  end
+  
+  # Upload a single image file
+  def upload_single_image(uploaded_file)
     # Generate a unique filename to prevent collisions
     file_extension = File.extname(uploaded_file.original_filename)
     unique_filename = "#{SecureRandom.uuid}#{file_extension}"
@@ -306,6 +317,145 @@ class Api::V1::BucketsController < ApplicationController
       Rails.logger.error e.backtrace.join("\n")
       render json: { error: "Upload failed: #{e.message}" }, status: :internal_server_error
     end
+  end
+  
+  # Upload and extract images from a ZIP file
+  def upload_zip_file(uploaded_file)
+    require 'zip'
+    
+    # Maximum ZIP file size: 50MB
+    MAX_ZIP_SIZE = 50.megabytes
+    MAX_FILE_SIZE = 10.megabytes # Maximum size per individual image file
+    
+    # Validate ZIP file size
+    if uploaded_file.size > MAX_ZIP_SIZE
+      return render json: { 
+        error: "ZIP file too large. Maximum size is #{MAX_ZIP_SIZE / 1.megabyte}MB" 
+      }, status: :bad_request
+    end
+    
+    uploaded_images = []
+    errors = []
+    temp_dir = nil
+    zip_temp_path = nil
+    
+    begin
+      # Save uploaded file to temp location for ZIP processing
+      zip_temp_path = Tempfile.new(['zip_upload', '.zip'])
+      zip_temp_path.binmode
+      zip_temp_path.write(uploaded_file.read)
+      zip_temp_path.rewind
+      
+      # Create temporary directory for extraction
+      temp_dir = Dir.mktmpdir('zip_upload_')
+      
+      # Extract ZIP file
+      Zip::File.open(zip_temp_path.path) do |zip_file|
+        zip_file.each do |entry|
+          # Skip directories and hidden files
+          next if entry.name.end_with?('/') || File.basename(entry.name).start_with?('.')
+          
+          # Validate file extension (only images)
+          file_ext = File.extname(entry.name).downcase
+          unless ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].include?(file_ext)
+            errors << "Skipped non-image file: #{entry.name}"
+            next
+          end
+          
+          # Validate file size
+          if entry.size > MAX_FILE_SIZE
+            errors << "File too large (skipped): #{entry.name} (#{(entry.size / 1.megabyte).round(2)}MB)"
+            next
+          end
+          
+          # Extract file to temp directory
+          extracted_path = File.join(temp_dir, File.basename(entry.name))
+          entry.extract(extracted_path) { true } # Overwrite if exists
+          
+          # Upload each image
+          begin
+            # Read file content into memory so it can be read multiple times
+            file_content = File.binread(extracted_path)
+            
+            # Create an object that mimics ActionDispatch::Http::UploadedFile interface
+            mock_uploaded_file = Object.new
+            mock_uploaded_file.define_singleton_method(:original_filename) { File.basename(entry.name) }
+            mock_uploaded_file.define_singleton_method(:content_type) { "image/#{file_ext[1..-1]}" }
+            mock_uploaded_file.define_singleton_method(:size) { file_content.bytesize }
+            mock_uploaded_file.define_singleton_method(:read) { file_content.dup }
+            mock_uploaded_file.define_singleton_method(:path) { extracted_path }
+            
+            # Upload this image using the single image upload logic
+            result = process_single_image_from_zip(mock_uploaded_file, File.basename(entry.name, file_ext))
+            uploaded_images << result if result
+          rescue => e
+            errors << "Failed to upload #{entry.name}: #{e.message}"
+            Rails.logger.error "Failed to upload #{entry.name}: #{e.message}"
+            Rails.logger.error e.backtrace.join("\n")
+          end
+        end
+      end
+      
+      if uploaded_images.empty?
+        return render json: { 
+          error: 'No valid images found in ZIP file',
+          errors: errors
+        }, status: :bad_request
+      end
+      
+      render json: {
+        bucket_images: uploaded_images.map { |bi| bucket_image_json(bi) },
+        uploaded_count: uploaded_images.length,
+        errors: errors.presence,
+        message: "Successfully uploaded #{uploaded_images.length} image#{'s' if uploaded_images.length != 1} from ZIP file"
+      }, status: :created
+      
+    rescue Zip::Error => e
+      Rails.logger.error "ZIP extraction error: #{e.message}"
+      render json: { error: "Invalid ZIP file: #{e.message}" }, status: :bad_request
+    rescue => e
+      Rails.logger.error "ZIP upload error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: "ZIP upload failed: #{e.message}" }, status: :internal_server_error
+    ensure
+      # Clean up temp files
+      zip_temp_path&.close
+      zip_temp_path&.unlink
+      if temp_dir && Dir.exist?(temp_dir)
+        FileUtils.rm_rf(temp_dir)
+      end
+    end
+  end
+  
+  # Process a single image file extracted from ZIP
+  def process_single_image_from_zip(extracted_file, friendly_name)
+    file_extension = File.extname(extracted_file.original_filename)
+    unique_filename = "#{SecureRandom.uuid}#{file_extension}"
+    
+    # Store file based on environment
+    if Rails.env.production?
+      spaces_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+      if spaces_key.present?
+        relative_path = upload_to_spaces(extracted_file, unique_filename)
+      else
+        Rails.logger.warn "DigitalOcean Spaces not configured, using placeholder image"
+        relative_path = "placeholder/#{unique_filename}"
+      end
+    else
+      relative_path = upload_locally(extracted_file, unique_filename)
+    end
+    
+    # Create Image record
+    image = Image.create!(
+      file_path: relative_path,
+      friendly_name: friendly_name
+    )
+    
+    # Create BucketImage record
+    @bucket.bucket_images.create!(
+      image_id: image.id,
+      friendly_name: friendly_name
+    )
   end
   
   # Upload file to DigitalOcean Spaces
