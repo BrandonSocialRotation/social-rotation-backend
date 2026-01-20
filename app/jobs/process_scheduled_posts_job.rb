@@ -129,12 +129,21 @@ class ProcessScheduledPostsJob < ApplicationJob
     minute_val = minute == '*' ? '*' : minute.to_i
     hour_val = hour == '*' ? '*' : hour.to_i
     
+    # Check day of month FIRST (before hour/minute) to properly handle future times
+    day_val = day == '*' ? '*' : day.to_i
+    unless day_val == '*' || day_val == current_day
+      Rails.logger.info "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      puts "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      return false
+    end
+    
     if minute_val != '*' && hour_val != '*'
       # Calculate minute difference accounting for hour rollover
       # Allow matches within a 5-minute window (0-5 minutes past the scheduled time)
       hour_diff = current_hour - hour_val
       minute_diff = nil
       
+      # Same day (or wildcard day) - check hour/minute
       if hour_diff == 0
         # Same hour: simple difference
         minute_diff = current_minute - minute_val
@@ -159,16 +168,16 @@ class ProcessScheduledPostsJob < ApplicationJob
           puts "Cron too far in past (crossed hour): scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
           return false
         end
+      elsif hour_diff < 0
+        # Current hour is LESS than scheduled hour (e.g., current=0, scheduled=12)
+        # This means scheduled time is in the future (later today, since day already matched)
+        Rails.logger.info "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        puts "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        return false
       else
-        # Different hour (not current or previous)
-        # This could mean the scheduled time is in the past (more than 1 hour ago) or future (more than 1 hour away)
-        if hour_diff > 1
-          Rails.logger.info "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-          puts "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-        else
-          Rails.logger.info "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-          puts "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-        end
+        # hour_diff > 1: Scheduled time is more than 1 hour in the past
+        Rails.logger.info "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        puts "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
         return false
       end
       
@@ -182,15 +191,7 @@ class ProcessScheduledPostsJob < ApplicationJob
       end
     end
     
-    # Check day of month (exact match or wildcard)
-    # For rotation schedules, day is usually '*'
-    day_val = day == '*' ? '*' : day.to_i
-    unless day_val == '*' || day_val == current_day
-      Rails.logger.info "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-      puts "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-      return false
-    end
-    
+    # Day check already happened above, before hour/minute check
     # If we get here, minute/hour/day/month all match - log it
     if minute_val != '*' && hour_val != '*'
       Rails.logger.info "✓ Cron time match: #{hour_val}:#{minute_val} matches #{current_hour}:#{current_minute}"
