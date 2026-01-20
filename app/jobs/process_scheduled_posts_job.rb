@@ -5,38 +5,25 @@ class ProcessScheduledPostsJob < ApplicationJob
   queue_as :default
 
   def perform
-    # Use STDOUT to ensure logs are visible in cron job output
     # Always use UTC - Rails default timezone
     utc_now = Time.current.utc
-    system_time = Time.now  # System time (may be wrong if server clock is off)
-    
-    puts "=== Processing scheduled posts at #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} UTC ==="
-    puts "=== Server system time: #{system_time.strftime('%Y-%m-%d %H:%M:%S')} | Rails timezone: #{Time.zone.name} ==="
-    Rails.logger.info "=== Processing scheduled posts at #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} UTC ==="
-    Rails.logger.info "=== Server system time: #{system_time.strftime('%Y-%m-%d %H:%M:%S')} | Rails timezone: #{Time.zone.name} ==="
+    Rails.logger.debug "Processing scheduled posts at #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
     
     # Get all active schedules
     schedules = BucketSchedule.includes(:bucket, :bucket_image, :bucket_send_histories, schedule_items: :bucket_image)
     total_count = schedules.count
-    puts "Found #{total_count} total schedules to check"
-    Rails.logger.info "Found #{total_count} total schedules to check"
     
     if total_count == 0
-      puts "No schedules found, exiting"
-      Rails.logger.info "No schedules found, exiting"
+      Rails.logger.debug "No schedules found"
       return
     end
     
     schedules.find_each do |schedule|
       # Process schedule items if they exist (new multi-image feature)
       if schedule.schedule_items.any?
-        puts "Processing schedule #{schedule.id} with #{schedule.schedule_items.count} schedule_items"
-        Rails.logger.info "Processing schedule #{schedule.id} with #{schedule.schedule_items.count} schedule_items"
         schedule.schedule_items.ordered.find_each do |item|
           if schedule_item_should_run?(item, schedule)
             begin
-              puts "Processing schedule item #{item.id} for schedule #{schedule.id}"
-    Rails.logger.info "Processing schedule item #{item.id} for schedule #{schedule.id}"
               process_schedule_item(item, schedule)
             rescue => e
               Rails.logger.error "Error processing schedule item #{item.id}: #{e.message}"
@@ -48,7 +35,6 @@ class ProcessScheduledPostsJob < ApplicationJob
         # Legacy: process schedule directly (single image or rotation)
         if schedule_should_run?(schedule)
           begin
-            Rails.logger.info "Processing legacy schedule #{schedule.id}"
             process_schedule(schedule)
           rescue => e
             Rails.logger.error "Error processing schedule #{schedule.id}: #{e.message}"
@@ -57,9 +43,6 @@ class ProcessScheduledPostsJob < ApplicationJob
         end
       end
     end
-    
-    puts "Finished processing scheduled posts"
-    Rails.logger.info "Finished processing scheduled posts"
   end
 
   def schedule_should_run?(schedule)
@@ -118,10 +101,8 @@ class ProcessScheduledPostsJob < ApplicationJob
     current_day = now.day
     current_month = now.month
     
-    # Log at INFO level so it's visible in production logs
-    timezone_info = user_timezone.present? ? "user timezone: #{user_timezone}" : "UTC (no user timezone)"
-    Rails.logger.info "Checking cron: #{cron_string} | #{timezone_info} | Server UTC: #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} | User Local: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')} | (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
-    puts "Checking cron: #{cron_string} | #{timezone_info} | Server UTC: #{utc_now.strftime('%Y-%m-%d %H:%M:%S')} | User Local: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')} | (min: #{current_minute}, hour: #{current_hour}, day: #{current_day}, month: #{current_month})"
+    # Log detailed check info at DEBUG level (only visible when needed)
+    Rails.logger.debug "Checking cron: #{cron_string} | timezone: #{user_timezone || 'UTC'} | local time: #{now.strftime('%H:%M:%S %Z')}"
     
     # Check minute - allow match if scheduled minute is current or within last 5 minutes
     # This handles cases where scheduler runs slightly late or you test manually
@@ -132,8 +113,7 @@ class ProcessScheduledPostsJob < ApplicationJob
     # Check day of month FIRST (before hour/minute) to properly handle future times
     day_val = day == '*' ? '*' : day.to_i
     unless day_val == '*' || day_val == current_day
-      Rails.logger.info "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-      puts "Cron day mismatch: scheduled day #{day_val} != current day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+      Rails.logger.debug "Cron day mismatch: scheduled day #{day_val} != current day #{current_day}"
       return false
     end
     
@@ -149,13 +129,11 @@ class ProcessScheduledPostsJob < ApplicationJob
         minute_diff = current_minute - minute_val
         if minute_diff < 0
           # Scheduled time is in the future within same hour (reject)
-          Rails.logger.info "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-          puts "Cron minute in future: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          Rails.logger.debug "Cron minute in future: scheduled #{hour_val}:#{minute_val.to_s.rjust(2, '0')}, current #{current_hour}:#{current_minute.to_s.rjust(2, '0')}"
           return false
         elsif minute_diff > 5
           # Too far in past, reject
-          Rails.logger.info "Cron minute too far in past: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-          puts "Cron minute too far in past: scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          Rails.logger.debug "Cron too far in past: scheduled #{hour_val}:#{minute_val.to_s.rjust(2, '0')}, current #{current_hour}:#{current_minute.to_s.rjust(2, '0')}"
           return false
         end
       elsif hour_diff == 1
@@ -164,26 +142,22 @@ class ProcessScheduledPostsJob < ApplicationJob
         minute_diff = (60 - minute_val) + current_minute
         if minute_diff > 5
           # Too far in past, reject
-          Rails.logger.info "Cron too far in past (crossed hour): scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-          puts "Cron too far in past (crossed hour): scheduled #{hour_val}:#{minute_val}, current #{current_hour}:#{current_minute} (minute_diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+          Rails.logger.debug "Cron too far in past (crossed hour): scheduled #{hour_val}:#{minute_val.to_s.rjust(2, '0')}, current #{current_hour}:#{current_minute.to_s.rjust(2, '0')}"
           return false
         end
       elsif hour_diff < 0
         # Current hour is LESS than scheduled hour (e.g., current=0, scheduled=12)
         # This means scheduled time is in the future (later today, since day already matched)
-        Rails.logger.info "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-        puts "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val} (#{hour_diff.abs} hours ahead), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        Rails.logger.debug "Cron scheduled time is in future: scheduled #{hour_val}:#{minute_val.to_s.rjust(2, '0')}, current #{current_hour}:#{current_minute.to_s.rjust(2, '0')}"
         return false
       else
         # hour_diff > 1: Scheduled time is more than 1 hour in the past
-        Rails.logger.info "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
-        puts "Cron scheduled time is too far in past: scheduled #{hour_val}:#{minute_val} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S')})"
+        Rails.logger.debug "Cron too far in past: scheduled #{hour_val}:#{minute_val.to_s.rjust(2, '0')} (#{hour_diff} hours ago), current #{current_hour}:#{current_minute.to_s.rjust(2, '0')}"
         return false
       end
       
       # minute_val matches or is within last 5 minutes (0 <= minute_diff <= 5)
-      Rails.logger.info "✓✓✓ Cron minute match: #{hour_val}:#{minute_val} is within 5 minutes of #{current_hour}:#{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
-      puts "✓✓✓ Cron minute match: #{hour_val}:#{minute_val} is within 5 minutes of #{current_hour}:#{current_minute} (diff: #{minute_diff}, cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+      Rails.logger.debug "Cron minute match: #{hour_val}:#{minute_val.to_s.rjust(2, '0')} matches #{current_hour}:#{current_minute.to_s.rjust(2, '0')} (diff: #{minute_diff})"
     elsif hour_val != '*'
       # Hour specified but minute is wildcard - just check hour
       unless hour_val == current_hour
@@ -193,10 +167,9 @@ class ProcessScheduledPostsJob < ApplicationJob
     end
     
     # Day check already happened above, before hour/minute check
-    # If we get here, minute/hour/day/month all match - log it
+    # If we get here, minute/hour/day/month all match
     if minute_val != '*' && hour_val != '*'
-      Rails.logger.info "✓✓✓✓✓ FULL CRON MATCH: #{hour_val}:#{minute_val} matches #{current_hour}:#{current_minute} on day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
-      puts "✓✓✓✓✓ FULL CRON MATCH: #{hour_val}:#{minute_val} matches #{current_hour}:#{current_minute} on day #{current_day} (cron: #{cron_string}, now: #{now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+      Rails.logger.info "✓ Schedule match: #{hour_val}:#{minute_val.to_s.rjust(2, '0')} on day #{current_day} (#{user_timezone || 'UTC'})"
     end
     
     # Check month (exact match or wildcard)
@@ -221,8 +194,6 @@ class ProcessScheduledPostsJob < ApplicationJob
       end
     end
     
-    puts "✓ Cron match: #{cron_string} matches current time #{now.strftime('%Y-%m-%d %H:%M:%S')}"
-    Rails.logger.info "✓ Cron match: #{cron_string} matches current time #{now.strftime('%Y-%m-%d %H:%M:%S')}"
     true
   end
 
@@ -299,15 +270,10 @@ class ProcessScheduledPostsJob < ApplicationJob
       Rails.logger.warn "No timezone set for schedule item #{item.id} - using UTC"
     end
     
-    current_time = item_timezone ? Time.current.in_time_zone(item_timezone) : Time.current
-    puts "Checking schedule item #{item.id} (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
-    Rails.logger.info "Checking schedule item #{item.id} (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
-    
     # Check if schedule item is due based on cron expression, using item's timezone (or schedule/user's as fallback)
     cron_match_result = cron_due?(item.schedule, item_timezone)
     unless cron_match_result
-      Rails.logger.info "Schedule item #{item.id} is not due yet (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}) - cron_due? returned false"
-      puts "Schedule item #{item.id} is not due yet (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}) - cron_due? returned false"
+      Rails.logger.debug "Schedule item #{item.id} is not due yet"
       return false
     end
     
@@ -320,12 +286,10 @@ class ProcessScheduledPostsJob < ApplicationJob
                        .exists?
     
     if last_sent
-      Rails.logger.info "Schedule item #{item.id} has already been sent, skipping"
+      Rails.logger.debug "Schedule item #{item.id} has already been sent, skipping"
       return false
     end
     
-    puts "✓ Schedule item #{item.id} is due and ready to post (cron: #{item.schedule})"
-    Rails.logger.info "✓ Schedule item #{item.id} is due and ready to post (cron: #{item.schedule})"
     true
   end
   
@@ -333,26 +297,18 @@ class ProcessScheduledPostsJob < ApplicationJob
     user = schedule.bucket.user
     
     # Check if user has active subscription (super admins bypass this check)
-    if user.super_admin?
-      Rails.logger.info "Super admin bypass: user #{user.id} (#{user.email}) is a super admin - skipping subscription check"
-      puts "Super admin bypass: user #{user.id} (#{user.email}) is a super admin - skipping subscription check"
-    elsif user.account&.has_active_subscription?
-      Rails.logger.info "User #{user.id} (#{user.email}) has active subscription"
-    else
-      Rails.logger.warn "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
-      puts "Cannot post schedule item #{item.id}: user #{user.id} (#{user.email}) does not have active subscription"
+    unless user.super_admin? || user.account&.has_active_subscription?
+      Rails.logger.warn "Cannot post schedule item #{item.id}: user #{user.id} does not have active subscription"
       return
     end
     
     bucket_image = item.bucket_image
     unless bucket_image
       Rails.logger.warn "Cannot post schedule item #{item.id}: bucket_image is missing"
-      puts "Cannot post schedule item #{item.id}: bucket_image is missing"
       return
     end
     
-    Rails.logger.info "Starting to post schedule item #{item.id} (bucket_image_id: #{bucket_image.id})"
-    puts "Starting to post schedule item #{item.id} (bucket_image_id: #{bucket_image.id})"
+    Rails.logger.info "Posting schedule item #{item.id} (schedule #{schedule.id}, image #{bucket_image.id})"
     
     # Get descriptions (item description overrides schedule description)
     description = item.description.presence || schedule.description.presence || bucket_image.description.presence || ''
@@ -386,8 +342,7 @@ class ProcessScheduledPostsJob < ApplicationJob
     # Update schedule
     schedule.increment!(:times_sent)
     
-    puts "Successfully posted schedule item #{item.id} (schedule #{schedule.id}) to social media"
-    Rails.logger.info "Successfully posted schedule item #{item.id} (schedule #{schedule.id}) to social media"
+    Rails.logger.info "✓ Successfully posted schedule item #{item.id} (schedule #{schedule.id})"
   rescue => e
     Rails.logger.error "Failed to post schedule item #{item.id}: #{e.message}"
     raise
