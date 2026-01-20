@@ -50,6 +50,10 @@ class Api::V1::BucketSchedulesController < ApplicationController
       Rails.logger.info "Timezone column found - will save timezone: #{schedule_params[:timezone]}"
     end
     
+    # Log the schedule being created for debugging
+    Rails.logger.info "Creating schedule with cron: #{schedule_params[:schedule]}, timezone: #{schedule_params[:timezone]}, schedule_type: #{schedule_params[:schedule_type]}"
+    puts "Creating schedule with cron: #{schedule_params[:schedule]}, timezone: #{schedule_params[:timezone]}, schedule_type: #{schedule_params[:schedule_type]}"
+    
     @bucket_schedule = @bucket.bucket_schedules.build(schedule_params)
     
     # Validate that bucket_image_id belongs to the bucket if provided
@@ -80,8 +84,9 @@ class Api::V1::BucketSchedulesController < ApplicationController
           end
           schedule_item = @bucket_schedule.schedule_items.create!(item_attrs)
           
-          # Log the schedule item creation
-          Rails.logger.info "Created schedule_item #{schedule_item.id} with schedule: #{schedule_item.schedule}"
+          # Log the schedule item creation with timezone info
+          Rails.logger.info "Created schedule_item #{schedule_item.id} with schedule: #{schedule_item.schedule}, timezone: #{item_attrs[:timezone] || 'nil'}"
+          puts "Created schedule_item #{schedule_item.id} with schedule: #{schedule_item.schedule}, timezone: #{item_attrs[:timezone] || 'nil'}"
           # Note: Jobs will be processed by ProcessScheduledPostsJob which runs every minute
           # The job will check if the cron time matches and post accordingly
         end

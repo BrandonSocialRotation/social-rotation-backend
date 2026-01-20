@@ -301,8 +301,10 @@ class ProcessScheduledPostsJob < ApplicationJob
     Rails.logger.info "Checking schedule item #{item.id} (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}, current time: #{current_time.strftime('%Y-%m-%d %H:%M:%S %Z')})"
     
     # Check if schedule item is due based on cron expression, using item's timezone (or schedule/user's as fallback)
-    unless cron_due?(item.schedule, item_timezone)
-      Rails.logger.debug "Schedule item #{item.id} is not due yet (cron: #{item.schedule})"
+    cron_match_result = cron_due?(item.schedule, item_timezone)
+    unless cron_match_result
+      Rails.logger.info "Schedule item #{item.id} is not due yet (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}) - cron_due? returned false"
+      puts "Schedule item #{item.id} is not due yet (cron: #{item.schedule}, timezone: #{item_timezone || 'UTC'}) - cron_due? returned false"
       return false
     end
     
