@@ -196,6 +196,9 @@ Rails.application.routes.draw do
   # Stripe webhook endpoint (legacy path that Stripe is configured to use)
   post 'stripe/subscription_created', to: 'api/v1/subscriptions#webhook'
   
+  # Privacy policy route (for Meta/Facebook verification)
+  get "privacy-policy", to: "privacy#show"
+  
   # Defines the root path route ("/")
   root "health#show"
 end
