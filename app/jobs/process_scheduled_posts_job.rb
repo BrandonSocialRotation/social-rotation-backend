@@ -213,12 +213,25 @@ class ProcessScheduledPostsJob < ApplicationJob
     
     return unless bucket_image
     
-    # Get descriptions
-    description = bucket_image.description.presence || schedule.description.presence || ''
-    twitter_description = bucket_image.twitter_description.presence || schedule.twitter_description.presence || description
+    # Get descriptions - prefer bucket_image description, then schedule description
+    description = if bucket_image.description.present?
+      bucket_image.description
+    elsif schedule.description.present?
+      schedule.description
+    else
+      ''
+    end
+    
+    twitter_description = if bucket_image.twitter_description.present?
+      bucket_image.twitter_description
+    elsif schedule.twitter_description.present?
+      schedule.twitter_description
+    else
+      description
+    end
     
     # Log what description is being used for debugging
-    Rails.logger.info "Description sources - bucket_image: '#{bucket_image.description}', schedule: '#{schedule.description}' => final: '#{description}'"
+    Rails.logger.info "Description sources - bucket_image: '#{bucket_image.description}', schedule: '#{schedule.description}' => final: '#{description}' (length: #{description.length})"
     
     # Post to all selected platforms
     poster = SocialMediaPosterService.new(
@@ -314,11 +327,29 @@ class ProcessScheduledPostsJob < ApplicationJob
     Rails.logger.info "Posting schedule item #{item.id} (schedule #{schedule.id}, image #{bucket_image.id})"
     
     # Get descriptions (item description overrides schedule description)
-    description = item.description.presence || schedule.description.presence || bucket_image.description.presence || ''
-    twitter_description = item.twitter_description.presence || schedule.twitter_description.presence || bucket_image.twitter_description.presence || description
+    # Use the first non-blank description found, or empty string if all are blank
+    description = if item.description.present?
+      item.description
+    elsif schedule.description.present?
+      schedule.description
+    elsif bucket_image.description.present?
+      bucket_image.description
+    else
+      ''
+    end
+    
+    twitter_description = if item.twitter_description.presence
+      item.twitter_description
+    elsif schedule.twitter_description.presence
+      schedule.twitter_description
+    elsif bucket_image.twitter_description.presence
+      bucket_image.twitter_description
+    else
+      description
+    end
     
     # Log what description is being used for debugging
-    Rails.logger.info "Description sources - item: '#{item.description}', schedule: '#{schedule.description}', bucket_image: '#{bucket_image.description}' => final: '#{description}'"
+    Rails.logger.info "Description sources - item: '#{item.description}', schedule: '#{schedule.description}', bucket_image: '#{bucket_image.description}' => final: '#{description}' (length: #{description.length})"
     
     # Post to all selected platforms
     poster = SocialMediaPosterService.new(

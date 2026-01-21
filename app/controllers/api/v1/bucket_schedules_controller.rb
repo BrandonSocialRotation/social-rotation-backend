@@ -74,8 +74,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
           item_attrs = {
             bucket_image_id: item_params[:bucket_image_id],
             schedule: item_params[:schedule] || @bucket_schedule.schedule,
-            description: item_params[:description] || '',
-            twitter_description: item_params[:twitter_description] || '',
+            description: item_params[:description].to_s,
+            twitter_description: item_params[:twitter_description].to_s,
             position: index
           }
           # Only set timezone if column exists
@@ -134,8 +134,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
           item_attrs = {
             bucket_image_id: item_params[:bucket_image_id],
             schedule: item_params[:schedule] || @bucket_schedule.schedule,
-            description: item_params[:description] || '',
-            twitter_description: item_params[:twitter_description] || '',
+            description: item_params[:description].to_s,
+            twitter_description: item_params[:twitter_description].to_s,
             position: index
           }
           # Only set timezone if column exists
