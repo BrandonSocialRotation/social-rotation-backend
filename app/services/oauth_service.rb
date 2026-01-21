@@ -126,8 +126,9 @@ class OauthService
     return nil unless client_id
     
     state = generate_state(user_id)
-    session["#{@platform}_state".to_sym] = state.split(':').last
-    session[:oauth_state] = state.split(':').last
+    # Store full state in session for fallback verification (in case database lookup fails)
+    session["#{@platform}_state".to_sym] = state
+    session[:oauth_state] = state
     session[:user_id] = user_id
     
     redirect_uri = @config[:env_callback] ? (ENV[@config[:env_callback]] || default_callback_url) : default_callback_url
