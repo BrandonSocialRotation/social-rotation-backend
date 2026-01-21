@@ -1,1 +1,12 @@
 # See https://www.robotstxt.org/robotstxt.html for documentation on how to use the robots.txt file
+
+# Allow all crawlers, including Meta/Facebook's crawler
+User-agent: *
+Allow: /
+
+# Specifically allow Meta's crawler
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: Facebot
+Allow: /
