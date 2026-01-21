@@ -542,13 +542,15 @@ module SocialMedia
         'X-Restli-Protocol-Version' => '2.0.0'
       }
       
+      Rails.logger.info "LinkedIn create_post - message: '#{message}', message length: #{message.to_s.length}"
+      
       body = {
         author: "urn:li:person:#{@user.linkedin_profile_id}",
         lifecycleState: 'PUBLISHED',
         specificContent: {
           'com.linkedin.ugc.ShareContent' => {
             shareCommentary: {
-              text: message
+              text: message.presence || ''
             },
             shareMediaCategory: 'IMAGE',
             media: [

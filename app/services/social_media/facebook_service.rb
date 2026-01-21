@@ -77,9 +77,11 @@ module SocialMedia
       # Step 1: Create media container
       create_url = "#{BASE_URL}/#{@user.instagram_business_id}/media"
       create_params = {
-        caption: message,
+        caption: message.presence || '',
         access_token: page_token
       }
+      
+      Rails.logger.info "Instagram post - caption: '#{message}', caption length: #{message.to_s.length}"
       
       if is_video
         create_params[:media_type] = 'REELS' # or 'VIDEO' for regular posts
@@ -220,13 +222,23 @@ module SocialMedia
       # Use page_id if provided, otherwise use /me endpoint
       endpoint = page_id ? "#{BASE_URL}/#{page_id}/photos" : "#{BASE_URL}/me/photos"
       params = {
-        message: message,
+        message: message.presence || '',
         url: image_url,
         access_token: page_token
       }
       
+      Rails.logger.info "Facebook post_image - message: '#{message}', message length: #{message.to_s.length}"
+      
       response = HTTParty.post(endpoint, body: params)
-      JSON.parse(response.body)
+      result = JSON.parse(response.body)
+      
+      if result['error']
+        Rails.logger.error "Facebook post_image error: #{result['error']}"
+      else
+        Rails.logger.info "Facebook post_image success - post ID: #{result['post_id'] || result['id']}"
+      end
+      
+      result
     end
     
     # Post a video to Facebook

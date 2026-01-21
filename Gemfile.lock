@@ -280,6 +280,7 @@ GEM
       rspec-mocks (~> 3.13)
       rspec-support (~> 3.13)
     rspec-support (3.13.6)
+    rubyzip (2.4.1)
     securerandom (0.4.1)
     shoulda-matchers (6.5.0)
       activesupport (>= 5.2.0)
@@ -338,6 +339,7 @@ DEPENDENCIES
   rails (~> 7.1.5, >= 7.1.5.1)
   rexml (~> 3.2)
   rspec-rails
+  rubyzip (~> 2.3)
   shoulda-matchers
   simplecov
   stripe (~> 10.0)

@@ -46,6 +46,9 @@ class SocialMediaPosterService
       image_url = get_public_image_url
       image_path = get_local_image_path
     
+    # Log the description being used for posting
+    Rails.logger.info "Posting with description: '#{@description}' (length: #{@description.length})"
+    
     # Post to Facebook
     if should_post_to?(BIT_FACEBOOK)
       results[:facebook] = post_to_facebook(image_url)
