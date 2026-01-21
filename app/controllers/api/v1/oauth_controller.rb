@@ -339,10 +339,12 @@ class Api::V1::OauthController < ApplicationController
       when 'access_denied' then "#{platform}_access_denied"
       else "#{platform}_auth_failed"
       end
+      Rails.logger.error "#{platform_name} OAuth error from provider: #{error_param}"
       return redirect_to oauth_callback_url(error: error_msg, platform: platform_name), allow_other_host: true
     end
     
     unless code.present?
+      Rails.logger.error "#{platform_name} OAuth callback missing code parameter"
       return redirect_to oauth_callback_url(error: "#{platform}_auth_failed", platform: platform_name), allow_other_host: true
     end
     
@@ -350,24 +352,30 @@ class Api::V1::OauthController < ApplicationController
     user_id, stored_state = service.verify_state(state, session["#{platform}_state".to_sym] || session[:oauth_state])
     
     unless stored_state && user_id && user_id > 0
+      Rails.logger.error "#{platform_name} OAuth state verification failed - state: #{state}, stored_state: #{stored_state}, user_id: #{user_id}"
       return redirect_to oauth_callback_url(error: 'invalid_state', platform: platform_name), allow_other_host: true
     end
     
     user = User.find_by(id: user_id)
     unless user
+      Rails.logger.error "#{platform_name} OAuth user not found: #{user_id}"
       return redirect_to oauth_callback_url(error: 'user_not_found', platform: platform_name), allow_other_host: true
     end
     
     redirect_uri = service.send(:default_callback_url)
+    Rails.logger.info "#{platform_name} OAuth exchanging code for token - redirect_uri: #{redirect_uri}"
     response = service.exchange_code_for_token(code, redirect_uri)
     
     unless response&.success?
+      error_body = response&.body || 'No response body'
+      Rails.logger.error "#{platform_name} OAuth token exchange failed - code: #{response&.code}, body: #{error_body}"
       return redirect_to oauth_callback_url(error: "#{platform}_auth_failed", platform: platform_name), allow_other_host: true
     end
     
     data = JSON.parse(response.body)
     
     unless data['access_token']
+      Rails.logger.error "#{platform_name} OAuth response missing access_token - response: #{data.inspect}"
       return redirect_to oauth_callback_url(error: "#{platform}_auth_failed", platform: platform_name), allow_other_host: true
     end
     
@@ -375,6 +383,7 @@ class Api::V1::OauthController < ApplicationController
     redirect_to oauth_callback_url(success: "#{platform}_connected", platform: platform_name), allow_other_host: true
   rescue => e
     Rails.logger.error "#{platform_name} OAuth error: #{e.message}"
+    Rails.logger.error "#{platform_name} OAuth error backtrace: #{e.backtrace.join("\n")}"
     redirect_to oauth_callback_url(error: "#{platform}_auth_failed", platform: platform_name), allow_other_host: true
   end
   
