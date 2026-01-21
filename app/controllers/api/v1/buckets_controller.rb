@@ -3,6 +3,10 @@ class Api::V1::BucketsController < ApplicationController
   before_action :set_bucket, only: [:show, :update, :destroy, :page, :randomize, :images, :single_image, :upload_image, :add_image, :videos, :upload_video]
   before_action :set_bucket_for_image_actions, only: [:update_image, :delete_image]
   before_action :set_bucket_image, only: [:update_image, :delete_image]
+  
+  # Maximum file size limits for ZIP uploads
+  MAX_ZIP_SIZE = 50.megabytes
+  MAX_FILE_SIZE = 10.megabytes
 
   # GET /api/v1/buckets
   def index
@@ -322,10 +326,6 @@ class Api::V1::BucketsController < ApplicationController
   # Upload and extract images from a ZIP file
   def upload_zip_file(uploaded_file)
     require 'zip'
-    
-    # Maximum ZIP file size: 50MB
-    MAX_ZIP_SIZE = 50.megabytes
-    MAX_FILE_SIZE = 10.megabytes # Maximum size per individual image file
     
     # Validate ZIP file size
     if uploaded_file.size > MAX_ZIP_SIZE
