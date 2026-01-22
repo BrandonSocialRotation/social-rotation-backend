@@ -62,7 +62,8 @@ class OauthService
       auth_url: 'https://www.facebook.com/v18.0/dialog/oauth',
       token_url: 'https://graph.facebook.com/v18.0/oauth/access_token',
       # Instagram Login scopes - allows direct Instagram account access
-      scopes: 'instagram_basic,instagram_content_publish,instagram_manage_insights,instagram_manage_messages,pages_show_list',
+      # Note: Use instagram_business_manage_messages (not instagram_manage_messages) to match approved permission
+      scopes: 'instagram_basic,instagram_content_publish,instagram_manage_insights,instagram_business_manage_messages,pages_show_list',
       callback_path: '/api/v1/oauth/instagram/callback'
     }
   }.freeze
