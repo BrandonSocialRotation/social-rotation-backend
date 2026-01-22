@@ -18,7 +18,6 @@ class PrivacyController < ActionController::Base
         <meta property="og:url" content="https://my.socialrotation.app/privacy-policy">
         <meta property="og:title" content="Privacy Policy - Social Rotation">
         <meta property="og:description" content="Social Rotation Privacy Policy. Learn how we collect, use, and protect your personal information.">
-        <meta property="og:image" content="https://my.socialrotation.app/og-image.png">
         
         <!-- Twitter -->
         <meta property="twitter:card" content="summary_large_image">
