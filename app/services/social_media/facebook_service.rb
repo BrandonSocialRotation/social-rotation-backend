@@ -71,7 +71,7 @@ module SocialMedia
       page_token ||= get_page_access_token(page_id: page_id)
       
       unless page_token
-        raise "Could not get Facebook page access token for Instagram"
+        raise "Could not get Facebook page access token for Instagram. Your Instagram account must be linked to a Facebook Page to post content. Please link your Instagram Business/Creator account to a Facebook Page in your Facebook Page settings."
       end
       
       # Step 1: Create media container
@@ -95,7 +95,15 @@ module SocialMedia
       
       unless data['id']
         error_message = if data['error']
-          "#{data['error']['message']} (Code: #{data['error']['code']})"
+          error_code = data['error']['code']
+          error_msg = data['error']['message']
+          
+          # Provide helpful error messages for common issues
+          if error_msg.include?('business account') || error_msg.include?('not a business account') || error_code == 10
+            "Your Instagram account must be a Business or Creator account linked to a Facebook Page. Please: 1) Convert your Instagram account to Business/Creator in Instagram settings, 2) Link it to a Facebook Page in your Facebook Page settings, then reconnect Instagram."
+          else
+            "#{error_msg} (Code: #{error_code})"
+          end
         else
           "Unknown error: #{data.inspect}"
         end
@@ -121,7 +129,16 @@ module SocialMedia
       publish_data = JSON.parse(response.body)
       
       if publish_data['error']
-        error_message = "#{publish_data['error']['message']} (Code: #{publish_data['error']['code']})"
+        error_code = publish_data['error']['code']
+        error_msg = publish_data['error']['message']
+        
+        # Provide helpful error messages for common issues
+        error_message = if error_msg.include?('business account') || error_msg.include?('not a business account') || error_code == 10
+          "Your Instagram account must be a Business or Creator account linked to a Facebook Page. Please: 1) Convert your Instagram account to Business/Creator in Instagram settings, 2) Link it to a Facebook Page in your Facebook Page settings, then reconnect Instagram."
+        else
+          "#{error_msg} (Code: #{error_code})"
+        end
+        
         Rails.logger.error "Instagram publish failed: #{error_message}"
         raise "Failed to publish Instagram media: #{error_message}"
       end
