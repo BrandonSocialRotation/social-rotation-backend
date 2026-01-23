@@ -29,10 +29,13 @@ class Api::V1::BucketsController < ApplicationController
       return render json: { error: 'Bucket not found' }, status: :not_found
     end
     
+    # Filter out bucket_images with missing image records (orphaned records)
+    bucket_images = @bucket.bucket_images.includes(:image).select { |bi| bi.image.present? }
+    
     render json: {
       bucket: bucket_json(@bucket, include_owner: @bucket.is_global),
-      bucket_images: @bucket.bucket_images.includes(:image).map { |bi| bucket_image_json(bi) },
-      bucket_videos: @bucket.bucket_videos.includes(:video).map { |bv| bucket_video_json(bv) },
+      bucket_images: bucket_images.map { |bi| bucket_image_json(bi) },
+      bucket_videos: @bucket.bucket_videos.includes(:video).select { |bv| bv.video.present? }.map { |bv| bucket_video_json(bv) },
       bucket_schedules: @bucket.bucket_schedules.map { |bs| bucket_schedule_json(bs) }
     }
   end
@@ -134,7 +137,15 @@ class Api::V1::BucketsController < ApplicationController
 
   # GET /api/v1/buckets/:id/images
   def images
-    @bucket_images = @bucket.bucket_images.includes(:image).order(:friendly_name)
+    # Filter out bucket_images with missing image records (orphaned records)
+    # Use left_joins to include images, then filter out nil images
+    @bucket_images = @bucket.bucket_images
+                          .includes(:image)
+                          .where.not(image_id: nil)
+                          .order(:friendly_name)
+                          .to_a
+                          .select { |bi| bi.image.present? }
+    
     render json: {
       bucket_images: @bucket_images.map { |bi| bucket_image_json(bi) }
     }
@@ -705,6 +716,21 @@ class Api::V1::BucketsController < ApplicationController
   end
 
   def bucket_image_json(bucket_image)
+    # Handle missing image gracefully
+    image_data = if bucket_image.image.present?
+      {
+        id: bucket_image.image.id,
+        file_path: bucket_image.image.file_path,
+        source_url: bucket_image.image.get_source_url
+      }
+    else
+      {
+        id: nil,
+        file_path: nil,
+        source_url: nil
+      }
+    end
+    
     {
       id: bucket_image.id,
       friendly_name: bucket_image.friendly_name,
@@ -714,11 +740,7 @@ class Api::V1::BucketsController < ApplicationController
       repeat: bucket_image.repeat,
       post_to: bucket_image.post_to,
       use_watermark: bucket_image.use_watermark,
-      image: {
-        id: bucket_image.image.id,
-        file_path: bucket_image.image.file_path,
-        source_url: bucket_image.image.get_source_url
-      },
+      image: image_data,
       created_at: bucket_image.created_at,
       updated_at: bucket_image.updated_at
     }
