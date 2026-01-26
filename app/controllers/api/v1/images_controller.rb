@@ -12,8 +12,9 @@ class Api::V1::ImagesController < ApplicationController
       return render json: { error: 'Path parameter required' }, status: :bad_request
     end
     
-    # Construct the full URL to DigitalOcean Spaces
-    endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://se1.sfo2.digitaloceanspaces.com'
+    # Get bucket name and endpoint
+    bucket_name = ENV['DO_SPACES_BUCKET'] || ENV['DIGITAL_OCEAN_SPACES_NAME']
+    endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://sfo2.digitaloceanspaces.com'
     endpoint = endpoint.chomp('/')
     
     # Handle different path formats
@@ -22,7 +23,23 @@ class Api::V1::ImagesController < ApplicationController
       path = path.sub(/^uploads\//, '')
     end
     
-    image_url = "#{endpoint}/#{path}"
+    # Construct the full URL to DigitalOcean Spaces
+    # Format: https://<bucket-name>.<region>.digitaloceanspaces.com/<key>
+    # OR: https://<endpoint>/<bucket-name>/<key> if endpoint doesn't include bucket
+    if bucket_name.present?
+      # Try virtual-hosted-style first (bucket in subdomain)
+      if endpoint.include?('digitaloceanspaces.com')
+        # Extract region from endpoint (e.g., sfo2 from https://sfo2.digitaloceanspaces.com)
+        region = endpoint.match(/https?:\/\/([^.]+)\.digitaloceanspaces\.com/)[1] rescue 'sfo2'
+        image_url = "https://#{bucket_name}.#{region}.digitaloceanspaces.com/#{path}"
+      else
+        # Use path-style if endpoint is custom
+        image_url = "#{endpoint}/#{bucket_name}/#{path}"
+      end
+    else
+      # Fallback: try without bucket name (might work if bucket is in endpoint)
+      image_url = "#{endpoint}/#{path}"
+    end
     
     begin
       # Fetch the image from DigitalOcean Spaces
@@ -33,8 +50,10 @@ class Api::V1::ImagesController < ApplicationController
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       
-      request = Net::HTTP::Get.new(uri.path)
+      request = Net::HTTP::Get.new(uri.request_uri)
       response = http.request(request)
+      
+      Rails.logger.info "Image proxy: Fetching #{image_url}, response code: #{response.code}"
       
       if response.code == '200'
         # Determine content type
