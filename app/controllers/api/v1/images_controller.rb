@@ -19,8 +19,16 @@ class Api::V1::ImagesController < ApplicationController
     
     # Handle different path formats
     if path.start_with?('uploads/')
-      # Remove uploads/ prefix if present
+      # Remove uploads/ prefix if present (for local files that were saved incorrectly)
       path = path.sub(/^uploads\//, '')
+    end
+    
+    # Ensure path has images/ folder if it's missing (for incorrectly saved files)
+    if !path.include?('/images/') && !path.start_with?('images/')
+      # If path is just "production/{filename}", add "images/" folder
+      if path.match(/^(production|development|test)\/[^\/]+$/)
+        path = path.sub(/\/([^\/]+)$/, '/images/\1')
+      end
     end
     
     # Construct the full URL to DigitalOcean Spaces
@@ -29,9 +37,14 @@ class Api::V1::ImagesController < ApplicationController
     if bucket_name.present?
       # Try virtual-hosted-style first (bucket in subdomain)
       if endpoint.include?('digitaloceanspaces.com')
-        # Extract region from endpoint (e.g., sfo2 from https://sfo2.digitaloceanspaces.com)
-        region = endpoint.match(/https?:\/\/([^.]+)\.digitaloceanspaces\.com/)[1] rescue 'sfo2'
-        image_url = "https://#{bucket_name}.#{region}.digitaloceanspaces.com/#{path}"
+        # Extract region from endpoint (e.g., sfo2 from https://sfo2.digitaloceanspaces.com or se1.sfo2 from https://se1.sfo2.digitaloceanspaces.com)
+        if endpoint.match(/https?:\/\/([^.]+)\.digitaloceanspaces\.com/)
+          region_part = endpoint.match(/https?:\/\/([^.]+)\.digitaloceanspaces\.com/)[1]
+          image_url = "https://#{bucket_name}.#{region_part}.digitaloceanspaces.com/#{path}"
+        else
+          # Fallback to sfo2
+          image_url = "https://#{bucket_name}.sfo2.digitaloceanspaces.com/#{path}"
+        end
       else
         # Use path-style if endpoint is custom
         image_url = "#{endpoint}/#{bucket_name}/#{path}"

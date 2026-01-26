@@ -557,31 +557,45 @@ class Api::V1::BucketsController < ApplicationController
       uploaded_file = params[:file]
       
       # Generate a unique filename
-      file_extension = File.extname(uploaded_file.original_filename)
+      file_extension = File.extname(uploaded_file.original_filename) || '.jpg'
       unique_filename = "#{SecureRandom.uuid}#{file_extension}"
       
-      # Create directory if it doesn't exist
-      upload_dir = Rails.root.join('public', 'uploads', Rails.env.to_s)
-      FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
-      
-      # Save the new file
-      file_path = upload_dir.join(unique_filename)
-      File.open(file_path, 'wb') do |file|
-        file.write(uploaded_file.read)
+      begin
+        # Store file based on environment (same logic as upload_single_image)
+        if Rails.env.production?
+          spaces_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+          if spaces_key.present?
+            # Production: Upload to DigitalOcean Spaces
+            relative_path = upload_to_spaces(uploaded_file, unique_filename)
+          else
+            # Production without DigitalOcean: Use a placeholder URL
+            Rails.logger.warn "DigitalOcean Spaces not configured, using placeholder image"
+            relative_path = "placeholder/#{unique_filename}"
+          end
+        else
+          # Development/Test: Store locally
+          relative_path = upload_locally(uploaded_file, unique_filename)
+        end
+        
+        # Delete old file if it exists (only for local files)
+        if Rails.env.development? || Rails.env.test?
+          old_file_path = Rails.root.join('public', @bucket_image.image.file_path)
+          File.delete(old_file_path) if File.exist?(old_file_path)
+        end
+        # Note: For Spaces, we don't delete old files to avoid complexity
+        
+        # Update the image record with new file path
+        @bucket_image.image.update(file_path: relative_path)
+        
+        render json: {
+          bucket_image: bucket_image_json(@bucket_image),
+          message: 'Image updated successfully'
+        }
+      rescue => e
+        Rails.logger.error "Image update error: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: { error: "Image update failed: #{e.message}" }, status: :internal_server_error
       end
-      
-      # Delete old file if it exists
-      old_file_path = Rails.root.join('public', @bucket_image.image.file_path)
-      File.delete(old_file_path) if File.exist?(old_file_path)
-      
-      # Update the image record with new file path
-      relative_path = "uploads/#{Rails.env}/#{unique_filename}"
-      @bucket_image.image.update(file_path: relative_path)
-      
-      render json: {
-        bucket_image: bucket_image_json(@bucket_image),
-        message: 'Image updated successfully'
-      }
     elsif bucket_image_params.present?
       # Update metadata only
       if @bucket_image.update(bucket_image_params)
