@@ -17,6 +17,8 @@ class Api::V1::ImagesController < ApplicationController
     endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://sfo2.digitaloceanspaces.com'
     endpoint = endpoint.chomp('/')
     
+    Rails.logger.debug "Image proxy: bucket_name=#{bucket_name.present? ? 'SET' : 'NOT SET'}, endpoint=#{endpoint}, path=#{path}"
+    
     # Handle different path formats
     if path.start_with?('uploads/')
       # Remove uploads/ prefix if present (for local files that were saved incorrectly)
