@@ -3,6 +3,37 @@ class Api::V1::ImagesController < ApplicationController
   skip_before_action :authenticate_user!, only: [:proxy]
   skip_before_action :require_active_subscription!, only: [:proxy]
   
+  # POST /api/v1/images
+  # Create an image record from a URL (for RSS feeds)
+  def create
+    file_path = params[:file_path]
+    friendly_name = params[:friendly_name] || 'Untitled Image'
+    
+    if file_path.blank?
+      return render json: { error: 'file_path is required' }, status: :bad_request
+    end
+    
+    # Create image record with the URL as file_path
+    # This is used for RSS feed images that are hosted externally
+    image = Image.new(
+      file_path: file_path,
+      friendly_name: friendly_name
+    )
+    
+    if image.save
+      render json: {
+        id: image.id,
+        file_path: image.file_path,
+        friendly_name: image.friendly_name,
+        source_url: image.get_source_url
+      }, status: :created
+    else
+      render json: {
+        errors: image.errors.full_messages
+      }, status: :unprocessable_entity
+    end
+  end
+  
   # Proxy endpoint to serve images from DigitalOcean Spaces with CORS headers
   # GET /api/v1/images/proxy?path=production/images/xxx.png
   def proxy
