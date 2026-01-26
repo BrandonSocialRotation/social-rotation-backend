@@ -539,11 +539,13 @@ class Api::V1::BucketsController < ApplicationController
     )
     
     if bucket_image.save
+      Rails.logger.info "Added image #{image.id} to bucket #{@bucket.id} as bucket_image #{bucket_image.id}"
       render json: {
         bucket_image: bucket_image_json(bucket_image),
         message: 'Image added successfully'
       }, status: :created
     else
+      Rails.logger.error "Failed to add image to bucket: #{bucket_image.errors.full_messages.join(', ')}"
       render json: {
         errors: bucket_image.errors.full_messages
       }, status: :unprocessable_entity

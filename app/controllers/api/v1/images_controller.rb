@@ -22,6 +22,7 @@ class Api::V1::ImagesController < ApplicationController
     )
     
     if image.save
+      Rails.logger.info "Created image #{image.id} with file_path: #{image.file_path}"
       render json: {
         image: {
           id: image.id,
@@ -31,6 +32,7 @@ class Api::V1::ImagesController < ApplicationController
         }
       }, status: :created
     else
+      Rails.logger.error "Failed to create image: #{image.errors.full_messages.join(', ')}"
       render json: {
         errors: image.errors.full_messages
       }, status: :unprocessable_entity
