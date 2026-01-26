@@ -32,25 +32,27 @@ class Api::V1::ImagesController < ApplicationController
     end
     
     # Construct the full URL to DigitalOcean Spaces
-    # Format: https://<bucket-name>.<region>.digitaloceanspaces.com/<key>
-    # OR: https://<endpoint>/<bucket-name>/<key> if endpoint doesn't include bucket
+    # DigitalOcean Spaces uses virtual-hosted-style: https://<bucket-name>.<region>.digitaloceanspaces.com/<key>
     if bucket_name.present?
-      # Try virtual-hosted-style first (bucket in subdomain)
       if endpoint.include?('digitaloceanspaces.com')
-        # Extract region from endpoint (e.g., sfo2 from https://sfo2.digitaloceanspaces.com or se1.sfo2 from https://se1.sfo2.digitaloceanspaces.com)
-        if endpoint.match(/https?:\/\/([^.]+)\.digitaloceanspaces\.com/)
-          region_part = endpoint.match(/https?:\/\/([^.]+)\.digitaloceanspaces\.com/)[1]
+        # Extract the full hostname from endpoint (e.g., "sfo2" or "se1.sfo2" from https://sfo2.digitaloceanspaces.com or https://se1.sfo2.digitaloceanspaces.com)
+        # Match everything between https:// and .digitaloceanspaces.com
+        if endpoint.match(/https?:\/\/([^\/]+)\.digitaloceanspaces\.com/)
+          region_part = endpoint.match(/https?:\/\/([^\/]+)\.digitaloceanspaces\.com/)[1]
           image_url = "https://#{bucket_name}.#{region_part}.digitaloceanspaces.com/#{path}"
         else
-          # Fallback to sfo2
-          image_url = "https://#{bucket_name}.sfo2.digitaloceanspaces.com/#{path}"
+          # Fallback: try to extract just the region (last part before .digitaloceanspaces.com)
+          # For se1.sfo2, we want sfo2; for sfo2, we want sfo2
+          region_part = endpoint.split('.').first.split('//').last rescue 'sfo2'
+          image_url = "https://#{bucket_name}.#{region_part}.digitaloceanspaces.com/#{path}"
         end
       else
         # Use path-style if endpoint is custom
         image_url = "#{endpoint}/#{bucket_name}/#{path}"
       end
     else
-      # Fallback: try without bucket name (might work if bucket is in endpoint)
+      Rails.logger.warn "Image proxy: No bucket name configured, using endpoint directly (may fail)"
+      # Fallback: try without bucket name (will likely fail but worth trying)
       image_url = "#{endpoint}/#{path}"
     end
     
