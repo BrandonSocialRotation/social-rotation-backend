@@ -11,8 +11,15 @@ Rails.application.routes.draw do
     path = env['action_dispatch.request.path_parameters'][:path]
     file_path = Rails.root.join('public', 'uploads', path).to_s
     
+    headers = {
+      'Content-Type' => Rack::Mime.mime_type(File.extname(file_path)),
+      'Access-Control-Allow-Origin' => '*',
+      'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+      'Access-Control-Allow-Headers' => 'Content-Type'
+    }
+    
     if File.exist?(file_path) && File.file?(file_path)
-      [200, { 'Content-Type' => Rack::Mime.mime_type(File.extname(file_path)) }, [File.read(file_path)]]
+      [200, headers, [File.read(file_path)]]
     else
       [404, { 'Content-Type' => 'text/plain' }, ['File not found']]
     end
