@@ -1,4 +1,8 @@
 class Api::V1::ImagesController < ApplicationController
+  # Skip authentication for image proxy (public images)
+  skip_before_action :authenticate_user!, only: [:proxy]
+  skip_before_action :require_active_subscription!, only: [:proxy]
+  
   # Proxy endpoint to serve images from DigitalOcean Spaces with CORS headers
   # GET /api/v1/images/proxy?path=production/images/xxx.png
   def proxy
