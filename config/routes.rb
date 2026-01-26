@@ -5,6 +5,19 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
+  # Serve uploaded files from public/uploads directory
+  # This allows images stored locally to be accessible via URL
+  get "uploads/*path", to: proc { |env|
+    path = env['action_dispatch.request.path_parameters'][:path]
+    file_path = Rails.root.join('public', 'uploads', path).to_s
+    
+    if File.exist?(file_path) && File.file?(file_path)
+      [200, { 'Content-Type' => Rack::Mime.mime_type(File.extname(file_path)) }, [File.read(file_path)]]
+    else
+      [404, { 'Content-Type' => 'text/plain' }, ['File not found']]
+    end
+  }
+
   # API Routes
   namespace :api do
     namespace :v1 do
