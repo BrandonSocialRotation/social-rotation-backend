@@ -6,8 +6,9 @@ class Api::V1::ImagesController < ApplicationController
   # POST /api/v1/images
   # Create an image record from a URL (for RSS feeds)
   def create
-    file_path = params[:file_path]
-    friendly_name = params[:friendly_name] || 'Untitled Image'
+    # Handle both top-level params and nested image params
+    file_path = params[:file_path] || params.dig(:image, :file_path)
+    friendly_name = params[:friendly_name] || params.dig(:image, :friendly_name) || 'Untitled Image'
     
     if file_path.blank?
       return render json: { error: 'file_path is required' }, status: :bad_request
@@ -22,10 +23,12 @@ class Api::V1::ImagesController < ApplicationController
     
     if image.save
       render json: {
-        id: image.id,
-        file_path: image.file_path,
-        friendly_name: image.friendly_name,
-        source_url: image.get_source_url
+        image: {
+          id: image.id,
+          file_path: image.file_path,
+          friendly_name: image.friendly_name,
+          source_url: image.get_source_url
+        }
       }, status: :created
     else
       render json: {
