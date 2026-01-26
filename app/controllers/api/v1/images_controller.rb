@@ -111,10 +111,9 @@ class Api::V1::ImagesController < ApplicationController
     # If we get here, all variations failed
     Rails.logger.error "Image proxy: All path variations failed for path: #{original_path}"
     render json: { error: 'Image not found' }, status: :not_found
-    rescue => e
-      Rails.logger.error "Image proxy error: #{e.message}"
-      Rails.logger.error e.backtrace.join("\n")
-      render json: { error: 'Failed to fetch image' }, status: :internal_server_error
-    end
+  rescue => e
+    Rails.logger.error "Image proxy error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { error: 'Failed to fetch image' }, status: :internal_server_error
   end
 end
