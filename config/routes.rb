@@ -166,7 +166,11 @@ Rails.application.routes.draw do
       end
 
       # Image management routes
-      resources :images, only: [:create]
+      resources :images, only: [:create] do
+        collection do
+          get 'proxy', to: 'images#proxy'
+        end
+      end
 
       # RSS feed management routes
       resources :rss_feeds, only: [:index, :create, :show, :update, :destroy] do

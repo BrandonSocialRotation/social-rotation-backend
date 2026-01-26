@@ -23,16 +23,14 @@ class Image < ApplicationRecord
     if file_path.start_with?('uploads/')
       # Check if it's for DigitalOcean Spaces (has environment prefix like uploads/production/)
       if environments.any? { |env| file_path.start_with?("uploads/#{env}/") }
-        # Prefer explicit host overrides first
-        storage_host = ENV['ACTIVE_STORAGE_URL'].presence ||
-                       ENV['DO_SPACES_CDN_HOST'].presence ||
-                       ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'].presence ||
-                       ENV['DO_SPACES_ENDPOINT'].presence
-
-        if storage_host.present?
-          storage_host = storage_host.chomp('/')
-          "#{storage_host}/#{file_path}"
+        # In production, use backend proxy to avoid CORS issues
+        if Rails.env.production?
+          backend_url = ENV['BACKEND_URL'] || ENV['API_BASE_URL'] || 'https://new-social-rotation-backend-qzyk8.ondigitalocean.app'
+          backend_url = backend_url.chomp('/')
+          # Use proxy endpoint to serve with CORS headers
+          "#{backend_url}/api/v1/images/proxy?path=#{CGI.escape(file_path)}"
         else
+          # Development: use direct Spaces URL
           endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://se1.sfo2.digitaloceanspaces.com'
           endpoint = endpoint.chomp('/')
           "#{endpoint}/#{file_path}"
@@ -51,16 +49,14 @@ class Image < ApplicationRecord
       end
     # Legacy format: paths starting with environment name directly (production/, development/, test/)
     elsif environments.any? { |env| file_path.start_with?("#{env}/") }
-      # Prefer explicit host overrides first
-      storage_host = ENV['ACTIVE_STORAGE_URL'].presence ||
-                     ENV['DO_SPACES_CDN_HOST'].presence ||
-                     ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'].presence ||
-                     ENV['DO_SPACES_ENDPOINT'].presence
-
-      if storage_host.present?
-        storage_host = storage_host.chomp('/')
-        "#{storage_host}/#{file_path}"
+      # In production, use backend proxy to avoid CORS issues
+      if Rails.env.production?
+        backend_url = ENV['BACKEND_URL'] || ENV['API_BASE_URL'] || 'https://new-social-rotation-backend-qzyk8.ondigitalocean.app'
+        backend_url = backend_url.chomp('/')
+        # Use proxy endpoint to serve with CORS headers
+        "#{backend_url}/api/v1/images/proxy?path=#{CGI.escape(file_path)}"
       else
+        # Development: use direct Spaces URL
         endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://se1.sfo2.digitaloceanspaces.com'
         endpoint = endpoint.chomp('/')
         "#{endpoint}/#{file_path}"
