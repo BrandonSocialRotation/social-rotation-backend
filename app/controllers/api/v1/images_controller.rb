@@ -196,15 +196,18 @@ class Api::V1::ImagesController < ApplicationController
         
         Rails.logger.info "Image proxy: Serving external image with content-type: #{content_type}"
         
-        # Set CORS headers - critical for canvas manipulation
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range'
-        response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
-        response.headers['Content-Type'] = content_type
-        response.headers['Cache-Control'] = 'public, max-age=3600'
+        # Set CORS headers - critical for canvas manipulation in react-easy-crop
+        # The Cropper component uses HTML5 Canvas which requires proper CORS headers
+        headers = {
+          'Content-Type' => content_type,
+          'Access-Control-Allow-Origin' => '*',
+          'Access-Control-Allow-Methods' => 'GET, OPTIONS, HEAD',
+          'Access-Control-Allow-Headers' => 'Content-Type, Accept, Range, Authorization',
+          'Access-Control-Expose-Headers' => 'Content-Length, Content-Type',
+          'Cache-Control' => 'public, max-age=3600'
+        }
         
-        send_data response.body, type: content_type, disposition: 'inline'
+        send_data response.body, type: content_type, disposition: 'inline', headers: headers
       else
         Rails.logger.error "Image proxy: Failed to fetch external URL #{image_url}, response code: #{response.code}"
         render json: { error: 'Image not found' }, status: :not_found
