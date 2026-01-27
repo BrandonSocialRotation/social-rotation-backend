@@ -160,4 +160,47 @@ class Api::V1::ImagesController < ApplicationController
     Rails.logger.error e.backtrace.join("\n")
     render json: { error: 'Failed to fetch image' }, status: :internal_server_error
   end
+  
+  # Proxy external URLs (for RSS feed images and other external sources)
+  def proxy_external_url(image_url)
+    require 'net/http'
+    require 'uri'
+    
+    begin
+      uri = URI(image_url)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true if uri.scheme == 'https'
+      
+      request = Net::HTTP::Get.new(uri.request_uri)
+      # Set a user agent to avoid blocking
+      request['User-Agent'] = 'Mozilla/5.0 (compatible; SocialRotation/1.0)'
+      
+      response = http.request(request)
+      
+      Rails.logger.info "Image proxy: Fetching external URL #{image_url}, response code: #{response.code}"
+      
+      if response.code == '200'
+        # Determine content type
+        content_type = response.content_type || 'image/jpeg'
+        
+        # Set CORS headers
+        headers = {
+          'Content-Type' => content_type,
+          'Access-Control-Allow-Origin' => '*',
+          'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+          'Access-Control-Allow-Headers' => 'Content-Type',
+          'Cache-Control' => 'public, max-age=3600' # Cache for 1 hour
+        }
+        
+        send_data response.body, type: content_type, disposition: 'inline', headers: headers
+      else
+        Rails.logger.error "Image proxy: Failed to fetch external URL #{image_url}, response code: #{response.code}"
+        render json: { error: 'Image not found' }, status: :not_found
+      end
+    rescue => e
+      Rails.logger.error "Image proxy error for external URL #{image_url}: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      render json: { error: 'Failed to fetch image' }, status: :internal_server_error
+    end
+  end
 end
