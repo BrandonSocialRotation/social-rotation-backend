@@ -57,15 +57,18 @@ class Api::V1::ImagesController < ApplicationController
     
     # Handle external URLs - decode if URL-encoded
     if url.present?
+      require 'cgi'
       # Decode the URL if it's encoded (common when passed as query parameter)
       decoded_url = CGI.unescape(url.to_s)
+      Rails.logger.info "Image proxy: Received URL param: #{url}, decoded: #{decoded_url}"
+      
       if decoded_url.start_with?('http://') || decoded_url.start_with?('https://')
         Rails.logger.info "Image proxy: Proxying external URL: #{decoded_url}"
         proxy_external_url(decoded_url)
         return
       else
         Rails.logger.warn "Image proxy: Invalid URL format: #{decoded_url}"
-        render json: { error: 'Invalid URL format' }, status: :bad_request
+        render json: { error: 'Invalid URL format - must start with http:// or https://' }, status: :bad_request
         return
       end
     end
@@ -190,16 +193,40 @@ class Api::V1::ImagesController < ApplicationController
   def proxy_external_url(image_url)
     require 'net/http'
     require 'uri'
+    require 'cgi'
     
     begin
-      uri = URI(image_url)
+      Rails.logger.info "Image proxy: Attempting to fetch external URL: #{image_url}"
+      
+      # Parse the URI - handle encoding issues
+      begin
+        uri = URI.parse(image_url)
+      rescue URI::InvalidURIError => e
+        Rails.logger.error "Image proxy: Invalid URI: #{image_url}, error: #{e.message}"
+        render json: { error: "Invalid URL format: #{e.message}" }, status: :bad_request
+        return
+      end
+      
+      # Validate URI
+      unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
+        Rails.logger.error "Image proxy: URI is not HTTP/HTTPS: #{uri.class}"
+        render json: { error: 'URL must be HTTP or HTTPS' }, status: :bad_request
+        return
+      end
+      
+      Rails.logger.info "Image proxy: Parsed URI - scheme: #{uri.scheme}, host: #{uri.host}, path: #{uri.path}"
+      
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true if uri.scheme == 'https'
+      http.read_timeout = 10 # 10 second timeout
+      http.open_timeout = 5  # 5 second connection timeout
       
       request = Net::HTTP::Get.new(uri.request_uri)
       # Set a user agent to avoid blocking
       request['User-Agent'] = 'Mozilla/5.0 (compatible; SocialRotation/1.0)'
+      request['Accept'] = 'image/*'
       
+      Rails.logger.info "Image proxy: Making HTTP request to #{uri.host}#{uri.path}"
       response = http.request(request)
       
       Rails.logger.info "Image proxy: Fetching external URL #{image_url}, response code: #{response.code}"
