@@ -39,13 +39,21 @@ class Api::V1::ImagesController < ApplicationController
     end
   end
   
-  # Proxy endpoint to serve images from DigitalOcean Spaces with CORS headers
+  # Proxy endpoint to serve images from DigitalOcean Spaces or external URLs with CORS headers
   # GET /api/v1/images/proxy?path=production/images/xxx.png
+  # GET /api/v1/images/proxy?url=https://example.com/image.png (for external URLs)
   def proxy
     path = params[:path]
+    url = params[:url]
+    
+    # Handle external URLs
+    if url.present? && (url.start_with?('http://') || url.start_with?('https://'))
+      proxy_external_url(url)
+      return
+    end
     
     if path.blank?
-      return render json: { error: 'Path parameter required' }, status: :bad_request
+      return render json: { error: 'Path or URL parameter required' }, status: :bad_request
     end
     
     # Get bucket name and endpoint
