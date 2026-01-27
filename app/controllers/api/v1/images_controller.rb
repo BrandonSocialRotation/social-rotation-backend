@@ -180,19 +180,31 @@ class Api::V1::ImagesController < ApplicationController
       Rails.logger.info "Image proxy: Fetching external URL #{image_url}, response code: #{response.code}"
       
       if response.code == '200'
-        # Determine content type
-        content_type = response.content_type || 'image/jpeg'
+        # Determine content type from response or file extension
+        content_type = response.content_type
+        if content_type.blank? || content_type == 'application/octet-stream'
+          # Try to determine from URL
+          ext = File.extname(uri.path).downcase
+          content_type = case ext
+                        when '.png' then 'image/png'
+                        when '.jpg', '.jpeg' then 'image/jpeg'
+                        when '.gif' then 'image/gif'
+                        when '.webp' then 'image/webp'
+                        else 'image/jpeg'
+                        end
+        end
         
-        # Set CORS headers
-        headers = {
-          'Content-Type' => content_type,
-          'Access-Control-Allow-Origin' => '*',
-          'Access-Control-Allow-Methods' => 'GET, OPTIONS',
-          'Access-Control-Allow-Headers' => 'Content-Type',
-          'Cache-Control' => 'public, max-age=3600' # Cache for 1 hour
-        }
+        Rails.logger.info "Image proxy: Serving external image with content-type: #{content_type}"
         
-        send_data response.body, type: content_type, disposition: 'inline', headers: headers
+        # Set CORS headers - critical for canvas manipulation
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
+        response.headers['Content-Type'] = content_type
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+        
+        send_data response.body, type: content_type, disposition: 'inline'
       else
         Rails.logger.error "Image proxy: Failed to fetch external URL #{image_url}, response code: #{response.code}"
         render json: { error: 'Image not found' }, status: :not_found
