@@ -246,27 +246,25 @@ class Api::V1::ImagesController < ApplicationController
                         end
         end
         
-        Rails.logger.info "Image proxy: Serving external image with content-type: #{content_type}"
+        # Validate that we actually got image data
+        if response.body.blank? || response.body.length < 100
+          Rails.logger.error "Image proxy: External URL returned empty or too small response: #{image_url}, body size: #{response.body&.length || 0}"
+          render json: { error: 'Image data is invalid or empty' }, status: :bad_request
+          return
+        end
         
-        # Set CORS headers on response object BEFORE sending data
+        Rails.logger.info "Image proxy: Serving external image with content-type: #{content_type}, size: #{response.body.length} bytes"
+        
+        # Set CORS headers on Rails response object (not Net::HTTP response)
         # This is critical for canvas manipulation in react-easy-crop
         # The Cropper component uses HTML5 Canvas which requires proper CORS headers
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range, Authorization'
-        response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
-        response.headers['Cache-Control'] = 'public, max-age=3600'
+        headers['Access-Control-Allow-Origin'] = '*'
+        headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
+        headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range, Authorization'
+        headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
+        headers['Cache-Control'] = 'public, max-age=3600'
         
-        # Also pass headers to send_data as backup
-        headers = {
-          'Content-Type' => content_type,
-          'Access-Control-Allow-Origin' => '*',
-          'Access-Control-Allow-Methods' => 'GET, OPTIONS, HEAD',
-          'Access-Control-Allow-Headers' => 'Content-Type, Accept, Range, Authorization',
-          'Access-Control-Expose-Headers' => 'Content-Length, Content-Type',
-          'Cache-Control' => 'public, max-age=3600'
-        }
-        
+        # Pass headers to send_data
         send_data response.body, type: content_type, disposition: 'inline', headers: headers
       else
         Rails.logger.error "Image proxy: Failed to fetch external URL #{image_url}, response code: #{response.code}, body preview: #{response.body[0..200] if response.body}"
