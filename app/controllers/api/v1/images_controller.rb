@@ -205,8 +205,16 @@ class Api::V1::ImagesController < ApplicationController
         
         Rails.logger.info "Image proxy: Serving external image with content-type: #{content_type}"
         
-        # Set CORS headers - critical for canvas manipulation in react-easy-crop
+        # Set CORS headers on response object BEFORE sending data
+        # This is critical for canvas manipulation in react-easy-crop
         # The Cropper component uses HTML5 Canvas which requires proper CORS headers
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range, Authorization'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+        
+        # Also pass headers to send_data as backup
         headers = {
           'Content-Type' => content_type,
           'Access-Control-Allow-Origin' => '*',
