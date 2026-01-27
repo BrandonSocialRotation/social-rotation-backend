@@ -239,7 +239,7 @@ class Api::V1::ImagesController < ApplicationController
     rescue => e
       Rails.logger.error "Image proxy error for external URL #{image_url}: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
-      render json: { error: 'Failed to fetch image' }, status: :internal_server_error
+      render json: { error: "Failed to fetch image: #{e.message}" }, status: :internal_server_error
     end
   end
 end
