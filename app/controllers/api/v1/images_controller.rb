@@ -1,7 +1,16 @@
 class Api::V1::ImagesController < ApplicationController
   # Skip authentication for image proxy (public images)
-  skip_before_action :authenticate_user!, only: [:proxy]
-  skip_before_action :require_active_subscription!, only: [:proxy]
+  skip_before_action :authenticate_user!, only: [:proxy, :proxy_options]
+  skip_before_action :require_active_subscription!, only: [:proxy, :proxy_options]
+  
+  # Handle CORS preflight requests for image proxy
+  def proxy_options
+    headers['Access-Control-Allow-Origin'] = '*'
+    headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
+    headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range, Authorization'
+    headers['Access-Control-Max-Age'] = '3600'
+    head :ok
+  end
   
   # POST /api/v1/images
   # Create an image record from a URL (for RSS feeds)

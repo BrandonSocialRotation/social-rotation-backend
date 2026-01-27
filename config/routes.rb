@@ -169,6 +169,7 @@ Rails.application.routes.draw do
       resources :images, only: [:create] do
         collection do
           get 'proxy', to: 'images#proxy'
+          options 'proxy', to: 'images#proxy_options'
         end
       end
 
