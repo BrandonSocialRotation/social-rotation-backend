@@ -55,10 +55,19 @@ class Api::V1::ImagesController < ApplicationController
     path = params[:path]
     url = params[:url]
     
-    # Handle external URLs
-    if url.present? && (url.start_with?('http://') || url.start_with?('https://'))
-      proxy_external_url(url)
-      return
+    # Handle external URLs - decode if URL-encoded
+    if url.present?
+      # Decode the URL if it's encoded (common when passed as query parameter)
+      decoded_url = CGI.unescape(url.to_s)
+      if decoded_url.start_with?('http://') || decoded_url.start_with?('https://')
+        Rails.logger.info "Image proxy: Proxying external URL: #{decoded_url}"
+        proxy_external_url(decoded_url)
+        return
+      else
+        Rails.logger.warn "Image proxy: Invalid URL format: #{decoded_url}"
+        render json: { error: 'Invalid URL format' }, status: :bad_request
+        return
+      end
     end
     
     if path.blank?
@@ -233,8 +242,8 @@ class Api::V1::ImagesController < ApplicationController
         
         send_data response.body, type: content_type, disposition: 'inline', headers: headers
       else
-        Rails.logger.error "Image proxy: Failed to fetch external URL #{image_url}, response code: #{response.code}"
-        render json: { error: 'Image not found' }, status: :not_found
+        Rails.logger.error "Image proxy: Failed to fetch external URL #{image_url}, response code: #{response.code}, body preview: #{response.body[0..200] if response.body}"
+        render json: { error: "Failed to fetch image: HTTP #{response.code}" }, status: :bad_gateway
       end
     rescue => e
       Rails.logger.error "Image proxy error for external URL #{image_url}: #{e.message}"
