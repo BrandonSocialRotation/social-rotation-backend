@@ -143,12 +143,19 @@ class Api::V1::ImagesController < ApplicationController
           # Determine content type
           content_type = response.content_type || Rack::Mime.mime_type(File.extname(try_path)) || 'image/jpeg'
           
-          # Set CORS headers
+          # Set CORS headers - critical for canvas manipulation
+          # Must set on response.headers first, then pass to send_data
+          response.headers['Access-Control-Allow-Origin'] = '*'
+          response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
+          response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range'
+          response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
+          
           headers = {
             'Content-Type' => content_type,
             'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Allow-Methods' => 'GET, OPTIONS',
-            'Access-Control-Allow-Headers' => 'Content-Type',
+            'Access-Control-Allow-Methods' => 'GET, OPTIONS, HEAD',
+            'Access-Control-Allow-Headers' => 'Content-Type, Accept, Range',
+            'Access-Control-Expose-Headers' => 'Content-Length, Content-Type',
             'Cache-Control' => 'public, max-age=31536000' # Cache for 1 year
           }
           
