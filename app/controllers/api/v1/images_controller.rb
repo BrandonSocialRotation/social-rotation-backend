@@ -155,24 +155,24 @@ class Api::V1::ImagesController < ApplicationController
           # Determine content type
           content_type = response.content_type || Rack::Mime.mime_type(File.extname(try_path)) || 'image/jpeg'
           
-          # Set CORS headers - critical for canvas manipulation
-          # Must set on response.headers first, then pass to send_data
-          response.headers['Access-Control-Allow-Origin'] = '*'
-          response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
-          response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range'
-          response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
+          # Validate that we actually got image data
+          if response.body.blank? || response.body.length < 100
+            Rails.logger.warn "Image proxy: DigitalOcean URL returned empty or too small response: #{image_url}, body size: #{response.body&.length || 0}, trying next variation..."
+            next # Try next variation instead of failing
+          end
           
-          headers = {
-            'Content-Type' => content_type,
-            'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Allow-Methods' => 'GET, OPTIONS, HEAD',
-            'Access-Control-Allow-Headers' => 'Content-Type, Accept, Range',
-            'Access-Control-Expose-Headers' => 'Content-Length, Content-Type',
-            'Cache-Control' => 'public, max-age=31536000' # Cache for 1 year
-          }
+          # Set CORS headers on Rails response object (not Net::HTTP response)
+          headers['Access-Control-Allow-Origin'] = '*'
+          headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS, HEAD'
+          headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Range, Authorization'
+          headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
+          headers['Cache-Control'] = 'public, max-age=31536000' # Cache for 1 year
           
-          send_data response.body, type: content_type, disposition: 'inline', headers: headers
+          Rails.logger.info "Image proxy: Successfully serving image from #{try_path} (#{response.body.length} bytes)"
+          send_data response.body, type: content_type, disposition: 'inline'
           return # Success - exit early
+        else
+          Rails.logger.debug "Image proxy: Path variation #{try_path} returned #{response.code}, trying next..."
         end
       rescue => e
         last_error = e
