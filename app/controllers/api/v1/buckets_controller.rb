@@ -559,7 +559,19 @@ class Api::V1::BucketsController < ApplicationController
       uploaded_file = params[:file]
       
       # Generate a unique filename
-      file_extension = File.extname(uploaded_file.original_filename) || '.jpg'
+      # Get extension from filename, or try content type, or default to .jpg
+      file_extension = File.extname(uploaded_file.original_filename)
+      if file_extension.blank?
+        # Try to detect from content type
+        content_type = uploaded_file.content_type
+        file_extension = case content_type
+                        when 'image/png' then '.png'
+                        when 'image/gif' then '.gif'
+                        when 'image/webp' then '.webp'
+                        else '.jpg' # Default to .jpg for JPEG images
+                        end
+        Rails.logger.info "Image update: No extension in filename '#{uploaded_file.original_filename}', using #{file_extension} based on content type #{content_type}"
+      end
       unique_filename = "#{SecureRandom.uuid}#{file_extension}"
       
       begin
