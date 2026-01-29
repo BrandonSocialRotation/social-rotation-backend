@@ -6,7 +6,17 @@ class Api::V1::SubAccountsController < ApplicationController
   # GET /api/v1/sub_accounts
   # List all sub-accounts for the current reseller
   def index
-    sub_accounts = current_user.account_users.where.not(is_account_admin: true)
+    # For super admins, show all sub-accounts they created (account_id = 0 or their agency account)
+    if current_user.super_admin?
+      # Super admins can see sub-accounts with account_id = 0 (created when they were super admin)
+      # OR sub-accounts in their agency account (if they converted to agency)
+      sub_accounts = User.where(account_id: current_user.account_id || 0)
+                        .where.not(is_account_admin: true)
+                        .where.not(id: current_user.id)
+    else
+      # Regular resellers see sub-accounts in their account
+      sub_accounts = current_user.account_users.where.not(is_account_admin: true)
+    end
     
     render json: {
       sub_accounts: sub_accounts.map { |user| sub_account_json(user) }
@@ -82,8 +92,18 @@ class Api::V1::SubAccountsController < ApplicationController
     target_user = User.find(params[:id])
     
     # Verify user has permission to switch to this account
-    unless current_user.super_admin? || current_user.account_users.include?(target_user)
-      return render json: { error: 'Unauthorized' }, status: :forbidden
+    if current_user.super_admin?
+      # Super admins can switch to any sub-account they created
+      unless User.where(account_id: current_user.account_id || 0)
+                 .where.not(is_account_admin: true)
+                 .include?(target_user)
+        return render json: { error: 'Unauthorized' }, status: :forbidden
+      end
+    else
+      # Regular resellers can only switch to sub-accounts in their account
+      unless current_user.account_users.include?(target_user)
+        return render json: { error: 'Unauthorized' }, status: :forbidden
+      end
     end
     
     # Generate new JWT token for the target user
@@ -106,7 +126,14 @@ class Api::V1::SubAccountsController < ApplicationController
   end
 
   def set_sub_account
-    @sub_account = current_user.account_users.find(params[:id])
+    # For super admins, allow accessing sub-accounts they created (account_id = 0 or their agency account)
+    if current_user.super_admin?
+      @sub_account = User.where(account_id: current_user.account_id || 0)
+                        .where.not(is_account_admin: true)
+                        .find(params[:id])
+    else
+      @sub_account = current_user.account_users.find(params[:id])
+    end
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Sub-account not found' }, status: :not_found
   end
