@@ -171,15 +171,26 @@ class ApplicationController < ActionController::API
   
   # Require active subscription for accessing the app
   # Returns 403 if account doesn't have an active subscription
-  # Super admins (account_id = 0) have full access forever
+  # Super admins (account_id = 0 or super admin emails) have full access forever
   # Free accounts can access until expiration date
   def require_active_subscription!
     # Skip if no current user (authentication failed or not required)
     return if @current_user.nil?
     
+    # List of super admin emails that bypass subscription checks
+    # These users have full access even if they convert to agency accounts
+    super_admin_emails = [
+      'jbickler4@gmail.com',
+      'bwolfe317@gmail.com',  # Brandon
+      'modonnell1915@gmail.com',
+      'cory@socialrotation.com',
+      'profjwells@gmail.com'
+    ]
+    
     # Super admin accounts (account_id = 0) bypass subscription check - full access forever
     # Also check using the super_admin? method for safety
-    if @current_user.account_id == 0 || @current_user.super_admin?
+    # ALSO check super admin emails even if account_id != 0 (for super admins who converted to agency)
+    if @current_user.account_id == 0 || @current_user.super_admin? || @current_user.email.in?(super_admin_emails)
       Rails.logger.info "Super admin access granted for user #{@current_user.id} (#{@current_user.email})"
       return
     end
@@ -189,7 +200,7 @@ class ApplicationController < ActionController::API
     # BUT: Skip this check if user is somehow a super admin (defensive check)
     if @current_user.account_id.nil?
       # Double-check if this might be a super admin that wasn't set up correctly
-      if @current_user.email.in?(['jbickler4@gmail.com', 'bwolfe317@gmail.com', 'modonnell1915@gmail.com'])
+      if @current_user.email.in?(super_admin_emails)
         Rails.logger.warn "Super admin user #{@current_user.email} has nil account_id - allowing access anyway"
         return
       end
@@ -206,7 +217,13 @@ class ApplicationController < ActionController::API
     account = @current_user.account
     
     # If account doesn't exist (shouldn't happen, but handle gracefully)
+    # BUT: Allow super admin emails even if account is missing
     unless account
+      if @current_user.email.in?(super_admin_emails)
+        Rails.logger.warn "Super admin user #{@current_user.email} has missing account - allowing access anyway"
+        return
+      end
+      
       render json: {
         error: 'Account not found',
         message: 'Your account could not be found. Please contact support.',

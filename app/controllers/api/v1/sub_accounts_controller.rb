@@ -16,15 +16,20 @@ class Api::V1::SubAccountsController < ApplicationController
   # POST /api/v1/sub_accounts
   # Create a new sub-account under the current reseller
   def create
-    # Check if reseller can add more users
-    unless current_user.account.can_add_user?
-      return render json: { 
-        error: 'Maximum users reached for your account' 
-      }, status: :forbidden
+    # For super admins, skip account limit check (they can add unlimited users)
+    unless current_user.super_admin?
+      # Check if reseller can add more users
+      unless current_user.account&.can_add_user?
+        return render json: { 
+          error: 'Maximum users reached for your account' 
+        }, status: :forbidden
+      end
     end
     
     sub_account = User.new(sub_account_params)
-    sub_account.account_id = current_user.account_id
+    # For super admins, use their account_id (which may be 0 or an agency account)
+    # For regular resellers, use their account_id
+    sub_account.account_id = current_user.account_id || 0
     sub_account.is_account_admin = false
     sub_account.role = 'sub_account'
     sub_account.status = 1

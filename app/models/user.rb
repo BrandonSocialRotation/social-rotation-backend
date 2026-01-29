@@ -133,7 +133,9 @@ class User < ApplicationRecord
   
   # Check if user is a reseller (account admin + reseller account)
   # Resellers can create sub-accounts and private marketplaces
+  # Super admins are also considered resellers for agency functionality
   def reseller?
+    return true if super_admin? # Super admins can act as resellers
     account_admin? && account&.reseller? || false
   end
   

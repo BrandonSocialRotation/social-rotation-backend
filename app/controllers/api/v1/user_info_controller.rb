@@ -304,29 +304,39 @@ class Api::V1::UserInfoController < ApplicationController
   # POST /api/v1/user_info/convert_to_agency
   # Convert a personal account to an agency account
   def convert_to_agency
-    # Only allow conversion if user is account admin or has account_id = 0 (personal)
+    # Only allow conversion if user is account admin or has account_id = 0 (personal/super admin)
     unless current_user.account_id == 0 || current_user.is_account_admin?
       return render json: { error: 'Only account admins can convert accounts' }, status: :forbidden
     end
 
-    # If user has account_id = 0, create a new agency account
+    # Check if user is a super admin (account_id = 0)
+    is_super_admin = current_user.super_admin?
+
+    # If user has account_id = 0 (super admin), create a new agency account
+    # Super admin access is preserved via email check in require_active_subscription!
     if current_user.account_id == 0
+      # For super admins, create the agency account and assign it
+      # This allows them to manage sub-accounts properly
+      # Super admin access is preserved via email check in require_active_subscription!
       account = Account.create!(
         name: params[:company_name] || "#{current_user.name}'s Agency",
         is_reseller: true,
         status: true
       )
       
-      # Update user to be part of the new account and make them admin
+      # Update user to be part of the new agency account
+      # Super admin access is preserved via email check in require_active_subscription!
       current_user.update!(
         account_id: account.id,
         is_account_admin: true,
         role: 'reseller'
       )
       
+      Rails.logger.info "Super admin #{current_user.email} converted to agency (account_id set to #{account.id}, super admin access preserved via email check)"
+      
       render json: {
         user: user_json(current_user),
-        message: 'Account successfully converted to agency account'
+        message: 'Account successfully converted to agency account. Super admin access preserved.'
       }
     else
       # User already has an account, just convert it to agency
