@@ -231,8 +231,16 @@ class ProcessScheduledPostsJob < ApplicationJob
     
     return unless bucket_image
     
-    # Get descriptions - prefer bucket_image description, then schedule description
-    description = if bucket_image.description.present?
+    # For bucket rotation, try to find schedule_item with caption for this image
+    schedule_item = nil
+    if schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_BUCKET_ROTATION
+      schedule_item = schedule.schedule_items.find_by(bucket_image_id: bucket_image.id)
+    end
+    
+    # Get descriptions - prefer schedule_item description (for bucket rotation), then bucket_image description, then schedule description
+    description = if schedule_item&.description.present?
+      schedule_item.description
+    elsif bucket_image.description.present?
       bucket_image.description
     elsif schedule.description.present?
       schedule.description
@@ -240,7 +248,9 @@ class ProcessScheduledPostsJob < ApplicationJob
       ''
     end
     
-    twitter_description = if bucket_image.twitter_description.present?
+    twitter_description = if schedule_item&.twitter_description.present?
+      schedule_item.twitter_description
+    elsif bucket_image.twitter_description.present?
       bucket_image.twitter_description
     elsif schedule.twitter_description.present?
       schedule.twitter_description
