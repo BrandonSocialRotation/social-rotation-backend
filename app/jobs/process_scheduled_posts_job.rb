@@ -73,6 +73,24 @@ class ProcessScheduledPostsJob < ApplicationJob
       return false if last_sent
     end
     
+    # For BUCKET_ROTATION schedules, check if we already posted today
+    if schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_BUCKET_ROTATION
+      today_start = Time.current.beginning_of_day
+      today_end = Time.current.end_of_day
+      posted_today = schedule.bucket_send_histories.where(sent_at: today_start..today_end).exists?
+      # Allow posting if we haven't posted today, or if all images have been posted today (cycle complete, start fresh)
+      if posted_today
+        # Check if all images in bucket have been posted today
+        all_images_count = schedule.bucket.bucket_images.count
+        posted_today_count = schedule.bucket_send_histories
+                                .where(sent_at: today_start..today_end)
+                                .distinct
+                                .count(:bucket_image_id)
+        # Only allow if we've posted all images today (cycle complete, can start fresh)
+        return false if posted_today_count < all_images_count
+      end
+    end
+    
     true
   end
 

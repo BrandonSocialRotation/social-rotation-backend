@@ -4,6 +4,7 @@ class BucketSchedule < ApplicationRecord
   SCHEDULE_TYPE_ONCE = 2
   SCHEDULE_TYPE_ANNUALLY = 3
   SCHEDULE_TYPE_MULTIPLE = 4
+  SCHEDULE_TYPE_BUCKET_ROTATION = 5  # Posts one image per day, rotating through all images
   
   # Social media platform bit flags
   BIT_FACEBOOK = 1
@@ -25,7 +26,7 @@ class BucketSchedule < ApplicationRecord
   
   # Validations
   validates :schedule, presence: true
-  validates :schedule_type, presence: true, inclusion: { in: [SCHEDULE_TYPE_ROTATION, SCHEDULE_TYPE_ONCE, SCHEDULE_TYPE_ANNUALLY, SCHEDULE_TYPE_MULTIPLE] }
+  validates :schedule_type, presence: true, inclusion: { in: [SCHEDULE_TYPE_ROTATION, SCHEDULE_TYPE_ONCE, SCHEDULE_TYPE_ANNUALLY, SCHEDULE_TYPE_MULTIPLE, SCHEDULE_TYPE_BUCKET_ROTATION] }
   validate :valid_cron_format
   
   # Methods from original PHP
@@ -54,6 +55,10 @@ class BucketSchedule < ApplicationRecord
       'post_once.png'
     when SCHEDULE_TYPE_ANNUALLY
       'annual.png'
+    when SCHEDULE_TYPE_BUCKET_ROTATION
+      'bucket_rotation.png'
+    else
+      'rotation.png' # Default fallback
     end
   end
   
@@ -84,6 +89,11 @@ class BucketSchedule < ApplicationRecord
       # If schedule_type is ONCE/ANNUALLY but no bucket_image_id, fall through to rotation logic
     end
     
+    # For bucket rotation schedules, get next unposted image (one per day)
+    if schedule_type == SCHEDULE_TYPE_BUCKET_ROTATION
+      return get_next_bucket_rotation_image
+    end
+    
     # For rotation schedules, get next image from bucket
     result = bucket.get_next_rotation_image(offset, skip_offset)
     
@@ -94,6 +104,71 @@ class BucketSchedule < ApplicationRecord
     end
     
     result
+  end
+  
+  # Get next image for bucket rotation schedule (one image per day, never repeat until all posted)
+  # Returns the next image that hasn't been posted today, cycling through all images
+  def get_next_bucket_rotation_image
+    all_images = bucket.bucket_images.order(:friendly_name).to_a
+    return nil if all_images.empty?
+    
+    # Get all images posted today for this schedule
+    today_start = Time.current.beginning_of_day
+    today_end = Time.current.end_of_day
+    posted_today = bucket_send_histories
+                     .where(sent_at: today_start..today_end)
+                     .pluck(:bucket_image_id)
+                     .compact
+    
+    # Find images that haven't been posted today
+    unposted_today = all_images.reject { |img| posted_today.include?(img.id) }
+    
+    # If all images were posted today, start fresh (cycle complete)
+    if unposted_today.empty?
+      Rails.logger.info "All images in bucket #{bucket.id} have been posted today for schedule #{id}, starting fresh cycle"
+      # Get the last image posted today to determine next in sequence
+      last_posted_today = bucket_send_histories
+                            .where(sent_at: today_start..today_end)
+                            .order(sent_at: :desc)
+                            .first
+      
+      if last_posted_today && last_posted_today.bucket_image_id
+        last_image = all_images.find { |img| img.id == last_posted_today.bucket_image_id }
+        if last_image
+          current_index = all_images.index(last_image)
+          next_index = (current_index + 1) % all_images.count
+          return all_images[next_index]
+        end
+      end
+      
+      # Fallback: start from first image
+      return all_images.first
+    end
+    
+    # If we have unposted images, find the next one in sequence
+    # Get the last image posted (ever, not just today) to determine sequence
+    last_posted = bucket_send_histories.order(sent_at: :desc).first
+    
+    if last_posted && last_posted.bucket_image_id
+      last_image = all_images.find { |img| img.id == last_posted.bucket_image_id }
+      if last_image && unposted_today.include?(last_image)
+        # Last posted image is in unposted list, find next in sequence
+        current_index = all_images.index(last_image)
+        next_index = (current_index + 1) % all_images.count
+        
+        # Find next unposted image starting from next_index
+        all_images.count.times do
+          candidate = all_images[next_index]
+          if unposted_today.include?(candidate)
+            return candidate
+          end
+          next_index = (next_index + 1) % all_images.count
+        end
+      end
+    end
+    
+    # No history or can't determine sequence, return first unposted image
+    unposted_today.first
   end
   
   def should_display_twitter_warning?
