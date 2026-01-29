@@ -93,10 +93,8 @@ class Api::V1::SubAccountsController < ApplicationController
     
     # Verify user has permission to switch to this account
     if current_user.super_admin?
-      # Super admins can switch to any sub-account they created
-      unless User.where(account_id: current_user.account_id || 0)
-                 .where.not(is_account_admin: true)
-                 .include?(target_user)
+      # Super admins can switch to any sub-account they created (same account_id and not an admin)
+      unless target_user.account_id == (current_user.account_id || 0) && !target_user.is_account_admin?
         return render json: { error: 'Unauthorized' }, status: :forbidden
       end
     else
