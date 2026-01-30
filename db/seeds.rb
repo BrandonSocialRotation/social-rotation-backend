@@ -44,6 +44,26 @@ Plan.find_or_create_by(name: "Agency Starter") do |plan|
   plan.sort_order = 10
 end
 
+Plan.find_or_create_by(name: "Agency Growth") do |plan|
+  plan.plan_type = 'agency'
+  plan.price_cents = 19900 # $199/month
+  plan.max_locations = 0
+  plan.max_users = 10 # Max 10 sub-accounts
+  plan.max_buckets = 100
+  plan.max_images_per_bucket = 1000
+  plan.features_hash = {
+    'rss' => true,
+    'marketplace' => true,
+    'watermark' => true,
+    'analytics' => true,
+    'white_label' => true,
+    'ai_copywriting' => true,
+    'ai_image_gen' => true
+  }
+  plan.status = true
+  plan.sort_order = 15
+end
+
 Plan.find_or_create_by(name: "Agency Professional") do |plan|
   plan.plan_type = 'agency'
   plan.price_cents = 24900 # $249/month
