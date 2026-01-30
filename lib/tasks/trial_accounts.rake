@@ -349,35 +349,13 @@ namespace :trial_accounts do
     end
     
     begin
-      # Retrieve the Stripe subscription to check its status
-      stripe_subscription = Stripe::Subscription.retrieve(subscription.stripe_subscription_id)
+      # Just clear the local reference - don't delete from Stripe
+      # The subscription will remain in Stripe but won't be connected to this account
+      old_subscription_id = subscription.stripe_subscription_id
+      old_customer_id = subscription.stripe_customer_id
       
-      # For incomplete/trialing subscriptions, we can cancel immediately
-      # For active subscriptions, we'll cancel at period end
-      if stripe_subscription.status == 'incomplete' || stripe_subscription.status == 'trialing' || stripe_subscription.status == 'incomplete_expired'
-        # Cancel immediately - incomplete subscriptions can be canceled
-        Stripe::Subscription.update(
-          subscription.stripe_subscription_id,
-          cancel_at_period_end: false
-        )
-        # Try to cancel it now by setting cancel_at to current time
-        begin
-          Stripe::Subscription.update(
-            subscription.stripe_subscription_id,
-            cancel_at: Time.current.to_i
-          )
-        rescue Stripe::StripeError
-          # If that fails, just mark it to cancel - Stripe will handle it
-        end
-        puts "✓ Canceled Stripe subscription immediately: #{subscription.stripe_subscription_id}"
-      else
-        # For active subscriptions, cancel at period end
-        Stripe::Subscription.update(
-          subscription.stripe_subscription_id,
-          cancel_at_period_end: true
-        )
-        puts "✓ Scheduled Stripe subscription for cancellation: #{subscription.stripe_subscription_id}"
-      end
+      puts "⚠️  Note: Stripe subscription #{old_subscription_id} will remain in Stripe"
+      puts "   You may want to cancel it manually in the Stripe dashboard if needed"
       
       # Optionally delete the customer (comment out if you want to keep the customer)
       # stripe_customer = Stripe::Customer.retrieve(subscription.stripe_customer_id)
