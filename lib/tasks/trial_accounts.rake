@@ -349,9 +349,8 @@ namespace :trial_accounts do
     end
     
     begin
-      # Cancel and delete the Stripe subscription
-      stripe_subscription = Stripe::Subscription.retrieve(subscription.stripe_subscription_id)
-      stripe_subscription.delete
+      # Cancel and delete the Stripe subscription using class method
+      Stripe::Subscription.delete(subscription.stripe_subscription_id)
       puts "✓ Deleted Stripe subscription: #{subscription.stripe_subscription_id}"
       
       # Optionally delete the customer (comment out if you want to keep the customer)
