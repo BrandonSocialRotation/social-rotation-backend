@@ -349,9 +349,35 @@ namespace :trial_accounts do
     end
     
     begin
-      # Cancel and delete the Stripe subscription using class method
-      Stripe::Subscription.delete(subscription.stripe_subscription_id)
-      puts "✓ Deleted Stripe subscription: #{subscription.stripe_subscription_id}"
+      # Retrieve and delete the Stripe subscription
+      # For incomplete/trialing subscriptions, we can cancel immediately
+      stripe_subscription = Stripe::Subscription.retrieve(subscription.stripe_subscription_id)
+      
+      # If subscription is incomplete or trialing, cancel it immediately
+      if stripe_subscription.status == 'incomplete' || stripe_subscription.status == 'trialing'
+        # Cancel immediately by deleting
+        begin
+          stripe_subscription.delete
+        rescue NoMethodError
+          # If delete method doesn't exist, try canceling immediately
+          Stripe::Subscription.update(
+            subscription.stripe_subscription_id,
+            cancel_at_period_end: false
+          )
+          # Then try to cancel it via the API
+          Stripe::Subscription.update(
+            subscription.stripe_subscription_id,
+            cancel_at: Time.current.to_i
+          )
+        end
+      else
+        # For active subscriptions, cancel at period end
+        Stripe::Subscription.update(
+          subscription.stripe_subscription_id,
+          cancel_at_period_end: true
+        )
+      end
+      puts "✓ Canceled/Deleted Stripe subscription: #{subscription.stripe_subscription_id}"
       
       # Optionally delete the customer (comment out if you want to keep the customer)
       # stripe_customer = Stripe::Customer.retrieve(subscription.stripe_customer_id)
