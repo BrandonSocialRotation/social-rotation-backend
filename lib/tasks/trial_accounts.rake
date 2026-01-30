@@ -351,11 +351,12 @@ namespace :trial_accounts do
     begin
       # Cancel and delete the Stripe subscription
       stripe_subscription = Stripe::Subscription.retrieve(subscription.stripe_subscription_id)
-      Stripe::Subscription.delete(subscription.stripe_subscription_id)
+      stripe_subscription.delete
       puts "✓ Deleted Stripe subscription: #{subscription.stripe_subscription_id}"
       
       # Optionally delete the customer (comment out if you want to keep the customer)
-      # Stripe::Customer.delete(subscription.stripe_customer_id)
+      # stripe_customer = Stripe::Customer.retrieve(subscription.stripe_customer_id)
+      # stripe_customer.delete
       # puts "✓ Deleted Stripe customer: #{subscription.stripe_customer_id}"
       
       # Clear the Stripe IDs from local subscription
