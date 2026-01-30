@@ -309,5 +309,145 @@ namespace :trial_accounts do
       exit 1
     end
   end
+  
+  desc "Disconnect and delete Stripe subscription for an account"
+  task :disconnect_stripe, [:email] => :environment do |t, args|
+    email = args[:email]
+    
+    if email.nil?
+      puts "Usage: rails trial_accounts:disconnect_stripe[\"email@example.com\"]"
+      exit 1
+    end
+    
+    user = User.find_by(email: email)
+    unless user
+      puts "❌ User with email '#{email}' not found."
+      exit 1
+    end
+    
+    account = user.account
+    unless account
+      puts "❌ User has no account."
+      exit 1
+    end
+    
+    subscription = account.subscription
+    unless subscription
+      puts "❌ Account has no subscription."
+      exit 1
+    end
+    
+    unless subscription.stripe_subscription_id.present?
+      puts "✓ Account is not connected to Stripe (no subscription ID)"
+      exit 0
+    end
+    
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    unless Stripe.api_key.present?
+      puts "❌ STRIPE_SECRET_KEY not configured."
+      exit 1
+    end
+    
+    begin
+      # Cancel and delete the Stripe subscription
+      stripe_subscription = Stripe::Subscription.retrieve(subscription.stripe_subscription_id)
+      Stripe::Subscription.delete(subscription.stripe_subscription_id)
+      puts "✓ Deleted Stripe subscription: #{subscription.stripe_subscription_id}"
+      
+      # Optionally delete the customer (comment out if you want to keep the customer)
+      # Stripe::Customer.delete(subscription.stripe_customer_id)
+      # puts "✓ Deleted Stripe customer: #{subscription.stripe_customer_id}"
+      
+      # Clear the Stripe IDs from local subscription
+      subscription.update!(
+        stripe_customer_id: "disconnected_#{subscription.stripe_customer_id}",
+        stripe_subscription_id: nil,
+        status: Subscription::STATUS_TRIALING
+      )
+      
+      puts "\n✅ Stripe subscription disconnected successfully!"
+      puts "  Local subscription still exists but is no longer connected to Stripe"
+      
+    rescue Stripe::StripeError => e
+      puts "❌ Stripe error: #{e.message}"
+      exit 1
+    end
+  end
+  
+  desc "Connect to an existing Stripe customer and subscription"
+  task :connect_existing_stripe, [:email, :stripe_customer_id, :stripe_subscription_id] => :environment do |t, args|
+    email = args[:email]
+    stripe_customer_id = args[:stripe_customer_id]
+    stripe_subscription_id = args[:stripe_subscription_id]
+    
+    if email.nil? || stripe_customer_id.nil? || stripe_subscription_id.nil?
+      puts "Usage: rails trial_accounts:connect_existing_stripe[\"email@example.com\",\"cus_xxx\",\"sub_xxx\"]"
+      exit 1
+    end
+    
+    user = User.find_by(email: email)
+    unless user
+      puts "❌ User with email '#{email}' not found."
+      exit 1
+    end
+    
+    account = user.account
+    unless account
+      puts "❌ User has no account."
+      exit 1
+    end
+    
+    subscription = account.subscription
+    unless subscription
+      puts "❌ Account has no subscription."
+      exit 1
+    end
+    
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    unless Stripe.api_key.present?
+      puts "❌ STRIPE_SECRET_KEY not configured."
+      exit 1
+    end
+    
+    begin
+      # Verify the Stripe customer exists
+      stripe_customer = Stripe::Customer.retrieve(stripe_customer_id)
+      puts "✓ Found Stripe customer: #{stripe_customer.id}"
+      
+      # Verify the Stripe subscription exists and belongs to this customer
+      stripe_subscription = Stripe::Subscription.retrieve(stripe_subscription_id)
+      unless stripe_subscription.customer == stripe_customer_id
+        puts "❌ Subscription #{stripe_subscription_id} does not belong to customer #{stripe_customer_id}"
+        exit 1
+      end
+      puts "✓ Found Stripe subscription: #{stripe_subscription.id}"
+      puts "  Status: #{stripe_subscription.status}"
+      puts "  Trial end: #{stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d %H:%M:%S') : 'N/A'}"
+      
+      # Update local subscription with existing Stripe IDs
+      subscription.update!(
+        stripe_customer_id: stripe_customer_id,
+        stripe_subscription_id: stripe_subscription_id,
+        status: stripe_subscription.status,
+        current_period_start: Time.at(stripe_subscription.current_period_start),
+        current_period_end: Time.at(stripe_subscription.current_period_end),
+        trial_end: stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end) : nil,
+        cancel_at_period_end: stripe_subscription.cancel_at_period_end
+      )
+      
+      puts "\n✅ Account connected to existing Stripe subscription successfully!"
+      puts "\nAccount Details:"
+      puts "  Account ID: #{account.id}"
+      puts "  User ID: #{user.id}"
+      puts "  Email: #{user.email}"
+      puts "  Stripe Customer ID: #{stripe_customer_id}"
+      puts "  Stripe Subscription ID: #{stripe_subscription_id}"
+      puts "  Subscription Status: #{stripe_subscription.status}"
+      
+    rescue Stripe::StripeError => e
+      puts "❌ Stripe error: #{e.message}"
+      exit 1
+    end
+  end
 end
 
