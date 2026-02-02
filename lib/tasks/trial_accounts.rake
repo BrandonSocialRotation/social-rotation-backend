@@ -444,10 +444,19 @@ namespace :trial_accounts do
           trial_end_timestamp = trial_end_date.end_of_day.to_i
           
           # Update Stripe subscription trial_end and ensure it continues billing monthly
+          # Convert metadata to hash if it's a Stripe object
+          existing_metadata = if stripe_subscription.metadata.respond_to?(:to_h)
+            stripe_subscription.metadata.to_h
+          elsif stripe_subscription.metadata.is_a?(Hash)
+            stripe_subscription.metadata
+          else
+            {}
+          end
+          
           update_params = {
             trial_end: trial_end_timestamp,
             cancel_at_period_end: false, # Ensure subscription continues after trial
-            metadata: stripe_subscription.metadata.merge({
+            metadata: existing_metadata.merge({
               trial_end_updated: Time.current.iso8601
             })
           }
