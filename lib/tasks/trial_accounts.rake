@@ -696,6 +696,13 @@ namespace :trial_accounts do
     # Parse trial end date
     begin
       trial_end_date = Date.parse(trial_end_date_str)
+      
+      # Check if date is in the past - if so, assume they meant next year
+      if trial_end_date < Date.today
+        puts "⚠️  Warning: Date #{trial_end_date.strftime('%Y-%m-%d')} is in the past."
+        puts "   Assuming you meant next year: #{(trial_end_date + 1.year).strftime('%Y-%m-%d')}"
+        trial_end_date = trial_end_date + 1.year
+      end
     rescue ArgumentError
       puts "❌ Invalid date format. Use YYYY-MM-DD (e.g., 2025-02-15)"
       exit 1
