@@ -19,8 +19,19 @@ class ProcessScheduledPostsJob < ApplicationJob
     end
     
     schedules.find_each do |schedule|
-      # Process schedule items if they exist (new multi-image feature)
-      if schedule.schedule_items.any?
+      # For BUCKET_ROTATION schedules, always process the schedule directly (not schedule_items)
+      # Schedule items are only used for storing captions, not for individual posting times
+      if schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_BUCKET_ROTATION
+        if schedule_should_run?(schedule)
+          begin
+            process_schedule(schedule)
+          rescue => e
+            Rails.logger.error "Error processing schedule #{schedule.id}: #{e.message}"
+            Rails.logger.error e.backtrace.join("\n")
+          end
+        end
+      # For MULTIPLE schedules, process schedule items (each has its own time)
+      elsif schedule.schedule_items.any?
         schedule.schedule_items.ordered.find_each do |item|
           if schedule_item_should_run?(item, schedule)
             begin
