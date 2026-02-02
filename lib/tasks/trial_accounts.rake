@@ -648,5 +648,159 @@ namespace :trial_accounts do
       exit 1
     end
   end
+  
+  desc "Upgrade account plan and set trial end date on existing Stripe subscription"
+  task :upgrade_plan, [:email, :plan_name, :trial_end_date] => :environment do |t, args|
+    email = args[:email]
+    plan_name = args[:plan_name]
+    trial_end_date_str = args[:trial_end_date] # Format: YYYY-MM-DD
+    
+    if email.nil? || plan_name.nil? || trial_end_date_str.nil?
+      puts "Usage: rails trial_accounts:upgrade_plan[\"email@example.com\",\"Plan Name\",\"YYYY-MM-DD\"]"
+      puts "Example: rails trial_accounts:upgrade_plan[\"adam@hailoint.com\",\"Agency Growth\",\"2025-02-15\"]"
+      exit 1
+    end
+    
+    user = User.find_by(email: email)
+    unless user
+      puts "❌ User with email '#{email}' not found."
+      exit 1
+    end
+    
+    account = user.account
+    unless account
+      puts "❌ User has no account."
+      exit 1
+    end
+    
+    subscription = account.subscription
+    unless subscription
+      puts "❌ Account has no subscription."
+      exit 1
+    end
+    
+    unless subscription.stripe_subscription_id.present?
+      puts "❌ Account is not connected to Stripe. Use fix_account task instead."
+      exit 1
+    end
+    
+    # Find the plan
+    plan = Plan.find_by(name: plan_name)
+    unless plan
+      puts "❌ Plan '#{plan_name}' not found."
+      puts "Available plans:"
+      Plan.all.each { |p| puts "  - #{p.name} ($#{p.price_cents / 100.0}/month)" }
+      exit 1
+    end
+    
+    # Parse trial end date
+    begin
+      trial_end_date = Date.parse(trial_end_date_str)
+    rescue ArgumentError
+      puts "❌ Invalid date format. Use YYYY-MM-DD (e.g., 2025-02-15)"
+      exit 1
+    end
+    
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    unless Stripe.api_key.present?
+      puts "❌ STRIPE_SECRET_KEY not configured."
+      exit 1
+    end
+    
+    puts "\n=== Upgrading Account Plan ==="
+    puts "Email: #{email}"
+    puts "Current Plan: #{subscription.plan.name}"
+    puts "New Plan: #{plan.name}"
+    puts "Trial End Date: #{trial_end_date.strftime('%Y-%m-%d')}"
+    puts "Existing Stripe Subscription: #{subscription.stripe_subscription_id}"
+    
+    begin
+      # Step 1: Retrieve existing Stripe subscription
+      puts "\n--- Step 1: Retrieving existing Stripe subscription ---"
+      stripe_subscription = Stripe::Subscription.retrieve(subscription.stripe_subscription_id)
+      puts "✓ Found Stripe subscription: #{stripe_subscription.id}"
+      puts "  Current status: #{stripe_subscription.status}"
+      
+      # Step 2: Create Stripe price for the new plan
+      puts "\n--- Step 2: Creating Stripe price for #{plan.name} ---"
+      stripe_price = if plan.stripe_price_id.present?
+        Stripe::Price.retrieve(plan.stripe_price_id)
+      else
+        Stripe::Price.create({
+          unit_amount: plan.price_cents,
+          currency: 'usd',
+          recurring: {
+            interval: 'month',
+          },
+          product_data: {
+            name: plan.name
+          }
+        })
+      end
+      puts "✓ Using Stripe price: #{stripe_price.id}"
+      
+      # Step 3: Update Stripe subscription with new price and trial end
+      puts "\n--- Step 3: Updating Stripe subscription ---"
+      trial_end_timestamp = trial_end_date.end_of_day.to_i
+      
+      # Get the subscription item ID
+      subscription_item_id = stripe_subscription.items.data.first.id
+      
+      # Update the subscription
+      updated_subscription = Stripe::Subscription.update(
+        subscription.stripe_subscription_id,
+        items: [{
+          id: subscription_item_id,
+          price: stripe_price.id
+        }],
+        trial_end: trial_end_timestamp,
+        metadata: {
+          account_id: account.id.to_s,
+          plan_id: plan.id.to_s,
+          trial_account: 'true',
+          trial_ends: trial_end_date.strftime('%Y-%m-%d')
+        }
+      )
+      puts "✓ Updated Stripe subscription"
+      puts "  New status: #{updated_subscription.status}"
+      puts "  Trial ends: #{Time.at(trial_end_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
+      
+      # Step 4: Update local subscription and plan
+      puts "\n--- Step 4: Updating local subscription and plan ---"
+      subscription.update!(
+        plan: plan,
+        status: updated_subscription.status,
+        current_period_start: Time.at(updated_subscription.current_period_start),
+        current_period_end: Time.at(updated_subscription.current_period_end),
+        trial_end: Time.at(updated_subscription.trial_end),
+        cancel_at_period_end: updated_subscription.cancel_at_period_end
+      )
+      account.update!(plan: plan)
+      puts "✓ Updated local subscription and account plan"
+      
+      puts "\n✅ Account upgraded successfully!"
+      puts "\nAccount Details:"
+      puts "  Account ID: #{account.id}"
+      puts "  User ID: #{user.id}"
+      puts "  Email: #{user.email}"
+      puts "  Plan: #{plan.name} ($#{plan.price_cents / 100.0}/month)"
+      puts "  Subscription Status: #{updated_subscription.status}"
+      puts "  Stripe Customer ID: #{subscription.stripe_customer_id}"
+      puts "  Stripe Subscription ID: #{subscription.stripe_subscription_id}"
+      puts "  Trial End Date: #{trial_end_date.strftime('%Y-%m-%d')}"
+      puts "  Will be charged on: #{trial_end_date.strftime('%Y-%m-%d')}"
+      puts "\n✅ Account remains connected to existing Stripe customer/subscription"
+      puts "   Subscription will automatically charge on #{trial_end_date.strftime('%Y-%m-%d')}"
+      
+    rescue Stripe::StripeError => e
+      puts "❌ Stripe error: #{e.message}"
+      puts "   #{e.backtrace.first}" if e.backtrace
+      exit 1
+    rescue => e
+      puts "❌ Error: #{e.message}"
+      puts "   #{e.backtrace.first}" if e.backtrace
+      exit 1
+    end
+  end
 end
 
