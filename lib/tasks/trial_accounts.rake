@@ -379,13 +379,15 @@ namespace :trial_accounts do
   end
   
   desc "Connect to an existing Stripe customer and subscription"
-  task :connect_existing_stripe, [:email, :stripe_customer_id, :stripe_subscription_id] => :environment do |t, args|
+  task :connect_existing_stripe, [:email, :stripe_customer_id, :stripe_subscription_id, :trial_end_date] => :environment do |t, args|
     email = args[:email]
     stripe_customer_id = args[:stripe_customer_id]
     stripe_subscription_id = args[:stripe_subscription_id]
+    trial_end_date_str = args[:trial_end_date] # Optional: YYYY-MM-DD format
     
     if email.nil? || stripe_customer_id.nil? || stripe_subscription_id.nil?
-      puts "Usage: rails trial_accounts:connect_existing_stripe[\"email@example.com\",\"cus_xxx\",\"sub_xxx\"]"
+      puts "Usage: rails trial_accounts:connect_existing_stripe[\"email@example.com\",\"cus_xxx\",\"sub_xxx\",\"YYYY-MM-DD\"]"
+      puts "  Note: trial_end_date is optional. If provided, will update Stripe subscription trial_end to that date."
       exit 1
     end
     
@@ -426,7 +428,41 @@ namespace :trial_accounts do
       end
       puts "✓ Found Stripe subscription: #{stripe_subscription.id}"
       puts "  Status: #{stripe_subscription.status}"
-      puts "  Trial end: #{stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d %H:%M:%S') : 'N/A'}"
+      puts "  Current trial end: #{stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d %H:%M:%S') : 'N/A'}"
+      
+      # Update trial_end if provided
+      if trial_end_date_str.present?
+        begin
+          trial_end_date = Date.parse(trial_end_date_str)
+          # If date is in the past, assume next year
+          if trial_end_date < Date.today
+            puts "⚠️  Warning: Date #{trial_end_date.strftime('%Y-%m-%d')} is in the past."
+            puts "   Assuming you meant next year: #{(trial_end_date + 1.year).strftime('%Y-%m-%d')}"
+            trial_end_date = trial_end_date + 1.year
+          end
+          
+          trial_end_timestamp = trial_end_date.end_of_day.to_i
+          
+          # Update Stripe subscription trial_end
+          updated_subscription = Stripe::Subscription.update(
+            stripe_subscription_id,
+            {
+              trial_end: trial_end_timestamp,
+              metadata: stripe_subscription.metadata.merge({
+                trial_end_updated: Time.current.iso8601
+              })
+            }
+          )
+          
+          puts "✓ Updated Stripe subscription trial_end to: #{trial_end_date.strftime('%Y-%m-%d')}"
+          stripe_subscription = updated_subscription
+        rescue ArgumentError => e
+          puts "⚠️  Warning: Invalid date format '#{trial_end_date_str}'. Using existing trial_end from Stripe."
+        rescue Stripe::StripeError => e
+          puts "⚠️  Warning: Could not update trial_end in Stripe: #{e.message}"
+          puts "   Using existing trial_end from Stripe subscription."
+        end
+      end
       
       # Update local subscription with existing Stripe IDs
       subscription.update!(
@@ -447,6 +483,10 @@ namespace :trial_accounts do
       puts "  Stripe Customer ID: #{stripe_customer_id}"
       puts "  Stripe Subscription ID: #{stripe_subscription_id}"
       puts "  Subscription Status: #{stripe_subscription.status}"
+      if stripe_subscription.trial_end
+        puts "  Trial End Date: #{Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d')}"
+        puts "  Will be charged on: #{Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d')}"
+      end
       
     rescue Stripe::StripeError => e
       puts "❌ Stripe error: #{e.message}"
@@ -806,6 +846,39 @@ namespace :trial_accounts do
     rescue => e
       puts "❌ Error: #{e.message}"
       puts "   #{e.backtrace.first}" if e.backtrace
+      exit 1
+    end
+  end
+  
+  desc "Reset a user's password to a known value"
+  task :reset_password, [:email, :new_password] => :environment do |t, args|
+    email = args[:email]
+    new_password = args[:new_password] || 'test'
+    
+    if email.nil?
+      puts "Usage: rails trial_accounts:reset_password[\"email@example.com\",\"newpassword\"]"
+      puts "       (password is optional, defaults to 'test')"
+      exit 1
+    end
+    
+    user = User.find_by(email: email)
+    unless user
+      puts "❌ User with email '#{email}' not found."
+      exit 1
+    end
+    
+    puts "\n=== Resetting Password ==="
+    puts "Email: #{email}"
+    puts "User: #{user.name} (ID: #{user.id})"
+    
+    if user.update(password: new_password, password_confirmation: new_password)
+      puts "✅ Password reset successfully!"
+      puts "\nLogin Credentials:"
+      puts "  Email: #{email}"
+      puts "  Password: #{new_password}"
+    else
+      puts "❌ Failed to reset password:"
+      user.errors.full_messages.each { |msg| puts "   - #{msg}" }
       exit 1
     end
   end
