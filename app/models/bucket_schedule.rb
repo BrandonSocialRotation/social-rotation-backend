@@ -237,12 +237,17 @@ class BucketSchedule < ApplicationRecord
     parts = schedule.split(' ')
     return [] if parts.length < 5
     
-    parts[4].split(',') # 5th column is days of week
+    weekday_field = parts[4]
+    return [0, 1, 2, 3, 4, 5, 6] if weekday_field == '*' # All days if wildcard
+    
+    weekday_field.split(',').map(&:to_i) # Return as integers (0=Sunday, 1=Monday, ..., 6=Saturday)
   end
   
   def is_day_selected?(day)
     days = get_days_selected
-    days.include?(day.to_s) || days.include?('*')
+    # day can be 0-6 (Sunday-Saturday) or 1-7 (Monday-Sunday), normalize to 0-6
+    day_normalized = day.to_i % 7
+    days.include?(day_normalized)
   end
   
   def get_time_format

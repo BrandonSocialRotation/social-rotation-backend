@@ -50,6 +50,23 @@ class Api::V1::BucketSchedulesController < ApplicationController
       Rails.logger.info "Timezone column found - will save timezone: #{schedule_params[:timezone]}"
     end
     
+    # For bucket rotation schedules, handle day selection
+    if schedule_params[:schedule_type].to_i == BucketSchedule::SCHEDULE_TYPE_BUCKET_ROTATION
+      days = params[:days] || params.dig(:bucket_schedule, :days)
+      if days.present? && days.is_a?(Array) && days.any?
+        # Update cron string to include selected days
+        cron_parts = schedule_params[:schedule].split(' ')
+        if cron_parts.length == 5
+          # Convert days to cron format (0=Sunday, 1=Monday, ..., 6=Saturday)
+          # Frontend may send 1-7 (Mon-Sun) or 0-6 (Sun-Sat), normalize to 0-6
+          cron_days = days.map { |d| d.to_i % 7 }.uniq.sort.join(',')
+          cron_parts[4] = cron_days # Update day-of-week field
+          schedule_params[:schedule] = cron_parts.join(' ')
+          Rails.logger.info "Bucket rotation schedule: Updated cron with days #{cron_days}: #{schedule_params[:schedule]}"
+        end
+      end
+    end
+    
     # Log the schedule being created for debugging
     Rails.logger.info "Creating schedule with cron: #{schedule_params[:schedule]}, timezone: #{schedule_params[:timezone]}, schedule_type: #{schedule_params[:schedule_type]}"
     puts "Creating schedule with cron: #{schedule_params[:schedule]}, timezone: #{schedule_params[:timezone]}, schedule_type: #{schedule_params[:schedule_type]}"
@@ -114,6 +131,22 @@ class Api::V1::BucketSchedulesController < ApplicationController
     end
     unless BucketSchedule.column_names.include?('timezone')
       update_params = update_params.except(:timezone)
+    end
+    
+    # For bucket rotation schedules, handle day selection updates
+    if @bucket_schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_BUCKET_ROTATION
+      days = params[:days] || params.dig(:bucket_schedule, :days)
+      if days.present? && days.is_a?(Array) && days.any?
+        # Update cron string to include selected days
+        cron_parts = update_params[:schedule]&.split(' ') || @bucket_schedule.schedule.split(' ')
+        if cron_parts.length == 5
+          # Convert days to cron format (0=Sunday, 1=Monday, ..., 6=Saturday)
+          cron_days = days.map { |d| d.to_i % 7 }.uniq.sort.join(',')
+          cron_parts[4] = cron_days # Update day-of-week field
+          update_params[:schedule] = cron_parts.join(' ')
+          Rails.logger.info "Bucket rotation schedule update: Updated cron with days #{cron_days}: #{update_params[:schedule]}"
+        end
+      end
     end
     
     # Handle schedule_items updates if provided
@@ -467,6 +500,17 @@ class Api::V1::BucketSchedulesController < ApplicationController
       created_at: bucket_schedule.created_at,
       updated_at: bucket_schedule.updated_at
     }
+    
+    # For bucket rotation schedules, include selected days in response
+    if bucket_schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_BUCKET_ROTATION
+      cron_parts = bucket_schedule.schedule.split(' ')
+      if cron_parts.length == 5 && cron_parts[4] != '*'
+        # Parse day-of-week from cron (0=Sunday, 1=Monday, ..., 6=Saturday)
+        json[:selected_days] = cron_parts[4].split(',').map(&:to_i)
+      else
+        json[:selected_days] = [0, 1, 2, 3, 4, 5, 6] # All days if wildcard
+      end
+    end
     
     # Include schedule_items if they exist
     if bucket_schedule.schedule_items.any?
