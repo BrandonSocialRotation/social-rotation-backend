@@ -453,5 +453,200 @@ namespace :trial_accounts do
       exit 1
     end
   end
+  
+  desc "Fix an account: disconnect from existing Stripe, update plan, create new trial subscription"
+  task :fix_account, [:email, :plan_name, :trial_end_date] => :environment do |t, args|
+    email = args[:email]
+    plan_name = args[:plan_name]
+    trial_end_date_str = args[:trial_end_date] # Format: YYYY-MM-DD
+    
+    if email.nil? || plan_name.nil? || trial_end_date_str.nil?
+      puts "Usage: rails trial_accounts:fix_account[\"email@example.com\",\"Plan Name\",\"YYYY-MM-DD\"]"
+      puts "Example: rails trial_accounts:fix_account[\"adam@hailoint.com\",\"Agency Growth\",\"2025-02-15\"]"
+      exit 1
+    end
+    
+    user = User.find_by(email: email)
+    unless user
+      puts "❌ User with email '#{email}' not found."
+      exit 1
+    end
+    
+    account = user.account
+    unless account
+      puts "❌ User has no account."
+      exit 1
+    end
+    
+    subscription = account.subscription
+    unless subscription
+      puts "❌ Account has no subscription."
+      exit 1
+    end
+    
+    # Find the plan
+    plan = Plan.find_by(name: plan_name)
+    unless plan
+      puts "❌ Plan '#{plan_name}' not found."
+      puts "Available plans:"
+      Plan.all.each { |p| puts "  - #{p.name} ($#{p.price_cents / 100.0}/month)" }
+      exit 1
+    end
+    
+    # Parse trial end date
+    begin
+      trial_end_date = Date.parse(trial_end_date_str)
+    rescue ArgumentError
+      puts "❌ Invalid date format. Use YYYY-MM-DD (e.g., 2025-02-15)"
+      exit 1
+    end
+    
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    unless Stripe.api_key.present?
+      puts "❌ STRIPE_SECRET_KEY not configured."
+      exit 1
+    end
+    
+    puts "\n=== Fixing Account ==="
+    puts "Email: #{email}"
+    puts "Current Plan: #{subscription.plan.name}"
+    puts "New Plan: #{plan.name}"
+    puts "Trial End Date: #{trial_end_date.strftime('%Y-%m-%d')}"
+    
+    begin
+      # Step 1: Disconnect from existing Stripe subscription (if connected)
+      if subscription.stripe_subscription_id.present?
+        puts "\n--- Step 1: Disconnecting from existing Stripe subscription ---"
+        puts "⚠️  Note: Stripe subscription #{subscription.stripe_subscription_id} will remain in Stripe"
+        puts "   You may want to cancel it manually in the Stripe dashboard if needed"
+        
+        old_subscription_id = subscription.stripe_subscription_id
+        old_customer_id = subscription.stripe_customer_id
+        
+        # Clear local reference
+        subscription.update!(
+          stripe_customer_id: "disconnected_#{old_customer_id}",
+          stripe_subscription_id: nil,
+          status: Subscription::STATUS_TRIALING
+        )
+        puts "✓ Disconnected from Stripe subscription"
+      else
+        puts "\n--- Step 1: No existing Stripe subscription to disconnect ---"
+      end
+      
+      # Step 2: Update plan
+      puts "\n--- Step 2: Updating plan to #{plan.name} ---"
+      subscription.update!(plan: plan)
+      account.update!(plan: plan)
+      puts "✓ Updated plan to #{plan.name}"
+      
+      # Step 3: Create new Stripe customer (or reuse if exists)
+      puts "\n--- Step 3: Creating/retrieving Stripe customer ---"
+      stripe_customer = nil
+      
+      # Try to find existing customer by email
+      customers = Stripe::Customer.list(email: email, limit: 1)
+      if customers.data.any?
+        stripe_customer = customers.data.first
+        puts "✓ Found existing Stripe customer: #{stripe_customer.id}"
+      else
+        # Create new customer
+        stripe_customer = Stripe::Customer.create({
+          email: email,
+          name: user.name,
+          metadata: {
+            account_id: account.id.to_s,
+            user_id: user.id.to_s,
+            trial_account: 'true',
+            fixed_account: 'true'
+          }
+        })
+        puts "✓ Created new Stripe customer: #{stripe_customer.id}"
+      end
+      
+      # Step 4: Create Stripe price for the plan
+      puts "\n--- Step 4: Creating Stripe price ---"
+      stripe_price = if plan.stripe_price_id.present?
+        Stripe::Price.retrieve(plan.stripe_price_id)
+      else
+        Stripe::Price.create({
+          unit_amount: plan.price_cents,
+          currency: 'usd',
+          recurring: {
+            interval: 'month',
+          },
+          product_data: {
+            name: plan.name
+          }
+        })
+      end
+      puts "✓ Using Stripe price: #{stripe_price.id}"
+      
+      # Step 5: Create new Stripe subscription with trial period
+      puts "\n--- Step 5: Creating new Stripe subscription with trial ---"
+      trial_end_timestamp = trial_end_date.end_of_day.to_i
+      
+      stripe_subscription = Stripe::Subscription.create({
+        customer: stripe_customer.id,
+        items: [{ price: stripe_price.id }],
+        trial_end: trial_end_timestamp,
+        payment_behavior: 'default_incomplete', # Requires payment method to be added
+        payment_settings: {
+          save_default_payment_method: 'on_subscription'
+        },
+        metadata: {
+          account_id: account.id.to_s,
+          plan_id: plan.id.to_s,
+          trial_account: 'true',
+          fixed_account: 'true',
+          trial_ends: trial_end_date.strftime('%Y-%m-%d')
+        }
+      })
+      puts "✓ Created Stripe subscription: #{stripe_subscription.id}"
+      puts "  Status: #{stripe_subscription.status}"
+      puts "  Trial ends: #{Time.at(trial_end_timestamp).strftime('%Y-%m-%d %H:%M:%S')}"
+      
+      # Step 6: Update local subscription
+      puts "\n--- Step 6: Updating local subscription record ---"
+      subscription.update!(
+        plan: plan,
+        status: stripe_subscription.status,
+        stripe_customer_id: stripe_customer.id,
+        stripe_subscription_id: stripe_subscription.id,
+        current_period_start: Time.at(stripe_subscription.current_period_start),
+        current_period_end: Time.at(stripe_subscription.current_period_end),
+        trial_end: Time.at(stripe_subscription.trial_end),
+        cancel_at_period_end: false,
+        billing_period: 'monthly'
+      )
+      puts "✓ Updated local subscription"
+      
+      puts "\n✅ Account fixed successfully!"
+      puts "\nAccount Details:"
+      puts "  Account ID: #{account.id}"
+      puts "  User ID: #{user.id}"
+      puts "  Email: #{user.email}"
+      puts "  Plan: #{plan.name} ($#{plan.price_cents / 100.0}/month)"
+      puts "  Subscription Status: #{stripe_subscription.status}"
+      puts "  Stripe Customer ID: #{stripe_customer.id}"
+      puts "  Stripe Subscription ID: #{stripe_subscription.id}"
+      puts "  Trial End Date: #{trial_end_date.strftime('%Y-%m-%d')}"
+      puts "  Will be charged on: #{trial_end_date.strftime('%Y-%m-%d')}"
+      puts "\n⚠️  IMPORTANT:"
+      puts "  The subscription is in 'incomplete' status and requires a payment method."
+      puts "  User must add a payment method through the app before #{trial_end_date.strftime('%Y-%m-%d')}."
+      puts "  Once payment method is added, Stripe will automatically charge on the trial end date."
+      puts "  If payment fails, the account will stop working (status: past_due)."
+      
+    rescue Stripe::StripeError => e
+      puts "❌ Stripe error: #{e.message}"
+      puts "   #{e.backtrace.first}" if e.backtrace
+      exit 1
+    rescue => e
+      puts "❌ Error: #{e.message}"
+      puts "   #{e.backtrace.first}" if e.backtrace
+      exit 1
+    end
+  end
 end
 
