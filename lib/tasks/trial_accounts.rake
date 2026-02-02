@@ -443,15 +443,18 @@ namespace :trial_accounts do
           
           trial_end_timestamp = trial_end_date.end_of_day.to_i
           
-          # Update Stripe subscription trial_end
+          # Update Stripe subscription trial_end and ensure it continues billing monthly
+          update_params = {
+            trial_end: trial_end_timestamp,
+            cancel_at_period_end: false, # Ensure subscription continues after trial
+            metadata: stripe_subscription.metadata.merge({
+              trial_end_updated: Time.current.iso8601
+            })
+          }
+          
           updated_subscription = Stripe::Subscription.update(
             stripe_subscription_id,
-            {
-              trial_end: trial_end_timestamp,
-              metadata: stripe_subscription.metadata.merge({
-                trial_end_updated: Time.current.iso8601
-              })
-            }
+            update_params
           )
           
           puts "✓ Updated Stripe subscription trial_end to: #{trial_end_date.strftime('%Y-%m-%d')}"
