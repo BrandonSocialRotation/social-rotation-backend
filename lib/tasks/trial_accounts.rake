@@ -456,6 +456,8 @@ namespace :trial_accounts do
           update_params = {
             trial_end: trial_end_timestamp,
             cancel_at_period_end: false, # Ensure subscription continues after trial
+            proration_behavior: 'none', # Prevent prorations when updating trial_end
+            prorate: false, # Also set prorate to false for safety
             metadata: existing_metadata.merge({
               trial_end_updated: Time.current.iso8601
             })
