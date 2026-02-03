@@ -430,8 +430,21 @@ namespace :trial_accounts do
       puts "  Status: #{stripe_subscription.status}"
       puts "  Current trial end: #{stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d %H:%M:%S') : 'N/A'}"
       
-      # Update trial_end if provided
-      if trial_end_date_str.present?
+      # Check if subscription is already active (past trial) - can't extend trial on active subscriptions
+      if stripe_subscription.status == 'active' && stripe_subscription.trial_end && Time.at(stripe_subscription.trial_end) < Time.current
+        puts "⚠️  Warning: Subscription is already active (trial ended). Cannot extend trial without creating prorations."
+        puts "   Current trial_end: #{Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d')}"
+        if trial_end_date_str.present?
+          trial_end_date = Date.parse(trial_end_date_str)
+          if trial_end_date < Date.today
+            trial_end_date = trial_end_date + 1.year
+          end
+          puts "   Requested trial_end: #{trial_end_date.strftime('%Y-%m-%d')}"
+          puts "   ⚠️  Skipping trial_end update to prevent prorations/refunds."
+          puts "   Subscription will remain active. To set a new trial, you may need to cancel and recreate."
+        end
+      # Update trial_end if provided and subscription is in trial or not yet started
+      elsif trial_end_date_str.present?
         begin
           trial_end_date = Date.parse(trial_end_date_str)
           # If date is in the past, assume next year
