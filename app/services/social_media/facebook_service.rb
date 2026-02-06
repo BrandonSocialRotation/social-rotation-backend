@@ -165,6 +165,7 @@ module SocialMedia
       url = "#{BASE_URL}/me/accounts"
       params = {
         access_token: @user.fb_user_access_key,
+        fields: 'id,name,access_token,instagram_business_account{id,username}',
         limit: 1000
       }
       
