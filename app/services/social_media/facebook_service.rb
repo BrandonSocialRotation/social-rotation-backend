@@ -72,7 +72,7 @@ module SocialMedia
       unless page_token
         # Find the page that has the Instagram account linked (works whether page_id was provided or not)
         Rails.logger.info "Instagram post - Finding page token for Instagram ID: #{instagram_id}"
-        page_token = get_page_token_for_instagram(instagram_id)
+        page_token = get_page_token_for_instagram_private(instagram_id)
         Rails.logger.info "Instagram post - Found page token: #{page_token.present? ? 'YES' : 'NO'}"
       end
       
@@ -241,6 +241,11 @@ module SocialMedia
       raise "Instagram video processing timeout after #{max_wait} seconds"
     end
     
+    # Get page token for Instagram account (public method for validation)
+    def get_page_token_for_instagram(instagram_id)
+      get_page_token_for_instagram_private(instagram_id)
+    end
+    
     private
     
     # Post an image to Facebook
@@ -312,7 +317,7 @@ module SocialMedia
     # Finds the Facebook Page that has the Instagram account linked
     # @param instagram_id [String] Instagram Business account ID
     # @return [String] Page access token for the page with this Instagram account
-    def get_page_token_for_instagram(instagram_id)
+    def get_page_token_for_instagram_private(instagram_id)
       url = "#{BASE_URL}/me/accounts"
       params = {
         access_token: @user.fb_user_access_key,

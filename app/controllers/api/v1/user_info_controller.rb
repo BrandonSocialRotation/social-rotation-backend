@@ -377,6 +377,23 @@ class Api::V1::UserInfoController < ApplicationController
 
   private
   
+  # Check if user can post to Instagram
+  # Instagram requires: 1) Instagram Business ID, 2) Facebook connected (for page token), 3) A page with Instagram linked
+  def can_post_to_instagram?(user)
+    return false unless user.instagram_business_id.present?
+    return false unless user.fb_user_access_key.present?
+    
+    # Check if there's a page with Instagram linked
+    begin
+      facebook_service = SocialMedia::FacebookService.new(user)
+      page_token = facebook_service.get_page_token_for_instagram(user.instagram_business_id)
+      page_token.present?
+    rescue => e
+      Rails.logger.warn "Instagram posting validation error: #{e.message}"
+      false
+    end
+  end
+  
   # Get Instagram account information (username, name, etc.)
   def get_instagram_account_info(user)
     return nil unless user.fb_user_access_key.present? && user.instagram_business_id.present?
@@ -487,6 +504,7 @@ class Api::V1::UserInfoController < ApplicationController
       instagram_connected: user.instagram_business_id.present?,
       instagram_business_id: user.instagram_business_id,
       instagram_account: user.instagram_business_id.present? ? get_instagram_account_info(user) : nil,
+      instagram_can_post: can_post_to_instagram?(user),
       tiktok_connected: user.tiktok_access_token.present?,
       youtube_connected: user.youtube_access_token.present?,
       pinterest_connected: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present?) || false,
