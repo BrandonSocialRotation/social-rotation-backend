@@ -68,7 +68,11 @@ module SocialMedia
         raise "User does not have Instagram connected"
       end
       
-      page_token ||= get_page_access_token(page_id: page_id)
+      # If we don't have a page token yet, find the page that has this Instagram account linked
+      unless page_token
+        # Find the page that has the Instagram account linked (works whether page_id was provided or not)
+        page_token = get_page_token_for_instagram(instagram_id)
+      end
       
       unless page_token
         raise "Could not get Facebook page access token for Instagram. Your Instagram account must be linked to a Facebook Page to post content. Please link your Instagram Business/Creator account to a Facebook Page in your Facebook Page settings."
@@ -297,6 +301,33 @@ module SocialMedia
       else
         nil
       end
+    end
+    
+    # Get the page access token for a specific Instagram account
+    # Finds the Facebook Page that has the Instagram account linked
+    # @param instagram_id [String] Instagram Business account ID
+    # @return [String] Page access token for the page with this Instagram account
+    def get_page_token_for_instagram(instagram_id)
+      url = "#{BASE_URL}/me/accounts"
+      params = {
+        access_token: @user.fb_user_access_key,
+        fields: 'id,name,access_token,instagram_business_account{id}',
+        limit: 1000
+      }
+      
+      response = HTTParty.get(url, query: params)
+      return nil unless response.success?
+      
+      data = JSON.parse(response.body)
+      return nil unless data['data']&.any?
+      
+      # Find the page that has this Instagram account linked
+      page = data['data'].find do |p|
+        p['instagram_business_account'] && 
+        p['instagram_business_account']['id'] == instagram_id
+      end
+      
+      page ? page['access_token'] : nil
     end
   end
 end
