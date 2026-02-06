@@ -71,12 +71,17 @@ module SocialMedia
       # If we don't have a page token yet, find the page that has this Instagram account linked
       unless page_token
         # Find the page that has the Instagram account linked (works whether page_id was provided or not)
+        Rails.logger.info "Instagram post - Finding page token for Instagram ID: #{instagram_id}"
         page_token = get_page_token_for_instagram(instagram_id)
+        Rails.logger.info "Instagram post - Found page token: #{page_token.present? ? 'YES' : 'NO'}"
       end
       
       unless page_token
+        Rails.logger.error "Instagram post - No page token found for Instagram ID: #{instagram_id}"
         raise "Could not get Facebook page access token for Instagram. Your Instagram account must be linked to a Facebook Page to post content. Please link your Instagram Business/Creator account to a Facebook Page in your Facebook Page settings."
       end
+      
+      Rails.logger.info "Instagram post - Using Instagram ID: #{instagram_id}, Page token present: #{page_token.present?}"
       
       # Step 1: Create media container
       create_url = "#{BASE_URL}/#{@user.instagram_business_id}/media"
@@ -316,15 +321,34 @@ module SocialMedia
       }
       
       response = HTTParty.get(url, query: params)
-      return nil unless response.success?
+      unless response.success?
+        Rails.logger.error "Instagram get_page_token_for_instagram - Failed to fetch pages: #{response.body}"
+        return nil
+      end
       
       data = JSON.parse(response.body)
-      return nil unless data['data']&.any?
+      unless data['data']&.any?
+        Rails.logger.error "Instagram get_page_token_for_instagram - No pages found"
+        return nil
+      end
+      
+      # Log all pages and their Instagram accounts for debugging
+      pages_with_instagram = data['data'].select { |p| p['instagram_business_account'] }
+      Rails.logger.info "Instagram get_page_token_for_instagram - Found #{pages_with_instagram.count} pages with Instagram accounts"
+      pages_with_instagram.each do |p|
+        Rails.logger.info "  Page: #{p['name']} (ID: #{p['id']}), Instagram ID: #{p['instagram_business_account']['id']}"
+      end
       
       # Find the page that has this Instagram account linked
       page = data['data'].find do |p|
         p['instagram_business_account'] && 
         p['instagram_business_account']['id'] == instagram_id
+      end
+      
+      if page
+        Rails.logger.info "Instagram get_page_token_for_instagram - Found matching page: #{page['name']} (ID: #{page['id']})"
+      else
+        Rails.logger.error "Instagram get_page_token_for_instagram - No page found with Instagram ID: #{instagram_id}"
       end
       
       page ? page['access_token'] : nil
