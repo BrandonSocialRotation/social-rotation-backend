@@ -21,16 +21,12 @@ class ApplicationController < ActionController::API
   # Authenticate user using JWT token from Authorization header
   # Expects: "Authorization: Bearer <token>"
   # Sets @current_user if valid token
-  # Returns 401 if missing or invalid token
+  # Returns 401 if missing or invalid token (frontend will handle logout)
   def authenticate_user!
     token = request.headers['Authorization']&.split(' ')&.last
     
     if token.blank?
-      render json: { 
-        error: 'Authentication token required',
-        message: 'Please log in to continue',
-        code: 'TOKEN_MISSING'
-      }, status: :unauthorized
+      render json: { error: 'Unauthorized' }, status: :unauthorized
       return
     end
 
@@ -40,41 +36,18 @@ class ApplicationController < ActionController::API
       @current_user = User.find_by(id: decoded[:user_id])
       
       unless @current_user
-        render json: { 
-          error: 'User not found',
-          message: 'Your account could not be found. Please log in again.',
-          code: 'USER_NOT_FOUND'
-        }, status: :unauthorized
+        render json: { error: 'Unauthorized' }, status: :unauthorized
         return
       end
     else
-      # Try to decode without expiration check to see if it's expired or invalid
-      begin
-        decoded_data = JWT.decode(token, JsonWebToken::SECRET_KEY, false)[0]
-        # If we get here, token is valid but expired
-        render json: { 
-          error: 'Token expired',
-          message: 'Your session has expired. Please log in again.',
-          code: 'TOKEN_EXPIRED'
-        }, status: :unauthorized
-      rescue JWT::DecodeError
-        # Token is completely invalid (wrong secret, malformed, etc.)
-        render json: { 
-          error: 'Invalid token',
-          message: 'Your session is invalid. This may happen after a server update. Please log in again.',
-          code: 'TOKEN_INVALID'
-        }, status: :unauthorized
-      end
+      # Token is expired or invalid - just return 401, frontend will handle logout
+      render json: { error: 'Unauthorized' }, status: :unauthorized
       return
     end
   rescue => e
     Rails.logger.error "Authentication error: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
-    render json: { 
-      error: 'Authentication failed',
-      message: 'Unable to authenticate. Please try logging in again.',
-      code: 'AUTH_ERROR'
-    }, status: :unauthorized
+    render json: { error: 'Unauthorized' }, status: :unauthorized
   end
 
   protected
