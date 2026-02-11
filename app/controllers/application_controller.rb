@@ -54,9 +54,8 @@ class ApplicationController < ActionController::API
         # If we get here, token is valid but expired
         render json: { 
           error: 'Token expired',
-          message: 'Your session has expired. Please refresh your token or log in again.',
-          code: 'TOKEN_EXPIRED',
-          can_refresh: true
+          message: 'Your session has expired. Please log in again.',
+          code: 'TOKEN_EXPIRED'
         }, status: :unauthorized
       rescue JWT::DecodeError
         # Token is completely invalid (wrong secret, malformed, etc.)
