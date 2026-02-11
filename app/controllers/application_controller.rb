@@ -26,7 +26,11 @@ class ApplicationController < ActionController::API
     token = request.headers['Authorization']&.split(' ')&.last
     
     if token.blank?
-      render json: { error: 'Authentication token required' }, status: :unauthorized
+      render json: { 
+        error: 'Authentication token required',
+        message: 'Please log in to continue',
+        code: 'TOKEN_MISSING'
+      }, status: :unauthorized
       return
     end
 
@@ -36,13 +40,42 @@ class ApplicationController < ActionController::API
       @current_user = User.find_by(id: decoded[:user_id])
       
       unless @current_user
-        render json: { error: 'User not found' }, status: :unauthorized
+        render json: { 
+          error: 'User not found',
+          message: 'Your account could not be found. Please log in again.',
+          code: 'USER_NOT_FOUND'
+        }, status: :unauthorized
+        return
       end
     else
-      render json: { error: 'Invalid or expired token' }, status: :unauthorized
+      # Try to decode without expiration check to see if it's expired or invalid
+      begin
+        decoded_data = JWT.decode(token, JsonWebToken::SECRET_KEY, false)[0]
+        # If we get here, token is valid but expired
+        render json: { 
+          error: 'Token expired',
+          message: 'Your session has expired. Please refresh your token or log in again.',
+          code: 'TOKEN_EXPIRED',
+          can_refresh: true
+        }, status: :unauthorized
+      rescue JWT::DecodeError
+        # Token is completely invalid (wrong secret, malformed, etc.)
+        render json: { 
+          error: 'Invalid token',
+          message: 'Your session is invalid. This may happen after a server update. Please log in again.',
+          code: 'TOKEN_INVALID'
+        }, status: :unauthorized
+      end
+      return
     end
   rescue => e
-    render json: { error: 'Authentication failed' }, status: :unauthorized
+    Rails.logger.error "Authentication error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { 
+      error: 'Authentication failed',
+      message: 'Unable to authenticate. Please try logging in again.',
+      code: 'AUTH_ERROR'
+    }, status: :unauthorized
   end
 
   protected

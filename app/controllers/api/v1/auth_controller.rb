@@ -6,8 +6,8 @@
 class Api::V1::AuthController < ApplicationController
   # Skip authentication for auth endpoints (otherwise can't login!)
   # Must be called before ApplicationController's before_action callbacks
-  skip_before_action :authenticate_user!, only: [:register, :login, :forgot_password, :reset_password], raise: false
-  skip_before_action :require_active_subscription!, only: [:register, :login, :forgot_password, :reset_password], raise: false
+  skip_before_action :authenticate_user!, only: [:register, :login, :forgot_password, :reset_password, :refresh], raise: false
+  skip_before_action :require_active_subscription!, only: [:register, :login, :forgot_password, :reset_password, :refresh], raise: false
 
   # POST /api/v1/auth/register
   # Create pending registration and Stripe checkout session
@@ -301,6 +301,70 @@ class Api::V1::AuthController < ApplicationController
     render json: {
       message: 'If an account with that email exists, a password reset link has been sent.'
     }
+  end
+
+  # POST /api/v1/auth/refresh
+  # Refresh JWT token - extends expiration without requiring re-login
+  # Expects: Authorization header with current token (even if expired)
+  # Returns: new token and user object
+  def refresh
+    token = request.headers['Authorization']&.split(' ')&.last
+    
+    if token.blank?
+      return render json: {
+        error: 'Token required',
+        message: 'Please provide your authentication token'
+      }, status: :unauthorized
+    end
+
+    # Try to decode token (even if expired, we can still get user_id)
+    decoded = JsonWebToken.decode(token)
+    
+    # If token is completely invalid (not just expired), try to decode without expiration check
+    unless decoded
+      begin
+        # Try to decode without expiration validation to get user_id from expired token
+        decoded_data = JWT.decode(token, JsonWebToken::SECRET_KEY, false)[0]
+        decoded = HashWithIndifferentAccess.new(decoded_data) if decoded_data
+      rescue JWT::DecodeError
+        return render json: {
+          error: 'Invalid token',
+          message: 'Your session has expired. Please log in again.'
+        }, status: :unauthorized
+      end
+    end
+
+    unless decoded && decoded[:user_id]
+      return render json: {
+        error: 'Invalid token',
+        message: 'Your session has expired. Please log in again.'
+      }, status: :unauthorized
+    end
+
+    user = User.find_by(id: decoded[:user_id])
+    
+    unless user
+      return render json: {
+        error: 'User not found',
+        message: 'Your account could not be found. Please log in again.'
+      }, status: :unauthorized
+    end
+
+    # Generate new token
+    new_token = JsonWebToken.encode(user_id: user.id)
+    
+    render json: {
+      user: user_json(user),
+      token: new_token,
+      message: 'Token refreshed successfully'
+    }
+  rescue => e
+    Rails.logger.error "Token refresh error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: {
+      error: 'Token refresh failed',
+      message: 'Unable to refresh your session. Please log in again.'
+    }, status: :unauthorized
   end
 
   # POST /api/v1/auth/reset_password
