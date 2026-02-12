@@ -40,24 +40,119 @@ class Api::V1::UserInfoController < ApplicationController
 
   # POST /api/v1/user_info/watermark
   def update_watermark
-    if params[:watermark_logo].present?
-      # Handle watermark logo upload
-      # This would integrate with your file storage system
-      current_user.update!(watermark_logo: "watermark_#{SecureRandom.uuid}.png")
-    end
+    begin
+      # Handle watermark logo removal (empty string or nil)
+      if params[:watermark_logo].present? && (params[:watermark_logo] == '' || params[:watermark_logo] == 'null')
+        current_user.update!(watermark_logo: nil)
+        return render json: {
+          user: user_json(current_user),
+          message: 'Watermark logo removed successfully'
+        }
+      end
+      
+      # Handle watermark logo file upload
+      if params[:watermark_logo].present? && params[:watermark_logo].respond_to?(:read)
+        uploaded_file = params[:watermark_logo]
+        
+        # Validate file type
+        unless uploaded_file.content_type&.start_with?('image/')
+          return render json: { error: 'Invalid file type. Please upload an image file.' }, status: :bad_request
+        end
+        
+        # Generate unique filename
+        file_extension = File.extname(uploaded_file.original_filename).presence || '.png'
+        unique_filename = "#{SecureRandom.uuid}#{file_extension}"
+        
+        # Upload to storage (DigitalOcean Spaces or local)
+        if Rails.env.production?
+          spaces_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+          if spaces_key.present?
+            watermark_path = upload_watermark_to_spaces(uploaded_file, unique_filename)
+          else
+            return render json: { error: 'Storage not configured' }, status: :internal_server_error
+          end
+        else
+          watermark_path = upload_watermark_locally(uploaded_file, unique_filename)
+        end
+        
+        # Update user with watermark logo filename
+        current_user.update!(watermark_logo: unique_filename)
+      end
 
-    watermark_params = params.permit(:watermark_opacity, :watermark_scale, :watermark_offset_x, :watermark_offset_y)
-    
-    if current_user.update(watermark_params)
+      # Update watermark settings (opacity, scale, position)
+      watermark_params = params.permit(:watermark_opacity, :watermark_scale, :watermark_offset_x, :watermark_offset_y)
+      
+      if current_user.update(watermark_params)
+        render json: {
+          user: user_json(current_user),
+          message: 'Watermark settings updated successfully'
+        }
+      else
+        render json: {
+          errors: current_user.errors.full_messages
+        }, status: :unprocessable_entity
+      end
+    rescue => e
+      Rails.logger.error "Watermark update error: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
       render json: {
-        user: user_json(current_user),
-        message: 'Watermark settings updated successfully'
-      }
-    else
-      render json: {
-        errors: current_user.errors.full_messages
-      }, status: :unprocessable_entity
+        error: 'Failed to update watermark',
+        message: e.message
+      }, status: :internal_server_error
     end
+  end
+  
+  private
+  
+  # Upload watermark logo to DigitalOcean Spaces
+  def upload_watermark_to_spaces(uploaded_file, unique_filename)
+    require 'aws-sdk-s3'
+    
+    access_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+    secret_key = ENV['DO_SPACES_SECRET'] || ENV['DIGITAL_OCEAN_SPACES_SECRET']
+    endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://sfo2.digitaloceanspaces.com'
+    region = ENV['DO_SPACES_REGION'] || ENV['DIGITAL_OCEAN_SPACES_REGION'] || 'sfo2'
+    bucket_name = ENV['DO_SPACES_BUCKET'] || ENV['DIGITAL_OCEAN_SPACES_NAME']
+    
+    # Configure AWS SDK for DigitalOcean Spaces
+    s3_client = Aws::S3::Client.new(
+      access_key_id: access_key,
+      secret_access_key: secret_key,
+      endpoint: endpoint,
+      region: region,
+      force_path_style: false
+    )
+    
+    # Path format: environment/user_id/watermarks/filename
+    key = "#{Rails.env}/#{current_user.id}/watermarks/#{unique_filename}"
+    
+    # Upload the file
+    s3_client.put_object(
+      bucket: bucket_name,
+      key: key,
+      body: uploaded_file.read,
+      acl: 'public-read',
+      content_type: uploaded_file.content_type
+    )
+    
+    # Return the path
+    key
+  end
+  
+  # Upload watermark logo locally (development/test)
+  def upload_watermark_locally(uploaded_file, unique_filename)
+    # Create directory if it doesn't exist
+    upload_dir = Rails.root.join('public', 'storage', Rails.env.to_s, current_user.id.to_s, 'watermarks')
+    FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
+    
+    # Save the file
+    file_path = upload_dir.join(unique_filename)
+    File.open(file_path, 'wb') do |file|
+      file.write(uploaded_file.read)
+    end
+    
+    # Return relative path for database (just the filename, path is handled by User model methods)
+    unique_filename
   end
 
   # GET /api/v1/user_info/connected_accounts
