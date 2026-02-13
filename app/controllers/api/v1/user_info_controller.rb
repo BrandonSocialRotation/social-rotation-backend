@@ -54,14 +54,50 @@ class Api::V1::UserInfoController < ApplicationController
       if params[:watermark_logo].present? && params[:watermark_logo].respond_to?(:read)
         uploaded_file = params[:watermark_logo]
         
-        # Validate file type
-        unless uploaded_file.content_type&.start_with?('image/')
-          return render json: { error: 'Invalid file type. Please upload an image file.' }, status: :bad_request
+        # Validate file size (max 5MB)
+        max_size = 5 * 1024 * 1024 # 5MB in bytes
+        if uploaded_file.size > max_size
+          return render json: { 
+            error: "File size must be less than 5MB. Your file is #{(uploaded_file.size.to_f / 1024 / 1024).round(2)}MB." 
+          }, status: :bad_request
         end
         
-        # Generate unique filename
-        file_extension = File.extname(uploaded_file.original_filename).presence || '.png'
-        unique_filename = "#{SecureRandom.uuid}#{file_extension}"
+        # Validate file type - must be PNG
+        unless uploaded_file.content_type == 'image/png'
+          return render json: { 
+            error: 'Only PNG files are allowed. Please upload a PNG image file.' 
+          }, status: :bad_request
+        end
+        
+        # Validate file extension
+        file_extension = File.extname(uploaded_file.original_filename).downcase
+        unless file_extension == '.png'
+          return render json: { 
+            error: 'Only PNG files are allowed. Please upload a PNG image file.' 
+          }, status: :bad_request
+        end
+        
+        # Validate that the file is actually a valid PNG by checking magic bytes
+        begin
+          uploaded_file.rewind
+          magic_bytes = uploaded_file.read(8)
+          uploaded_file.rewind
+          
+          # PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
+          unless magic_bytes == "\x89PNG\r\n\x1a\n".force_encoding('BINARY')
+            return render json: { 
+              error: 'File is not a valid PNG image. Please upload a valid PNG file.' 
+            }, status: :bad_request
+          end
+        rescue => e
+          Rails.logger.error "Error validating PNG file: #{e.message}"
+          return render json: { 
+            error: 'Unable to validate file. Please ensure it is a valid PNG image.' 
+          }, status: :bad_request
+        end
+        
+        # Generate unique filename (always .png)
+        unique_filename = "#{SecureRandom.uuid}.png"
         
         # Upload to storage (DigitalOcean Spaces or local)
         if Rails.env.production?
