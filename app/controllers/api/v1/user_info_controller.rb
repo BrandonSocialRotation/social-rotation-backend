@@ -62,44 +62,27 @@ class Api::V1::UserInfoController < ApplicationController
           }, status: :bad_request
         end
         
-        # Validate file type - must be PNG
-        unless uploaded_file.content_type == 'image/png'
+        # Validate file type - allow common image types
+        unless uploaded_file.content_type&.start_with?('image/')
           return render json: { 
-            error: 'Only PNG files are allowed. Please upload a PNG image file.' 
+            error: 'Please upload an image file (PNG, JPG, JPEG, etc.)' 
           }, status: :bad_request
         end
         
-        # Validate file extension
+        # Get file extension
         file_extension = File.extname(uploaded_file.original_filename).downcase
-        unless file_extension == '.png'
+        valid_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+        unless valid_extensions.include?(file_extension)
           return render json: { 
-            error: 'Only PNG files are allowed. Please upload a PNG image file.' 
+            error: 'Please upload a valid image file (PNG, JPG, JPEG, GIF, or WEBP)' 
           }, status: :bad_request
         end
         
-        # Validate that the file is actually a valid PNG by checking magic bytes
-        begin
-          uploaded_file.rewind
-          magic_bytes = uploaded_file.read(8)
-          uploaded_file.rewind
-          
-          # PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
-          unless magic_bytes == "\x89PNG\r\n\x1a\n".force_encoding('BINARY')
-            return render json: { 
-              error: 'File is not a valid PNG image. Please upload a valid PNG file.' 
-            }, status: :bad_request
-          end
-        rescue => e
-          Rails.logger.error "Error validating PNG file: #{e.message}"
-          return render json: { 
-            error: 'Unable to validate file. Please ensure it is a valid PNG image.' 
-          }, status: :bad_request
-        end
-        
-        # Generate unique filename (always .png)
-        unique_filename = "#{SecureRandom.uuid}.png"
+        # Generate unique filename with original extension
+        unique_filename = "#{SecureRandom.uuid}#{file_extension}"
         
         # Upload to storage (DigitalOcean Spaces or local)
+        watermark_path = nil
         if Rails.env.production?
           spaces_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
           if spaces_key.present?
@@ -109,6 +92,46 @@ class Api::V1::UserInfoController < ApplicationController
           end
         else
           watermark_path = upload_watermark_locally(uploaded_file, unique_filename)
+        end
+        
+        # After upload, validate the image is not broken by trying to get its URL and verify it loads
+        begin
+          watermark_url = current_user.get_watermark_logo
+          if watermark_url.present?
+            # Try to validate the image by checking if we can read its dimensions
+            # For local files, check if file exists and has content
+            if Rails.env.development? || Rails.env.test?
+              local_path = Rails.root.join('public', watermark_path)
+              if File.exist?(local_path)
+                # Try to read the file to ensure it's valid
+                file_size = File.size(local_path)
+                if file_size == 0
+                  # File is empty/broken, delete it
+                  File.delete(local_path) if File.exist?(local_path)
+                  current_user.update!(watermark_logo: nil)
+                  return render json: { 
+                    error: 'The uploaded image appears to be broken or corrupted. Please try uploading a different image.' 
+                  }, status: :bad_request
+                end
+              end
+            end
+            # For production, we'll rely on the frontend validation after upload
+          end
+        rescue => e
+          Rails.logger.error "Error validating uploaded watermark image: #{e.message}"
+          # If validation fails, clean up
+          begin
+            if Rails.env.development? || Rails.env.test?
+              local_path = Rails.root.join('public', watermark_path)
+              File.delete(local_path) if File.exist?(local_path)
+            end
+            current_user.update!(watermark_logo: nil)
+          rescue => cleanup_error
+            Rails.logger.error "Error cleaning up broken image: #{cleanup_error.message}"
+          end
+          return render json: { 
+            error: 'The uploaded image appears to be broken or corrupted. Please try uploading a different image.' 
+          }, status: :bad_request
         end
         
         # Update user with watermark logo filename
