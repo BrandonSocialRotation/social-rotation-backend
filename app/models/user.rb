@@ -90,11 +90,26 @@ class User < ApplicationRecord
     watermark_logo ? "https://se1.sfo2.digitaloceanspaces.com/#{rails_env}/#{id}/watermarks/#{watermark_logo}" : ''
   end
   
-  # Returns local storage path for watermark logo
-  # Used for serving watermark from local storage
+  # Returns URL for watermark logo
+  # Handles both production (DigitalOcean Spaces) and development (local storage)
   # Returns empty string if no watermark logo exists
   def get_watermark_logo
-    watermark_logo ? "/storage/#{rails_env}/#{id}/watermarks/#{watermark_logo}" : ''
+    return '' unless watermark_logo
+    
+    # Path format: environment/user_id/watermarks/filename
+    watermark_path = "#{rails_env}/#{id}/watermarks/#{watermark_logo}"
+    
+    if Rails.env.production?
+      # In production, use backend proxy to avoid CORS issues
+      backend_url = ENV['BACKEND_URL'] || ENV['API_BASE_URL'] || 'https://new-social-rotation-backend-qzyk8.ondigitalocean.app'
+      backend_url = backend_url.chomp('/')
+      # Use proxy endpoint to serve with CORS headers
+      require 'cgi'
+      "#{backend_url}/api/v1/images/proxy?path=#{CGI.escape(watermark_path)}"
+    else
+      # Development/Test: serve from local storage
+      "/storage/#{watermark_path}"
+    end
   end
   
   # Returns absolute filesystem path to user's watermark directory
