@@ -160,6 +160,38 @@ class Api::V1::UserInfoController < ApplicationController
       }, status: :internal_server_error
     end
   end
+
+  # GET /api/v1/user_info/facebook_pages
+  def facebook_pages
+    unless current_user.fb_user_access_key.present?
+      return render json: { error: 'Facebook not connected' }, status: :unauthorized
+    end
+
+    begin
+      facebook_service = SocialMedia::FacebookService.new(current_user)
+      pages = facebook_service.fetch_pages
+      render json: { pages: pages }
+    rescue => e
+      Rails.logger.error "Facebook pages error: #{e.message}"
+      render json: { error: 'Failed to fetch Facebook pages', message: e.message }, status: :internal_server_error
+    end
+  end
+  
+  # GET /api/v1/user_info/linkedin_organizations
+  def linkedin_organizations
+    unless current_user.linkedin_access_token.present?
+      return render json: { error: 'LinkedIn not connected' }, status: :unauthorized
+    end
+
+    begin
+      linkedin_service = SocialMedia::LinkedinService.new(current_user)
+      organizations = linkedin_service.fetch_organizations
+      render json: { organizations: organizations }
+    rescue => e
+      Rails.logger.error "LinkedIn organizations error: #{e.message}"
+      render json: { error: 'Failed to fetch LinkedIn organizations', message: e.message }, status: :internal_server_error
+    end
+  end
   
   private
   
@@ -232,38 +264,6 @@ class Api::V1::UserInfoController < ApplicationController
       support_url: support_url,
       message: 'You can update your email address in your account settings. Your account and subscription will remain active.'
     }
-  end
-
-  # GET /api/v1/user_info/facebook_pages
-  def facebook_pages
-    unless current_user.fb_user_access_key.present?
-      return render json: { error: 'Facebook not connected' }, status: :unauthorized
-    end
-
-    begin
-      facebook_service = SocialMedia::FacebookService.new(current_user)
-      pages = facebook_service.fetch_pages
-      render json: { pages: pages }
-    rescue => e
-      Rails.logger.error "Facebook pages error: #{e.message}"
-      render json: { error: 'Failed to fetch Facebook pages', message: e.message }, status: :internal_server_error
-    end
-  end
-  
-  # GET /api/v1/user_info/linkedin_organizations
-  def linkedin_organizations
-    unless current_user.linkedin_access_token.present?
-      return render json: { error: 'LinkedIn not connected' }, status: :unauthorized
-    end
-
-    begin
-      linkedin_service = SocialMedia::LinkedinService.new(current_user)
-      organizations = linkedin_service.fetch_organizations
-      render json: { organizations: organizations }
-    rescue => e
-      Rails.logger.error "LinkedIn organizations error: #{e.message}"
-      render json: { error: 'Failed to fetch LinkedIn organizations', message: e.message }, status: :internal_server_error
-    end
   end
 
   # GET /api/v1/user_info/debug
