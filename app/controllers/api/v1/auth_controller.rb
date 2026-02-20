@@ -169,6 +169,9 @@ class Api::V1::AuthController < ApplicationController
           payment_method_types: ['card'],
           line_items: line_items,
           mode: 'subscription',
+          subscription_data: {
+            trial_period_days: 7
+          },
           success_url: success_url,
           cancel_url: cancel_url,
           billing_address_collection: 'required',

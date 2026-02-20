@@ -189,6 +189,9 @@ class Api::V1::SubscriptionsController < ApplicationController
         payment_method_types: ['card'],
         line_items: line_items,
         mode: 'subscription',
+        subscription_data: {
+          trial_period_days: 7
+        },
         success_url: success_url,
         cancel_url: cancel_url,
         billing_address_collection: 'required',
@@ -709,6 +712,7 @@ class Api::V1::SubscriptionsController < ApplicationController
       user_count_at_subscription: user_count,
       current_period_start: Time.at(stripe_subscription.current_period_start),
       current_period_end: Time.at(stripe_subscription.current_period_end),
+      trial_end: stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end) : nil,
       cancel_at_period_end: stripe_subscription.cancel_at_period_end
     )
     
@@ -726,11 +730,12 @@ class Api::V1::SubscriptionsController < ApplicationController
       status: stripe_subscription.status,
       current_period_start: Time.at(stripe_subscription.current_period_start),
       current_period_end: Time.at(stripe_subscription.current_period_end),
+      trial_end: stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end) : nil,
       cancel_at_period_end: stripe_subscription.cancel_at_period_end,
       canceled_at: stripe_subscription.canceled_at ? Time.at(stripe_subscription.canceled_at) : nil
     )
   end
-  
+
   def handle_subscription_deleted(stripe_subscription)
     subscription = Subscription.find_by(stripe_subscription_id: stripe_subscription.id)
     return unless subscription
@@ -756,10 +761,11 @@ class Api::V1::SubscriptionsController < ApplicationController
     subscription.update!(
       status: stripe_subscription.status,
       current_period_start: Time.at(stripe_subscription.current_period_start),
-      current_period_end: Time.at(stripe_subscription.current_period_end)
+      current_period_end: Time.at(stripe_subscription.current_period_end),
+      trial_end: stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end) : nil
     )
   end
-  
+
   def handle_payment_failed(invoice)
     stripe_subscription_id = invoice.subscription
     return unless stripe_subscription_id
