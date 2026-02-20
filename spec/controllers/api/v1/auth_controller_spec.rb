@@ -51,6 +51,24 @@ RSpec.describe Api::V1::AuthController, type: :controller do
         expect(json_response['checkout_session_id']).to eq('cs_test123')
       end
 
+      it 'creates Stripe checkout session with 7-day free trial' do
+        customer_double = double(id: 'cus_test123')
+        session_double = double(id: 'cs_test123', url: 'https://checkout.stripe.com/test')
+        allow(Stripe::Customer).to receive(:create).and_return(customer_double)
+        allow(Stripe::Price).to receive(:create).and_return(double(id: 'price_test123'))
+        checkout_params = nil
+        allow(Stripe::Checkout::Session).to receive(:create) do |params|
+          checkout_params = params
+          session_double
+        end
+
+        post :register, params: valid_user_params
+
+        expect(checkout_params).to be_present
+        expect(checkout_params[:subscription_data]).to eq({ trial_period_days: 7 })
+        expect(response).to have_http_status(:created)
+      end
+
       it 'stores registration data in pending registration' do
         customer_double = double(id: 'cus_test123')
         session_double = double(id: 'cs_test123', url: 'https://checkout.stripe.com/test')
