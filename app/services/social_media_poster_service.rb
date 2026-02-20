@@ -45,6 +45,21 @@ class SocialMediaPosterService
       # Get image URL (needs to be publicly accessible)
       image_url = get_public_image_url
       image_path = get_local_image_path
+      
+      # Apply watermark if needed
+      use_watermark = @bucket_image.use_watermark || @bucket_image.bucket&.use_watermark || false
+      if use_watermark && @user.watermark_logo.present?
+        watermark_service = WatermarkService.new(@user)
+        watermarked_path = watermark_service.apply_watermark(image_path, use_watermark: true)
+        
+        # If watermark was applied, we need to upload the watermarked image
+        if watermarked_path != image_path && File.exist?(watermarked_path)
+          # Upload watermarked image and get new URL
+          watermarked_url = upload_watermarked_image(watermarked_path)
+          image_url = watermarked_url if watermarked_url
+          image_path = watermarked_path
+        end
+      end
     
     # Log the description being used for posting
     Rails.logger.info "Posting with description: '#{@description}' (length: #{@description.length})"
@@ -111,21 +126,20 @@ class SocialMediaPosterService
   
   # Get local file path for the image
   # Downloads the image if it's a URL, otherwise returns local path
-  # @return [String] Local file path or URL if local file doesn't exist
+  # @return [String] Local file path
   def get_local_image_path
     file_path = @bucket_image.image.file_path
     return nil if file_path.nil?
     
-    # If it's a URL (http:// or https://), return it (TwitterService will download it)
+    # If it's a URL (http:// or https://), download it to temp file
     if file_path.start_with?('http://') || file_path.start_with?('https://')
-      return file_path
+      return download_image_to_temp(file_path)
     end
     
     # Check if file_path starts with environment prefix (production/, development/, etc.)
     if file_path.start_with?('production/') || file_path.start_with?('development/') || file_path.start_with?('test/')
-      # This is a Digital Ocean Spaces path, not a local file
-      # Return the public URL instead
-      return get_public_image_url
+      # This is a Digital Ocean Spaces path, download it
+      return download_image_to_temp(get_public_image_url)
     end
     
     # Try local file path
@@ -135,9 +149,60 @@ class SocialMediaPosterService
     if File.exist?(local_path)
       local_path
     else
-      # File doesn't exist locally, use public URL instead
-      Rails.logger.warn "Local file not found at #{local_path}, using public URL instead"
-      get_public_image_url
+      # File doesn't exist locally, download from public URL
+      Rails.logger.warn "Local file not found at #{local_path}, downloading from public URL"
+      download_image_to_temp(get_public_image_url)
+    end
+  end
+  
+  # Upload watermarked image to storage and return public URL
+  def upload_watermarked_image(watermarked_path)
+    require 'aws-sdk-s3'
+    
+    # Generate unique filename for watermarked image
+    file_extension = File.extname(watermarked_path)
+    unique_filename = "watermarked_#{SecureRandom.uuid}#{file_extension}"
+    
+    if Rails.env.production?
+      # Upload to DigitalOcean Spaces
+      access_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+      return nil unless access_key.present?
+      
+      secret_key = ENV['DO_SPACES_SECRET'] || ENV['DIGITAL_OCEAN_SPACES_SECRET']
+      endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://sfo2.digitaloceanspaces.com'
+      region = ENV['DO_SPACES_REGION'] || ENV['DIGITAL_OCEAN_SPACES_REGION'] || 'sfo2'
+      bucket_name = ENV['DO_SPACES_BUCKET'] || ENV['DIGITAL_OCEAN_SPACES_NAME']
+      
+      s3_client = Aws::S3::Client.new(
+        access_key_id: access_key,
+        secret_access_key: secret_key,
+        endpoint: endpoint,
+        region: region,
+        force_path_style: false
+      )
+      
+      key = "#{Rails.env}/images/#{unique_filename}"
+      
+      s3_client.put_object(
+        bucket: bucket_name,
+        key: key,
+        body: File.read(watermarked_path),
+        acl: 'public-read'
+      )
+      
+      # Return public URL
+      endpoint = endpoint.chomp('/')
+      "#{endpoint}/#{key}"
+    else
+      # Store locally in development
+      upload_dir = Rails.root.join('public', 'uploads', Rails.env.to_s, 'images')
+      FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
+      
+      file_path = upload_dir.join(unique_filename)
+      FileUtils.cp(watermarked_path, file_path)
+      
+      # Return local URL
+      "http://localhost:3000/uploads/#{Rails.env}/images/#{unique_filename}"
     end
   end
   

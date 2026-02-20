@@ -1,5 +1,45 @@
 # Rails Console Commands for Account Management
 
+## Create account and connect to existing Stripe (no charge/refund)
+
+Use this when the customer already has a Stripe subscription and you only need to create the app account and link it.
+
+**Option A – One command (no brackets).** Run from the app directory. Uses env vars so `rails trial_accounts:create_and_connect_env` is recognized:
+
+```bash
+NAME="Mellorya Bullard" EMAIL="drwynndc@gmail.com" PASSWORD="ChangeMe123" PLAN="Agency Enterprise" STRIPE_CUSTOMER_ID="cus_MHXm3Y16YjSBwM" STRIPE_SUBSCRIPTION_ID="sub_1LYygtDjghj5sy3y4FVHO1bT" bin/rails trial_accounts:create_and_connect_env
+```
+
+Change the quoted values for each new customer. Deploy the latest code so this task exists on the server.
+
+**Option B – From Rails console (always works, no task needed).** Run `rails console`, then paste:
+
+```ruby
+email = "drwynndc@gmail.com"
+name = "Mellorya Bullard"
+password = "ChangeMe123"
+plan_name = "Agency Enterprise"
+stripe_customer_id = "cus_MHXm3Y16YjSBwM"
+stripe_subscription_id = "sub_1LYygtDjghj5sy3y4FVHO1bT"
+
+plan = Plan.find_by(name: plan_name)
+raise "Plan not found" unless plan
+raise "User exists" if User.exists?(email: email)
+
+account = Account.create!(name: "#{name}'s Account", status: true)
+user = User.create!(name: name, email: email, password: password, password_confirmation: password, account_id: account.id, is_account_admin: true)
+subscription = Subscription.create!(account: account, plan: plan, status: "trialing", stripe_customer_id: nil, stripe_subscription_id: nil, billing_period: "monthly")
+account.update!(plan: plan)
+
+stripe_sub = Stripe::Subscription.retrieve(stripe_subscription_id)
+subscription.update!(stripe_customer_id: stripe_customer_id, stripe_subscription_id: stripe_subscription_id, status: stripe_sub.status, current_period_start: Time.at(stripe_sub.current_period_start), current_period_end: Time.at(stripe_sub.current_period_end), trial_end: stripe_sub.trial_end ? Time.at(stripe_sub.trial_end) : nil, cancel_at_period_end: stripe_sub.cancel_at_period_end)
+puts "Done. #{email} can log in."
+```
+
+Change the variables at the top for each new customer.
+
+---
+
 ## View All Accounts
 
 ```ruby

@@ -2,6 +2,61 @@
 # Create trial accounts that will be charged on a specific date
 
 namespace :trial_accounts do
+  def run_create_and_connect(name, email, password, plan_name, stripe_customer_id, stripe_subscription_id)
+    plan = Plan.find_by(name: plan_name)
+    unless plan
+      puts "❌ Plan '#{plan_name}' not found. Available: #{Plan.pluck(:name).join(', ')}"
+      exit 1
+    end
+    if User.find_by(email: email)
+      puts "❌ User with email '#{email}' already exists."
+      exit 1
+    end
+    account = Account.create!(name: "#{name}'s Account", status: true)
+    User.create!(name: name, email: email, password: password, password_confirmation: password, account_id: account.id, is_account_admin: true)
+    subscription = Subscription.create!(account: account, plan: plan, status: 'trialing', stripe_customer_id: nil, stripe_subscription_id: nil, billing_period: 'monthly')
+    account.update!(plan: plan)
+    puts "✓ Created account: #{email} (Account ID: #{account.id})"
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    unless Stripe.api_key.present?
+      puts "❌ STRIPE_SECRET_KEY not set. Account created but not linked to Stripe."
+      exit 1
+    end
+    stripe_subscription = Stripe::Subscription.retrieve(stripe_subscription_id)
+    unless stripe_subscription.customer == stripe_customer_id
+      puts "❌ Subscription does not belong to customer."
+      exit 1
+    end
+    subscription.update!(
+      stripe_customer_id: stripe_customer_id,
+      stripe_subscription_id: stripe_subscription_id,
+      status: stripe_subscription.status,
+      current_period_start: Time.at(stripe_subscription.current_period_start),
+      current_period_end: Time.at(stripe_subscription.current_period_end),
+      trial_end: stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end) : nil,
+      cancel_at_period_end: stripe_subscription.cancel_at_period_end
+    )
+    puts "✓ Linked to Stripe (no changes made in Stripe)"
+    puts "\n✅ Done. #{email} can log in."
+  rescue Stripe::StripeError => e
+    puts "❌ Stripe error: #{e.message}. Account was created but not linked."
+    exit 1
+  end
+
+  desc "List all users (email, name, account, plan, Stripe linked)"
+  task list_users: :environment do
+    puts "\nID    | Email                              | Name                 | Account | Plan                  | Stripe"
+    puts "-" * 115
+    User.includes(account: { subscription: :plan }).order(:id).each do |u|
+      acc = u.account
+      sub = acc&.subscription
+      plan = sub&.plan&.name || "—"
+      stripe = sub&.stripe_subscription_id.present? ? "yes" : "no"
+      puts "#{u.id.to_s.ljust(5)} | #{u.email.to_s.ljust(34)} | #{(u.name || "").to_s.ljust(20)} | #{acc&.id.to_s.ljust(7)} | #{plan.to_s.ljust(22)} | #{stripe}"
+    end
+    puts "\nTotal: #{User.count} users\n"
+  end
+
   desc "Create a trial account with specific plan and charge date"
   task :create, [:name, :email, :password, :plan_name, :charge_date] => :environment do |t, args|
     name = args[:name]
@@ -378,16 +433,139 @@ namespace :trial_accounts do
     end
   end
   
-  desc "Connect to an existing Stripe customer and subscription"
-  task :connect_existing_stripe, [:email, :stripe_customer_id, :stripe_subscription_id, :trial_end_date] => :environment do |t, args|
+  desc "Create account and connect to existing Stripe (read from env: NAME, EMAIL, PASSWORD, PLAN, STRIPE_CUSTOMER_ID, STRIPE_SUBSCRIPTION_ID)"
+  task create_and_connect_env: :environment do
+    name = ENV["NAME"]
+    email = ENV["EMAIL"]
+    password = ENV["PASSWORD"]
+    plan_name = ENV["PLAN"]
+    stripe_customer_id = ENV["STRIPE_CUSTOMER_ID"]
+    stripe_subscription_id = ENV["STRIPE_SUBSCRIPTION_ID"]
+    if name.blank? || email.blank? || password.blank? || plan_name.blank? || stripe_customer_id.blank? || stripe_subscription_id.blank?
+      puts "Usage: NAME=\"...\" EMAIL=\"...\" PASSWORD=\"...\" PLAN=\"...\" STRIPE_CUSTOMER_ID=\"cus_xxx\" STRIPE_SUBSCRIPTION_ID=\"sub_xxx\" rails trial_accounts:create_and_connect_env"
+      exit 1
+    end
+    plan = Plan.find_by(name: plan_name)
+    unless plan
+      puts "❌ Plan '#{plan_name}' not found. Available: #{Plan.pluck(:name).join(', ')}"
+      exit 1
+    end
+    if User.find_by(email: email)
+      puts "❌ User with email '#{email}' already exists."
+      exit 1
+    end
+    account = Account.create!(name: "#{name}'s Account", status: true)
+    User.create!(name: name, email: email, password: password, password_confirmation: password, account_id: account.id, is_account_admin: true)
+    subscription = Subscription.create!(account: account, plan: plan, status: 'trialing', stripe_customer_id: nil, stripe_subscription_id: nil, billing_period: 'monthly')
+    account.update!(plan: plan)
+    puts "✓ Created account: #{email} (Account ID: #{account.id})"
+    unless ENV['STRIPE_SECRET_KEY'].present?
+      puts "❌ STRIPE_SECRET_KEY not set. Account created but not linked to Stripe."
+      exit 1
+    end
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    stripe_subscription = Stripe::Subscription.retrieve(stripe_subscription_id)
+    unless stripe_subscription.customer == stripe_customer_id
+      puts "❌ Subscription does not belong to customer."
+      exit 1
+    end
+    subscription.update!(
+      stripe_customer_id: stripe_customer_id,
+      stripe_subscription_id: stripe_subscription_id,
+      status: stripe_subscription.status,
+      current_period_start: Time.at(stripe_subscription.current_period_start),
+      current_period_end: Time.at(stripe_subscription.current_period_end),
+      trial_end: stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end) : nil,
+      cancel_at_period_end: stripe_subscription.cancel_at_period_end
+    )
+    puts "✓ Linked to Stripe (no changes made in Stripe)"
+    puts "\n✅ Done. #{email} can log in."
+  rescue Stripe::StripeError => e
+    puts "❌ Stripe error: #{e.message}. Account was created but not linked."
+    exit 1
+  end
+
+  desc "Create account and connect to existing Stripe in one command (link only - no charge/refund)"
+  task :create_and_connect, [:name, :email, :password, :plan_name, :stripe_customer_id, :stripe_subscription_id] => :environment do |t, args|
+    name = args[:name]
+    email = args[:email]
+    password = args[:password]
+    plan_name = args[:plan_name]
+    stripe_customer_id = args[:stripe_customer_id]
+    stripe_subscription_id = args[:stripe_subscription_id]
+    if name.nil? || email.nil? || password.nil? || plan_name.nil? || stripe_customer_id.nil? || stripe_subscription_id.nil?
+      puts "Usage: rails trial_accounts:create_and_connect[\"Name\",\"email@example.com\",\"password\",\"Plan Name\",\"cus_xxx\",\"sub_xxx\"]"
+      puts "  Or use: NAME=\"...\" EMAIL=\"...\" PASSWORD=\"...\" PLAN=\"...\" STRIPE_CUSTOMER_ID=\"...\" STRIPE_SUBSCRIPTION_ID=\"...\" rails trial_accounts:create_and_connect_env"
+      exit 1
+    end
+    run_create_and_connect(name, email, password, plan_name, stripe_customer_id, stripe_subscription_id)
+  end
+
+  desc "Create app account only (no Stripe). Then run connect_existing_stripe to link their Stripe."
+  task :create_local, [:name, :email, :password, :plan_name] => :environment do |t, args|
+    name = args[:name]
+    email = args[:email]
+    password = args[:password]
+    plan_name = args[:plan_name]
+    
+    if name.nil? || email.nil? || password.nil? || plan_name.nil?
+      puts "Usage: rails trial_accounts:create_local[\"Name\",\"email@example.com\",\"password\",\"Plan Name\"]"
+      puts "  Creates the account in the app only. Does NOT touch Stripe."
+      puts "  Then run: rails trial_accounts:connect_existing_stripe[\"email@example.com\",\"cus_xxx\",\"sub_xxx\"]"
+      exit 1
+    end
+    
+    plan = Plan.find_by(name: plan_name)
+    unless plan
+      puts "❌ Plan '#{plan_name}' not found. Available: #{Plan.pluck(:name).join(', ')}"
+      exit 1
+    end
+    
+    if User.find_by(email: email)
+      puts "❌ User with email '#{email}' already exists."
+      exit 1
+    end
+    
+    account = Account.create!(name: "#{name}'s Account", status: true)
+    user = User.create!(
+      name: name,
+      email: email,
+      password: password,
+      password_confirmation: password,
+      account_id: account.id,
+      is_account_admin: true
+    )
+    Subscription.create!(
+      account: account,
+      plan: plan,
+      status: 'trialing',
+      stripe_customer_id: nil,
+      stripe_subscription_id: nil,
+      billing_period: 'monthly'
+    )
+    account.update!(plan: plan)
+    
+    puts "✅ Account created (no Stripe)."
+    puts "  Email: #{email}"
+    puts "  Account ID: #{account.id}"
+    puts ""
+    puts "Next: link their existing Stripe (no charge/refund):"
+    puts "  rails trial_accounts:connect_existing_stripe[\"#{email}\",\"cus_XXXXX\",\"sub_XXXXX\"]"
+  end
+
+  desc "Connect to an existing Stripe customer and subscription (LINK ONLY - never charges or refunds)"
+  task :connect_existing_stripe, [:email, :stripe_customer_id, :stripe_subscription_id] => :environment do |t, args|
     email = args[:email]
     stripe_customer_id = args[:stripe_customer_id]
     stripe_subscription_id = args[:stripe_subscription_id]
-    trial_end_date_str = args[:trial_end_date] # Optional: YYYY-MM-DD format
     
     if email.nil? || stripe_customer_id.nil? || stripe_subscription_id.nil?
-      puts "Usage: rails trial_accounts:connect_existing_stripe[\"email@example.com\",\"cus_xxx\",\"sub_xxx\",\"YYYY-MM-DD\"]"
-      puts "  Note: trial_end_date is optional. If provided, will update Stripe subscription trial_end to that date."
+      puts "Usage: rails trial_accounts:connect_existing_stripe[\"email@example.com\",\"cus_xxx\",\"sub_xxx\"]"
+      puts ""
+      puts "  This task ONLY links the account to the existing Stripe subscription."
+      puts "  It does NOT change anything in Stripe - no charges, no refunds, no trial_end updates."
+      puts "  To charge on the 15th: create the subscription in Stripe with trial_end on the 15th first,"
+      puts "  then run this task to link it. Or use trial_accounts:create with charge_date 2025-02-15."
       exit 1
     end
     
@@ -416,11 +594,10 @@ namespace :trial_accounts do
     end
     
     begin
-      # Verify the Stripe customer exists
+      # READ ONLY from Stripe - verify customer and subscription exist
       stripe_customer = Stripe::Customer.retrieve(stripe_customer_id)
       puts "✓ Found Stripe customer: #{stripe_customer.id}"
       
-      # Verify the Stripe subscription exists and belongs to this customer
       stripe_subscription = Stripe::Subscription.retrieve(stripe_subscription_id)
       unless stripe_subscription.customer == stripe_customer_id
         puts "❌ Subscription #{stripe_subscription_id} does not belong to customer #{stripe_customer_id}"
@@ -428,70 +605,11 @@ namespace :trial_accounts do
       end
       puts "✓ Found Stripe subscription: #{stripe_subscription.id}"
       puts "  Status: #{stripe_subscription.status}"
-      puts "  Current trial end: #{stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d %H:%M:%S') : 'N/A'}"
+      puts "  Trial end: #{stripe_subscription.trial_end ? Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d %H:%M') : 'N/A (already billing)'}"
+      puts ""
+      puts "  This task will NOT modify the subscription in Stripe. Only linking in our database."
       
-      # Check if subscription is already active (past trial) - can't extend trial on active subscriptions
-      if stripe_subscription.status == 'active' && stripe_subscription.trial_end && Time.at(stripe_subscription.trial_end) < Time.current
-        puts "⚠️  Warning: Subscription is already active (trial ended). Cannot extend trial without creating prorations."
-        puts "   Current trial_end: #{Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d')}"
-        if trial_end_date_str.present?
-          trial_end_date = Date.parse(trial_end_date_str)
-          if trial_end_date < Date.today
-            trial_end_date = trial_end_date + 1.year
-          end
-          puts "   Requested trial_end: #{trial_end_date.strftime('%Y-%m-%d')}"
-          puts "   ⚠️  Skipping trial_end update to prevent prorations/refunds."
-          puts "   Subscription will remain active. To set a new trial, you may need to cancel and recreate."
-        end
-      # Update trial_end if provided and subscription is in trial or not yet started
-      elsif trial_end_date_str.present?
-        begin
-          trial_end_date = Date.parse(trial_end_date_str)
-          # If date is in the past, assume next year
-          if trial_end_date < Date.today
-            puts "⚠️  Warning: Date #{trial_end_date.strftime('%Y-%m-%d')} is in the past."
-            puts "   Assuming you meant next year: #{(trial_end_date + 1.year).strftime('%Y-%m-%d')}"
-            trial_end_date = trial_end_date + 1.year
-          end
-          
-          trial_end_timestamp = trial_end_date.end_of_day.to_i
-          
-          # Update Stripe subscription trial_end and ensure it continues billing monthly
-          # Convert metadata to hash if it's a Stripe object
-          existing_metadata = if stripe_subscription.metadata.respond_to?(:to_h)
-            stripe_subscription.metadata.to_h
-          elsif stripe_subscription.metadata.is_a?(Hash)
-            stripe_subscription.metadata
-          else
-            {}
-          end
-          
-          update_params = {
-            trial_end: trial_end_timestamp,
-            cancel_at_period_end: false, # Ensure subscription continues after trial
-            proration_behavior: 'none', # Prevent prorations when updating trial_end
-            prorate: false, # Also set prorate to false for safety
-            metadata: existing_metadata.merge({
-              trial_end_updated: Time.current.iso8601
-            })
-          }
-          
-          updated_subscription = Stripe::Subscription.update(
-            stripe_subscription_id,
-            update_params
-          )
-          
-          puts "✓ Updated Stripe subscription trial_end to: #{trial_end_date.strftime('%Y-%m-%d')}"
-          stripe_subscription = updated_subscription
-        rescue ArgumentError => e
-          puts "⚠️  Warning: Invalid date format '#{trial_end_date_str}'. Using existing trial_end from Stripe."
-        rescue Stripe::StripeError => e
-          puts "⚠️  Warning: Could not update trial_end in Stripe: #{e.message}"
-          puts "   Using existing trial_end from Stripe subscription."
-        end
-      end
-      
-      # Update local subscription with existing Stripe IDs
+      # Update ONLY our local database - never call Stripe::Subscription.update
       subscription.update!(
         stripe_customer_id: stripe_customer_id,
         stripe_subscription_id: stripe_subscription_id,
@@ -502,17 +620,18 @@ namespace :trial_accounts do
         cancel_at_period_end: stripe_subscription.cancel_at_period_end
       )
       
-      puts "\n✅ Account connected to existing Stripe subscription successfully!"
+      puts "\n✅ Account connected (link only). No changes were made in Stripe."
       puts "\nAccount Details:"
       puts "  Account ID: #{account.id}"
       puts "  User ID: #{user.id}"
       puts "  Email: #{user.email}"
       puts "  Stripe Customer ID: #{stripe_customer_id}"
       puts "  Stripe Subscription ID: #{stripe_subscription_id}"
-      puts "  Subscription Status: #{stripe_subscription.status}"
+      puts "  Status: #{stripe_subscription.status}"
       if stripe_subscription.trial_end
-        puts "  Trial End Date: #{Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d')}"
-        puts "  Will be charged on: #{Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d')}"
+        puts "  Next charge (trial end): #{Time.at(stripe_subscription.trial_end).strftime('%Y-%m-%d')}"
+      else
+        puts "  Next charge: per Stripe billing cycle (see Stripe Dashboard)"
       end
       
     rescue Stripe::StripeError => e
@@ -820,7 +939,7 @@ namespace :trial_accounts do
       # Get the subscription item ID
       subscription_item_id = stripe_subscription.items.data.first.id
       
-      # Update the subscription
+      # Update the subscription - proration_behavior: 'none' prevents refunds/credits when changing plan or trial_end
       updated_subscription = Stripe::Subscription.update(
         subscription.stripe_subscription_id,
         items: [{
@@ -828,6 +947,7 @@ namespace :trial_accounts do
           price: stripe_price.id
         }],
         trial_end: trial_end_timestamp,
+        proration_behavior: 'none', # Prevent prorations/refunds when changing plan or trial
         metadata: {
           account_id: account.id.to_s,
           plan_id: plan.id.to_s,
