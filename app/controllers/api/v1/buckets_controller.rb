@@ -10,14 +10,12 @@ class Api::V1::BucketsController < ApplicationController
 
   # GET /api/v1/buckets
   def index
-    # Get user's own buckets (eager load cover_image and bucket_images => image for cover_image_url)
-    user_buckets = current_user.buckets.user_owned
-      .includes(:cover_image, :bucket_schedules, bucket_images: :image)
-    
-    # Get global buckets (available to all users)
-    global_buckets = Bucket.global
-      .includes(:cover_image, :bucket_schedules, :user, bucket_images: :image)
-    
+    # Eager load (cover_image only if migration has been run)
+    base_includes = [:bucket_schedules, bucket_images: :image]
+    base_includes = [:cover_image] + base_includes if Bucket.column_names.include?('cover_image_id')
+    user_buckets = current_user.buckets.user_owned.includes(*base_includes)
+    global_buckets = Bucket.global.includes(*base_includes, :user)
+
     render json: {
       buckets: user_buckets.map { |bucket| bucket_json(bucket) },
       global_buckets: global_buckets.map { |bucket| bucket_json(bucket, include_owner: true) }
@@ -31,8 +29,10 @@ class Api::V1::BucketsController < ApplicationController
       return render json: { error: 'Bucket not found' }, status: :not_found
     end
     
-    # Eager load for bucket_json cover_image_url
-    @bucket = Bucket.includes(:cover_image, bucket_images: :image).find(@bucket.id)
+    # Eager load for bucket_json cover_image_url (only if migration run)
+    load_includes = [:bucket_images => :image]
+    load_includes = [:cover_image, bucket_images: :image] if Bucket.column_names.include?('cover_image_id')
+    @bucket = Bucket.includes(load_includes).find(@bucket.id)
     # Filter out bucket_images with missing image records (orphaned records)
     bucket_images = @bucket.bucket_images.select { |bi| bi.image.present? }
     
@@ -732,11 +732,13 @@ class Api::V1::BucketsController < ApplicationController
       created_at: bucket.created_at,
       updated_at: bucket.updated_at,
       images_count: bucket.bucket_images.count,
-      schedules_count: bucket.bucket_schedules.count,
-      cover_image_url: bucket.cover_image_url,
-      cover_image_id: bucket.cover_image_id
+      schedules_count: bucket.bucket_schedules.count
     }
-    
+    if Bucket.column_names.include?('cover_image_id')
+      json[:cover_image_url] = bucket.cover_image_url
+      json[:cover_image_id] = bucket.cover_image_id
+    end
+
     # Include owner info for global buckets
     if include_owner && bucket.is_global && bucket.user
       json[:owner] = {
