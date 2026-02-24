@@ -633,7 +633,12 @@ class Api::V1::BucketsController < ApplicationController
 
   # DELETE /api/v1/buckets/:id/images/:image_id
   def delete_image
-    # Delete associated schedules first
+    # Clear bucket cover if this image is the cover (avoid orphaned reference)
+    if Bucket.column_names.include?('cover_image_id') && @bucket.cover_image_id == @bucket_image.image_id
+      @bucket.update_columns(cover_image_id: nil)
+    end
+    # Destroy in order to avoid FK violations: send histories reference schedule_items, so destroy histories first
+    @bucket_image.bucket_send_histories.destroy_all
     @bucket_image.bucket_schedules.destroy_all
     @bucket_image.destroy
     render json: { message: 'Image deleted successfully' }
