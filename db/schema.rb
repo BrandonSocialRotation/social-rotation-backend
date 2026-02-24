@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2025_12_31_200000) do
+ActiveRecord::Schema[7.1].define(version: 2026_01_17_191643) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -78,6 +78,7 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_31_200000) do
     t.string "facebook_page_id"
     t.string "linkedin_organization_urn"
     t.string "name"
+    t.string "timezone"
     t.index ["bucket_id"], name: "index_bucket_schedules_on_bucket_id"
     t.index ["bucket_image_id"], name: "index_bucket_schedules_on_bucket_image_id"
   end
@@ -93,9 +94,11 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_31_200000) do
     t.datetime "sent_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "schedule_item_id"
     t.index ["bucket_id"], name: "index_bucket_send_histories_on_bucket_id"
     t.index ["bucket_image_id"], name: "index_bucket_send_histories_on_bucket_image_id"
     t.index ["bucket_schedule_id"], name: "index_bucket_send_histories_on_bucket_schedule_id"
+    t.index ["schedule_item_id"], name: "index_bucket_send_histories_on_schedule_item_id"
   end
 
   create_table "bucket_videos", force: :cascade do |t|
@@ -122,6 +125,7 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_31_200000) do
     t.boolean "post_once_bucket"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "is_global", default: false, null: false
     t.index ["user_id"], name: "index_buckets_on_user_id"
   end
 
@@ -230,6 +234,21 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_31_200000) do
     t.index ["rss_feed_id"], name: "index_rss_posts_on_rss_feed_id"
   end
 
+  create_table "schedule_items", force: :cascade do |t|
+    t.bigint "bucket_schedule_id", null: false
+    t.bigint "bucket_image_id", null: false
+    t.string "schedule", null: false
+    t.text "description"
+    t.text "twitter_description"
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "timezone"
+    t.index ["bucket_image_id"], name: "index_schedule_items_on_bucket_image_id"
+    t.index ["bucket_schedule_id", "position"], name: "index_schedule_items_on_bucket_schedule_id_and_position"
+    t.index ["bucket_schedule_id"], name: "index_schedule_items_on_bucket_schedule_id"
+  end
+
   create_table "subscriptions", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.string "stripe_subscription_id"
@@ -305,7 +324,10 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_31_200000) do
     t.string "google_account_name"
     t.string "pinterest_username"
     t.string "youtube_channel_name"
+    t.string "password_reset_token"
+    t.datetime "password_reset_sent_at"
     t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["password_reset_token"], name: "index_users_on_password_reset_token", unique: true
   end
 
   create_table "videos", force: :cascade do |t|
@@ -327,11 +349,14 @@ ActiveRecord::Schema[7.1].define(version: 2025_12_31_200000) do
   add_foreign_key "bucket_send_histories", "bucket_images"
   add_foreign_key "bucket_send_histories", "bucket_schedules"
   add_foreign_key "bucket_send_histories", "buckets"
+  add_foreign_key "bucket_send_histories", "schedule_items"
   add_foreign_key "bucket_videos", "buckets"
   add_foreign_key "bucket_videos", "videos"
   add_foreign_key "buckets", "users"
   add_foreign_key "market_items", "buckets"
   add_foreign_key "market_items", "images", column: "front_image_id"
+  add_foreign_key "schedule_items", "bucket_images"
+  add_foreign_key "schedule_items", "bucket_schedules"
   add_foreign_key "subscriptions", "accounts"
   add_foreign_key "subscriptions", "plans"
   add_foreign_key "user_market_items", "market_items"

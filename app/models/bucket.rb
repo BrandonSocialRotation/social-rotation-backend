@@ -6,6 +6,8 @@ class Bucket < ApplicationRecord
   # ASSOCIATIONS
   # Bucket belongs to one user (owner)
   belongs_to :user
+  # Optional cover image for the bucket card (defaults to first image if nil)
+  belongs_to :cover_image, class_name: 'Image', optional: true
   # Bucket has many bucket_images (images in this collection) - destroy when bucket deleted
   has_many :bucket_images, dependent: :destroy
   # Bucket can access images through bucket_images join table
@@ -33,6 +35,14 @@ class Bucket < ApplicationRecord
   # Find user-owned buckets (not global)
   scope :user_owned, -> { where(is_global: false) }
   
+  # URL for the bucket card image: cover_image if set, otherwise first image in bucket
+  # Call with bucket_images (and optionally cover_image) preloaded to avoid N+1
+  def cover_image_url
+    img = cover_image
+    img ||= bucket_images.includes(:image).order(:id).first&.image
+    img&.get_source_url
+  end
+
   # Check if this bucket is listed in marketplace
   # Returns: true if bucket is for sale, false otherwise
   # Logic: user's account_id of 0 means marketplace bucket

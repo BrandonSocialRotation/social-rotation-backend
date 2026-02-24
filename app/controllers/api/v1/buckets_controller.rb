@@ -10,11 +10,13 @@ class Api::V1::BucketsController < ApplicationController
 
   # GET /api/v1/buckets
   def index
-    # Get user's own buckets
-    user_buckets = current_user.buckets.user_owned.includes(:bucket_images, :bucket_schedules)
+    # Get user's own buckets (eager load cover_image and bucket_images => image for cover_image_url)
+    user_buckets = current_user.buckets.user_owned
+      .includes(:cover_image, :bucket_schedules, bucket_images: :image)
     
     # Get global buckets (available to all users)
-    global_buckets = Bucket.global.includes(:bucket_images, :bucket_schedules, :user)
+    global_buckets = Bucket.global
+      .includes(:cover_image, :bucket_schedules, :user, bucket_images: :image)
     
     render json: {
       buckets: user_buckets.map { |bucket| bucket_json(bucket) },
@@ -29,8 +31,10 @@ class Api::V1::BucketsController < ApplicationController
       return render json: { error: 'Bucket not found' }, status: :not_found
     end
     
+    # Eager load for bucket_json cover_image_url
+    @bucket = Bucket.includes(:cover_image, bucket_images: :image).find(@bucket.id)
     # Filter out bucket_images with missing image records (orphaned records)
-    bucket_images = @bucket.bucket_images.includes(:image).select { |bi| bi.image.present? }
+    bucket_images = @bucket.bucket_images.select { |bi| bi.image.present? }
     
     render json: {
       bucket: bucket_json(@bucket, include_owner: @bucket.is_global),
@@ -707,7 +711,7 @@ class Api::V1::BucketsController < ApplicationController
 
   def bucket_params
     # Only super admins can set is_global
-    permitted = [:name, :description, :use_watermark, :post_once_bucket]
+    permitted = [:name, :description, :use_watermark, :post_once_bucket, :cover_image_id]
     permitted << :is_global if current_user&.super_admin?
     params.require(:bucket).permit(*permitted)
   end
@@ -728,7 +732,9 @@ class Api::V1::BucketsController < ApplicationController
       created_at: bucket.created_at,
       updated_at: bucket.updated_at,
       images_count: bucket.bucket_images.count,
-      schedules_count: bucket.bucket_schedules.count
+      schedules_count: bucket.bucket_schedules.count,
+      cover_image_url: bucket.cover_image_url,
+      cover_image_id: bucket.cover_image_id
     }
     
     # Include owner info for global buckets
