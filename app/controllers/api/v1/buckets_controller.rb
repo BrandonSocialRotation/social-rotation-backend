@@ -734,9 +734,15 @@ class Api::V1::BucketsController < ApplicationController
       images_count: bucket.bucket_images.count,
       schedules_count: bucket.bucket_schedules.count
     }
+    # Cover image: use column if present, else compute from first bucket_image (works even if schema cache is stale)
     if Bucket.column_names.include?('cover_image_id')
       json[:cover_image_url] = bucket.cover_image_url
       json[:cover_image_id] = bucket.cover_image_id
+    end
+    # Fallback: if no cover_image_url yet, use first image from preloaded bucket_images so cards always show an image when bucket has images
+    if json[:cover_image_url].blank?
+      first_bi = bucket.bucket_images.to_a.sort_by(&:id).first
+      json[:cover_image_url] = first_bi&.image&.get_source_url if first_bi&.image
     end
 
     # Include owner info for global buckets
