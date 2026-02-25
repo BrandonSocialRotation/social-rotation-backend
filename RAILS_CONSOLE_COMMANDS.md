@@ -1,5 +1,39 @@
 # Rails Console Commands for Account Management
 
+## Create free Agency Enterprise account (no Stripe, highest tier)
+
+Use this to grant someone the top plan (Agency Enterprise: 50 sub-accounts, 500 buckets, etc.) for free. They are a normal agency admin, not a super admin.
+
+**Rake task (from app directory):**
+
+```bash
+rails "accounts:create_free_agency[btantillo@gmail.com]"
+# Or with name and password:
+rails "accounts:create_free_agency[btantillo@gmail.com,B Tantillo,YourPassword123]"
+```
+
+If you omit name/password, name is derived from the email and a random password is generated (they should reset it after first login).
+
+**From Rails console (if rake is awkward in your shell):**
+
+```ruby
+email = "btantillo@gmail.com"
+name = "B Tantillo"   # or email.split('@').first.titleize
+password = "ChangeMe123"
+
+plan = Plan.find_by(name: "Agency Enterprise")
+raise "Plan not found" unless plan
+raise "User exists" if User.exists?(email: email)
+
+account = Account.create!(name: "#{name}'s Agency", is_reseller: true, status: true)
+user = User.create!(name: name, email: email, password: password, password_confirmation: password, account_id: account.id, is_account_admin: true, role: 'reseller', status: 1)
+Subscription.create!(account: account, plan: plan, status: 'active', stripe_customer_id: "comp_#{email.parameterize}_#{account.id}", stripe_subscription_id: nil, billing_period: 'monthly', user_count_at_subscription: 1, current_period_start: Time.current, current_period_end: 10.years.from_now, cancel_at_period_end: false)
+account.update!(plan: plan)
+puts "Done. #{email} / #{password}"
+```
+
+---
+
 ## Create account and connect to existing Stripe (no charge/refund)
 
 Use this when the customer already has a Stripe subscription and you only need to create the app account and link it.
