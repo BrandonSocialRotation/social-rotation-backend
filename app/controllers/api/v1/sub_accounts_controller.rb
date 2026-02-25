@@ -24,18 +24,31 @@ class Api::V1::SubAccountsController < ApplicationController
   end
 
   # POST /api/v1/sub_accounts
-  # Create a new sub-account under the current reseller
+  # Create a new sub-account under the current reseller.
+  # For per-user plans: updates Stripe subscription and charges prorated amount for the new seat (they cannot avoid paying by deleting before the bill cycle).
   def create
     # For super admins, skip account limit check (they can add unlimited users)
     unless current_user.super_admin?
       # Check if reseller can add more users
       unless current_user.account&.can_add_user?
-        return render json: { 
-          error: 'Maximum users reached for your account' 
+        return render json: {
+          error: 'Maximum users reached for your account'
         }, status: :forbidden
       end
     end
-    
+
+    # Charge for the new seat (prorated) before creating the user. Skip for super_admin (no billing).
+    unless current_user.super_admin?
+      begin
+        SubscriptionSeatService.charge_for_new_seat(current_user.account)
+      rescue SubscriptionSeatService::Error => e
+        return render json: { error: e.message }, status: :unprocessable_entity
+      rescue Stripe::StripeError => e
+        Rails.logger.error "Stripe error adding seat: #{e.message}"
+        return render json: { error: 'Payment could not be updated. Please check your payment method.' }, status: :unprocessable_entity
+      end
+    end
+
     sub_account = User.new(sub_account_params)
     # For super admins, use their account_id (which may be 0 or an agency account)
     # For regular resellers, use their account_id
@@ -43,11 +56,13 @@ class Api::V1::SubAccountsController < ApplicationController
     sub_account.is_account_admin = false
     sub_account.role = 'sub_account'
     sub_account.status = 1
-    
+
     if sub_account.save
+      new_total_message = new_total_notification(current_user.account)
       render json: {
         sub_account: sub_account_json(sub_account),
-        message: 'Sub-account created successfully'
+        message: 'Sub-account created successfully',
+        notification: new_total_message
       }, status: :created
     else
       render json: {
@@ -80,9 +95,18 @@ class Api::V1::SubAccountsController < ApplicationController
   end
 
   # DELETE /api/v1/sub_accounts/:id
-  # Delete a sub-account
+  # Delete a sub-account. For per-user plans, the lower price applies at period end (no refund for current period).
   def destroy
     @sub_account.destroy
+    # Update Stripe so next period they pay for fewer seats; no refund for current period.
+    unless current_user.super_admin?
+      begin
+        SubscriptionSeatService.apply_removed_seat_at_period_end(current_user.account)
+      rescue SubscriptionSeatService::Error, Stripe::StripeError => e
+        Rails.logger.error "Stripe error applying removed seat: #{e.message}"
+        # Sub-account already deleted; don't fail the request
+      end
+    end
     render json: { message: 'Sub-account deleted successfully' }
   end
 
@@ -166,5 +190,16 @@ class Api::V1::SubAccountsController < ApplicationController
       is_account_admin: user.is_account_admin,
       role: user.role
     }
+  end
+
+  def new_total_notification(account)
+    sub = account.subscription
+    return nil unless sub&.plan
+    return nil unless sub.plan.respond_to?(:supports_per_user_pricing) && sub.plan.supports_per_user_pricing
+
+    user_count = account.users.count
+    billing_period = sub.respond_to?(:billing_period) && sub.billing_period.present? ? sub.billing_period : 'monthly'
+    formatted = sub.plan.formatted_price_for_users(user_count, billing_period)
+    "Your new total will be #{formatted}."
   end
 end
