@@ -250,7 +250,7 @@ class SocialMediaPosterService
       end
     end
   
-  # Post to Twitter
+    # Post to Twitter
   def post_to_twitter(image_path)
     begin
       return { success: false, error: 'Image path is required' } if image_path.nil?
@@ -261,6 +261,7 @@ class SocialMediaPosterService
       { success: true, response: response }
     rescue => e
       Rails.logger.error "Twitter posting error: #{e.message}"
+      Rails.logger.error "Twitter error class: #{e.class}. Backtrace: #{e.backtrace&.first(5)&.join(', ')}"
       { success: false, error: e.message }
     end
   end

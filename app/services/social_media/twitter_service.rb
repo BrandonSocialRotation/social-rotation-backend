@@ -49,7 +49,7 @@ module SocialMedia
     
     private
     
-    # Upload media to Twitter
+    # Upload media to Twitter using proper multipart/form-data (OAuth gem does not build multipart correctly)
     # @param image_path [String] Local path to image
     # @return [String] Media ID
     def upload_media(image_path)
@@ -60,35 +60,43 @@ module SocialMedia
         raise "Twitter API credentials not configured"
       end
       
-      # Create OAuth consumer
       consumer = ::OAuth::Consumer.new(
         consumer_key,
         consumer_secret,
         site: 'https://upload.twitter.com'
       )
-      
-      # Create access token from stored credentials
       access_token = ::OAuth::AccessToken.new(
         consumer,
         @user.twitter_oauth_token,
         @user.twitter_oauth_token_secret
       )
       
-      # Read image file in binary mode
-      image_data = File.binread(image_path)
-      Rails.logger.info "Twitter upload - file size: #{image_data.length} bytes"
+      file_size = File.size(image_path)
+      Rails.logger.info "Twitter upload - file: #{image_path}, size: #{file_size} bytes"
       
-      # Upload media using multipart form data
-      response = access_token.post(
-        '/1.1/media/upload.json',
-        {
-          media: image_data,
-          media_category: 'tweet_image'
-        },
-        {
-          'Content-Type' => 'multipart/form-data'
+      mime_type = mime_type_for_path(image_path)
+      filename = File.basename(image_path)
+      filename = "image#{File.extname(image_path)}" if filename.blank?
+      
+      require 'multipart/post'
+      require 'net/http/post/multipart'
+      uri = URI('https://upload.twitter.com/1.1/media/upload.json')
+      file = File.open(image_path, 'rb')
+      begin
+        form = {
+          'media' => Multipart::Post::UploadIO.new(file, mime_type, filename),
+          'media_category' => 'tweet_image'
         }
-      )
+        req = Net::HTTP::Post::Multipart.new(uri.path, form)
+        access_token.sign!(req)
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = true
+        http.read_timeout = 30
+        http.open_timeout = 10
+        response = http.request(req)
+      ensure
+        file.close
+      end
       
       Rails.logger.info "Twitter upload response - status: #{response.code}, body: #{response.body[0..500]}"
       
@@ -112,6 +120,17 @@ module SocialMedia
       Rails.logger.error "Twitter upload exception: #{e.class} - #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
       raise
+    end
+
+    def mime_type_for_path(path)
+      ext = File.extname(path).to_s.downcase
+      case ext
+      when '.jpg', '.jpeg' then 'image/jpeg'
+      when '.png' then 'image/png'
+      when '.gif' then 'image/gif'
+      when '.webp' then 'image/webp'
+      else 'image/jpeg'
+      end
     end
     
     # Create a tweet with media

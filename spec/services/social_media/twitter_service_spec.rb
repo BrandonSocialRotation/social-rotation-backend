@@ -29,10 +29,13 @@ RSpec.describe SocialMedia::TwitterService do
       
       before do
         allow(File).to receive(:exist?).with(image_path).and_return(true)
-        allow(File).to receive(:binread).with(image_path).and_return('image data')
+        allow(File).to receive(:size).with(image_path).and_return(1000)
+        allow(File).to receive(:open).with(image_path, 'rb').and_return(StringIO.new('image data'))
         allow(OAuth::Consumer).to receive(:new).and_return(mock_consumer)
         allow(OAuth::AccessToken).to receive(:new).and_return(mock_access_token)
-        allow(mock_access_token).to receive(:post).and_return(success_response, tweet_response)
+        allow(mock_access_token).to receive(:sign!)
+        allow_any_instance_of(Net::HTTP).to receive(:request).and_return(success_response)
+        allow(mock_access_token).to receive(:post).and_return(tweet_response)
         allow(JSON).to receive(:parse).with('{"media_id_string": "12345"}').and_return({'media_id_string' => '12345'})
         allow(JSON).to receive(:parse).with('{"data": {"id": "tweet123"}}').and_return({'data' => {'id' => 'tweet123'}})
       end
@@ -77,10 +80,13 @@ RSpec.describe SocialMedia::TwitterService do
       before do
         allow(service).to receive(:download_image_to_temp).and_return(temp_file)
         allow(File).to receive(:exist?).with(temp_file.path).and_return(true)
-        allow(File).to receive(:binread).with(temp_file.path).and_return('image data')
+        allow(File).to receive(:size).with(temp_file.path).and_return(1000)
+        allow(File).to receive(:open).with(temp_file.path, 'rb').and_return(StringIO.new('image data'))
         allow(OAuth::Consumer).to receive(:new).and_return(mock_consumer)
         allow(OAuth::AccessToken).to receive(:new).and_return(mock_access_token)
-        allow(mock_access_token).to receive(:post).and_return(success_response, tweet_response)
+        allow(mock_access_token).to receive(:sign!)
+        allow_any_instance_of(Net::HTTP).to receive(:request).and_return(success_response)
+        allow(mock_access_token).to receive(:post).and_return(tweet_response)
         allow(JSON).to receive(:parse).with('{"media_id_string": "12345"}').and_return({'media_id_string' => '12345'})
         allow(JSON).to receive(:parse).with('{"data": {"id": "tweet123"}}').and_return({'data' => {'id' => 'tweet123'}})
       end
@@ -98,17 +104,18 @@ RSpec.describe SocialMedia::TwitterService do
     let(:mock_access_token) { double('OAuth::AccessToken') }
     
       before do
-        allow(File).to receive(:exist?).with(image_path).and_return(true)
-        allow(File).to receive(:binread).with(image_path).and_return('image data')
+        allow(File).to receive(:size).with(image_path).and_return(1000)
+        allow(File).to receive(:open).with(image_path, 'rb').and_return(StringIO.new('image data'))
         allow(OAuth::Consumer).to receive(:new).and_return(mock_consumer)
         allow(OAuth::AccessToken).to receive(:new).and_return(mock_access_token)
+        allow(mock_access_token).to receive(:sign!)
       end
       
       context 'when upload succeeds' do
         let(:success_response) { double('Net::HTTPSuccess', is_a?: true, code: '200', body: '{"media_id_string": "12345"}') }
         
         before do
-          allow(mock_access_token).to receive(:post).and_return(success_response)
+          allow_any_instance_of(Net::HTTP).to receive(:request).and_return(success_response)
           allow(JSON).to receive(:parse).with('{"media_id_string": "12345"}').and_return({'media_id_string' => '12345'})
         end
       
@@ -119,10 +126,10 @@ RSpec.describe SocialMedia::TwitterService do
     end
     
     context 'when upload fails' do
-      let(:error_response) { double('Net::HTTPError', is_a?: false, code: '400', body: '{"errors": [{"message": "Upload failed"}]}') }
+      let(:error_response) { double('Net::HTTPClientError', is_a?: false, code: '400', body: '{"errors": [{"message": "Upload failed"}]}') }
       
       before do
-        allow(mock_access_token).to receive(:post).and_return(error_response)
+        allow_any_instance_of(Net::HTTP).to receive(:request).and_return(error_response)
       end
       
       it 'raises an error' do

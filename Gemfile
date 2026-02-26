@@ -8,6 +8,9 @@ gem "dotenv-rails", "~> 2.8"
 # OAuth 1.0a for Twitter
 gem "oauth", "~> 1.1"
 
+# Multipart form-data for Twitter media upload
+gem "multipart-post", "~> 2.3"
+
 # Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
 gem "rails", "~> 7.1.5", ">= 7.1.5.1"
 
