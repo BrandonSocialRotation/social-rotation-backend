@@ -322,7 +322,8 @@ class ProcessScheduledPostsJob < ApplicationJob
       description,
       twitter_description: twitter_description,
       facebook_page_id: schedule.facebook_page_id,
-      linkedin_organization_urn: schedule.linkedin_organization_urn
+      linkedin_organization_urn: schedule.linkedin_organization_urn,
+      pinterest_board_id: schedule.respond_to?(:pinterest_board_id) ? schedule.pinterest_board_id : nil
     )
     
     results = poster.post_to_all
@@ -440,7 +441,8 @@ class ProcessScheduledPostsJob < ApplicationJob
       description,
       twitter_description: twitter_description,
       facebook_page_id: schedule.facebook_page_id,
-      linkedin_organization_urn: schedule.linkedin_organization_urn
+      linkedin_organization_urn: schedule.linkedin_organization_urn,
+      pinterest_board_id: schedule.respond_to?(:pinterest_board_id) ? schedule.pinterest_board_id : nil
     )
     
     results = poster.post_to_all

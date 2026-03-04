@@ -68,7 +68,8 @@ class BucketSchedule < ApplicationRecord
       'Twitter' => (post_to & BIT_TWITTER) > 0 ? 'twitter_on.png' : 'twitter_off.png',
       'LinkedIn' => (post_to & BIT_LINKEDIN) > 0 ? 'linkedin_on.png' : 'linkedin_off.png',
       'Instagram' => (post_to & BIT_INSTAGRAM) > 0 ? 'instagram_on.png' : 'instagram_off.png',
-      'GMB' => (post_to & BIT_GMB) > 0 ? 'gmb_on.png' : 'gmb_off.png'
+      'GMB' => (post_to & BIT_GMB) > 0 ? 'gmb_on.png' : 'gmb_off.png',
+      'Pinterest' => (post_to & BIT_PINTEREST) > 0 ? 'pinterest_on.png' : 'pinterest_off.png'
     }
   end
   
@@ -223,7 +224,8 @@ class BucketSchedule < ApplicationRecord
       BIT_TWITTER => 'twitter_on.png',
       BIT_LINKEDIN => 'linkedin_on.png',
       BIT_INSTAGRAM => 'instagram_on.png',
-      BIT_GMB => 'gmb_on.png'
+      BIT_GMB => 'gmb_on.png',
+      BIT_PINTEREST => 'pinterest_on.png'
     }
   end
   

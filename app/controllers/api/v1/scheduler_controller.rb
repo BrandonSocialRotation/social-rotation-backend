@@ -73,7 +73,10 @@ class Api::V1::SchedulerController < ApplicationController
         bucket_image,
         @bucket_schedule.post_to,
         description,
-        twitter_description: twitter_description
+        twitter_description: twitter_description,
+        facebook_page_id: @bucket_schedule.respond_to?(:facebook_page_id) ? @bucket_schedule.facebook_page_id : nil,
+        linkedin_organization_urn: @bucket_schedule.respond_to?(:linkedin_organization_urn) ? @bucket_schedule.linkedin_organization_urn : nil,
+        pinterest_board_id: @bucket_schedule.respond_to?(:pinterest_board_id) ? @bucket_schedule.pinterest_board_id : nil
       )
       
       results = poster.post_to_all
@@ -194,6 +197,8 @@ class Api::V1::SchedulerController < ApplicationController
         post_to += BucketSchedule::BIT_LINKEDIN
       when 'google_business'
         post_to += BucketSchedule::BIT_GMB
+      when 'pinterest'
+        post_to += BucketSchedule::BIT_PINTEREST
       end
     end
     post_to

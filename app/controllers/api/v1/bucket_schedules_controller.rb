@@ -32,7 +32,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
     if params[:bucket_schedule].present?
       schedule_params = params.require(:bucket_schedule).permit(
         :schedule, :schedule_type, :post_to, :description, :twitter_description,
-        :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name, :timezone
+        :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name, :timezone, :pinterest_board_id
       )
     end
     
@@ -449,7 +449,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
   def bucket_schedule_params
     params.require(:bucket_schedule).permit(
       :schedule, :schedule_type, :post_to, :description, :twitter_description,
-      :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name, :timezone
+      :times_sent, :skip_image, :bucket_image_id, :facebook_page_id, :linkedin_organization_urn, :name, :timezone, :pinterest_board_id
     )
   end
 
@@ -467,6 +467,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
         post_to += BucketSchedule::BIT_LINKEDIN
       when 'google_business'
         post_to += BucketSchedule::BIT_GMB
+      when 'pinterest'
+        post_to += BucketSchedule::BIT_PINTEREST
       end
     end
     post_to
@@ -488,6 +490,7 @@ class Api::V1::BucketSchedulesController < ApplicationController
       timezone: bucket_schedule.respond_to?(:timezone) ? bucket_schedule.timezone : nil,
       facebook_page_id: bucket_schedule.respond_to?(:facebook_page_id) ? bucket_schedule.facebook_page_id : nil,
       linkedin_organization_urn: bucket_schedule.respond_to?(:linkedin_organization_urn) ? bucket_schedule.linkedin_organization_urn : nil,
+      pinterest_board_id: bucket_schedule.respond_to?(:pinterest_board_id) ? bucket_schedule.pinterest_board_id : nil,
       bucket_name: bucket_schedule.bucket ? bucket_schedule.bucket.name : nil,
       bucket: bucket_schedule.bucket ? {
         id: bucket_schedule.bucket.id,

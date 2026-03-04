@@ -18,6 +18,7 @@ class BucketSendHistory < ApplicationRecord
     sent_to_platforms << 'LinkedIn' if (sent_to & BucketSchedule::BIT_LINKEDIN) > 0
     sent_to_platforms << 'Google My Business' if (sent_to & BucketSchedule::BIT_GMB) > 0
     sent_to_platforms << 'Instagram' if (sent_to & BucketSchedule::BIT_INSTAGRAM) > 0
+    sent_to_platforms << 'Pinterest' if (sent_to & BucketSchedule::BIT_PINTEREST) > 0
     
     sent_to_platforms.empty? ? 'Unknown' : sent_to_platforms.join(', ')
   end

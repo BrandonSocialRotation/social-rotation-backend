@@ -192,6 +192,22 @@ class Api::V1::UserInfoController < ApplicationController
       render json: { error: 'Failed to fetch LinkedIn organizations', message: e.message }, status: :internal_server_error
     end
   end
+
+  # GET /api/v1/user_info/pinterest_boards
+  def pinterest_boards
+    unless current_user.respond_to?(:pinterest_access_token) && current_user.pinterest_access_token.present?
+      return render json: { error: 'Pinterest not connected' }, status: :unauthorized
+    end
+
+    begin
+      service = SocialMedia::PinterestService.new(current_user)
+      boards = service.list_boards
+      render json: { boards: boards }
+    rescue => e
+      Rails.logger.error "Pinterest boards error: #{e.message}"
+      render json: { error: 'Failed to fetch Pinterest boards', message: e.message }, status: :internal_server_error
+    end
+  end
   
   private
   

@@ -7,7 +7,7 @@ class SocialMediaPosterService
   BIT_GMB = 16
   BIT_PINTEREST = 32
   
-  def initialize(user, bucket_image, post_to_flags, description, twitter_description: nil, facebook_page_id: nil, linkedin_organization_urn: nil)
+  def initialize(user, bucket_image, post_to_flags, description, twitter_description: nil, facebook_page_id: nil, linkedin_organization_urn: nil, pinterest_board_id: nil)
     @user = user
     @bucket_image = bucket_image
     @post_to = post_to_flags
@@ -15,6 +15,7 @@ class SocialMediaPosterService
     @twitter_description = twitter_description || description
     @facebook_page_id = facebook_page_id
     @linkedin_organization_urn = linkedin_organization_urn
+    @pinterest_board_id = pinterest_board_id
     @temp_files = [] # Track temp files for cleanup
   end
   
@@ -87,6 +88,11 @@ class SocialMediaPosterService
     # Post to Google My Business
     if should_post_to?(BIT_GMB)
       results[:gmb] = post_to_gmb(image_url)
+    end
+
+    # Post to Pinterest
+    if should_post_to?(BIT_PINTEREST)
+      results[:pinterest] = post_to_pinterest(image_url)
     end
     
     results
@@ -316,6 +322,21 @@ class SocialMediaPosterService
       { success: true, response: response }
     rescue => e
       Rails.logger.error "Google My Business posting error: #{e.message}"
+      { success: false, error: e.message }
+    end
+  end
+
+  # Post to Pinterest
+  def post_to_pinterest(image_url)
+    begin
+      return { success: false, error: 'Image URL is required' } if image_url.blank?
+      service = SocialMedia::PinterestService.new(@user)
+      title = @description.to_s[0...100]
+      description = @description.to_s[0...500]
+      response = service.create_pin(title, description, image_url, link: image_url, board_id: @pinterest_board_id)
+      { success: true, response: response }
+    rescue => e
+      Rails.logger.error "Pinterest posting error: #{e.message}"
       { success: false, error: e.message }
     end
   end
