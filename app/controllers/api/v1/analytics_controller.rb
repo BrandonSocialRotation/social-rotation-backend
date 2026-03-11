@@ -140,6 +140,82 @@ class Api::V1::AnalyticsController < ApplicationController
       posts_last_30d: posts_last_30d
     }
   end
+
+  # GET /api/v1/analytics/status
+  # Returns per-platform diagnostics: what's connected, what's working, what's not.
+  def status
+    u = current_user
+    diagnostics = {}
+
+    # --- Instagram (Meta Insights) ---
+    ig_connected = u.instagram_business_id.present? && u.fb_user_access_key.present?
+    if ig_connected
+      begin
+        page_token = MetaInsightsService.new(u).send(:get_page_access_token)
+        if page_token.present?
+          diagnostics[:instagram] = { connected: true, status: 'working', message: 'Instagram Business linked; insights API ready.' }
+        else
+          diagnostics[:instagram] = { connected: true, status: 'no_page_token', message: 'Facebook Page token for this Instagram account could not be found. Reconnect Facebook/Instagram or ensure the Page is linked to your IG Business account.' }
+        end
+      rescue => e
+        diagnostics[:instagram] = { connected: true, status: 'error', message: "Instagram check failed: #{e.message}" }
+      end
+    else
+      diagnostics[:instagram] = {
+        connected: false,
+        status: 'not_connected',
+        message: 'Connect both Facebook and Instagram (Business/Creator account linked to a Facebook Page) to see Instagram analytics.'
+      }
+    end
+
+    # --- Twitter ---
+    tw_connected = u.twitter_oauth_token.present? && u.twitter_oauth_token_secret.present?
+    tw_env_ok = ENV['TWITTER_API_KEY'].present? && ENV['TWITTER_API_SECRET_KEY'].present?
+    if tw_connected && tw_env_ok
+      diagnostics[:twitter] = {
+        connected: true,
+        status: 'ready',
+        message: u.twitter_user_id.present? ? 'Twitter connected; analytics will fetch followers and tweet metrics.' : 'Twitter connected; user ID will be fetched on first analytics load. Free tier: 100 tweets/month for tweet metrics.'
+      }
+    elsif tw_connected && !tw_env_ok
+      diagnostics[:twitter] = { connected: true, status: 'env_missing', message: 'Twitter API keys (TWITTER_API_KEY, TWITTER_API_SECRET_KEY) are not set on the server.' }
+    else
+      diagnostics[:twitter] = { connected: false, status: 'not_connected', message: 'Connect Twitter in Profile to see follower count and tweet engagement.' }
+    end
+
+    # --- LinkedIn ---
+    li_connected = u.respond_to?(:linkedin_access_token) && u.linkedin_access_token.present?
+    if li_connected
+      begin
+        svc = SocialMedia::LinkedinService.new(u)
+        orgs = svc.fetch_organizations
+        if orgs.present?
+          diagnostics[:linkedin] = { connected: true, status: 'working', message: 'LinkedIn Company Page linked; follower count available. (Engagement metrics require Community Management API access.)' }
+        else
+          diagnostics[:linkedin] = { connected: true, status: 'no_organization', message: 'No LinkedIn Company Page found. Analytics require a Company Page linked to your account.' }
+        end
+      rescue => e
+        diagnostics[:linkedin] = { connected: true, status: 'error', message: "LinkedIn check failed: #{e.message}" }
+      end
+    else
+      diagnostics[:linkedin] = { connected: false, status: 'not_connected', message: 'Connect LinkedIn (with Company Page access) to see follower count.' }
+    end
+
+    # --- Facebook ---
+    fb_connected = u.fb_user_access_key.present?
+    diagnostics[:facebook] = {
+      connected: fb_connected,
+      status: 'placeholder',
+      message: 'Facebook analytics are not implemented yet; coming soon.'
+    }
+
+    # --- Posts count (always from DB) ---
+    bucket_ids = u.buckets.pluck(:id)
+    total = BucketSendHistory.where(bucket_id: bucket_ids).count
+    diagnostics[:posts_count] = { status: 'working', message: "Uses your sent post history (#{total} total posts).", total_posts: total }
+
+    render json: { diagnostics: diagnostics }
+  end
   
   private
   
