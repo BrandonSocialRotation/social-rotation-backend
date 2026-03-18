@@ -49,14 +49,9 @@ class Api::V1::AnalyticsController < ApplicationController
   def overall
     range = params[:range].presence || '7d'
     # Accept platforms as array: ?platforms[]=instagram&platforms[]=facebook
-    selected_platforms = params[:platforms].present? ? Array(params[:platforms]) : nil
-    
-    # Aggregate analytics from selected platforms (or all connected if none specified)
-    metrics = {}
-    
-    # Determine which platforms to include
-    platforms_to_fetch = if selected_platforms.present?
-      selected_platforms.map(&:to_sym)
+    # Empty array = user selected none (return zeros). Omitted = default to all connected.
+    platforms_to_fetch = if params.key?(:platforms)
+      Array(params[:platforms]).map(&:to_sym)
     else
       # Default: include all connected platforms
       connected_platforms = []
@@ -66,6 +61,8 @@ class Api::V1::AnalyticsController < ApplicationController
       connected_platforms << :linkedin if current_user.linkedin_access_token.present?
       connected_platforms
     end
+    
+    metrics = {}
     
     # Instagram analytics
     if platforms_to_fetch.include?(:instagram) && current_user.instagram_business_id.present?
