@@ -26,7 +26,8 @@ class Api::V1::AnalyticsController < ApplicationController
       render json: { platform: platform, range: range, metrics: data }
     when 'facebook'
       begin
-        data = fetch_facebook_analytics(current_user, range)
+        facebook_page_id = params[:facebook_page_id].presence
+        data = fetch_facebook_analytics(current_user, range, facebook_page_id: facebook_page_id)
         render json: { platform: platform, range: range, metrics: data }
       rescue => e
         Rails.logger.error "Facebook analytics error: #{e.message}"
@@ -75,10 +76,11 @@ class Api::V1::AnalyticsController < ApplicationController
       end
     end
     
-    # Facebook analytics
+    # Facebook analytics (optional facebook_page_id to show one page instead of all)
     if platforms_to_fetch.include?(:facebook) && current_user.fb_user_access_key.present?
       begin
-        metrics[:facebook] = fetch_facebook_analytics(current_user, range)
+        facebook_page_id = params[:facebook_page_id].presence
+        metrics[:facebook] = fetch_facebook_analytics(current_user, range, facebook_page_id: facebook_page_id)
       rescue => e
         Rails.logger.error "Facebook analytics error: #{e.message}"
         metrics[:facebook] = { message: "Facebook analytics unavailable: #{e.message}" }
@@ -118,6 +120,7 @@ class Api::V1::AnalyticsController < ApplicationController
       range: range,
       platforms: metrics,
       selected_platforms: platforms_to_fetch.map(&:to_s),
+      facebook_page_id: params[:facebook_page_id].presence,
       total_engagement: valid_metrics.values.sum { |m| (m[:total_engagement] || m[:engagement_rate] || 0).to_f },
       total_likes: valid_metrics.values.sum { |m| (m[:likes] || 0).to_i },
       total_comments: valid_metrics.values.sum { |m| (m[:comments] || 0).to_i },
@@ -716,7 +719,7 @@ class Api::V1::AnalyticsController < ApplicationController
     end
   end
 
-  def fetch_facebook_analytics(user, range)
+  def fetch_facebook_analytics(user, range, facebook_page_id: nil)
     unless user.fb_user_access_key.present?
       return { message: 'Facebook not connected', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
     end
@@ -725,6 +728,12 @@ class Api::V1::AnalyticsController < ApplicationController
     pages = facebook_service.fetch_pages
     if pages.blank?
       return { message: 'No Facebook Pages found. Connect a Page to see analytics.', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
+    end
+
+    # When facebook_page_id provided, only fetch that page (like scheduler)
+    pages = pages.select { |p| p[:id].to_s == facebook_page_id.to_s } if facebook_page_id.present?
+    if facebook_page_id.present? && pages.blank?
+      return { message: 'Selected Facebook Page not found. Choose a different page.', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
     end
 
     since_ts = case range.to_s
