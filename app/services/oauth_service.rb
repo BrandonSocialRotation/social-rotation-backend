@@ -6,7 +6,7 @@ class OauthService
       env_callback: nil,
       auth_url: 'https://www.facebook.com/v18.0/dialog/oauth',
       token_url: 'https://graph.facebook.com/v18.0/oauth/access_token',
-      scopes: 'email,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish,instagram_manage_insights,publish_video',
+      scopes: 'email,pages_manage_posts,pages_read_engagement,read_insights,instagram_basic,instagram_content_publish,instagram_manage_insights,publish_video',
       callback_path: '/api/v1/oauth/facebook/callback'
     },
     linkedin: {

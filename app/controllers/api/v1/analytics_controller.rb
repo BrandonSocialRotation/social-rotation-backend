@@ -24,7 +24,15 @@ class Api::V1::AnalyticsController < ApplicationController
       service = MetaInsightsService.new(current_user)
       data = service.summary(range)
       render json: { platform: platform, range: range, metrics: data }
-    when 'facebook', 'twitter', 'linkedin'
+    when 'facebook'
+      begin
+        data = fetch_facebook_analytics(current_user, range)
+        render json: { platform: platform, range: range, metrics: data }
+      rescue => e
+        Rails.logger.error "Facebook analytics error: #{e.message}"
+        render json: { platform: platform, range: range, metrics: {}, message: e.message }, status: :internal_server_error
+      end
+    when 'twitter', 'linkedin'
       # Placeholder for other platforms - return empty data for now
       render json: {
         platform: platform,
@@ -70,9 +78,14 @@ class Api::V1::AnalyticsController < ApplicationController
       end
     end
     
-    # Facebook analytics (placeholder for now)
+    # Facebook analytics
     if platforms_to_fetch.include?(:facebook) && current_user.fb_user_access_key.present?
-      metrics[:facebook] = { message: 'Facebook analytics coming soon' }
+      begin
+        metrics[:facebook] = fetch_facebook_analytics(current_user, range)
+      rescue => e
+        Rails.logger.error "Facebook analytics error: #{e.message}"
+        metrics[:facebook] = { message: "Facebook analytics unavailable: #{e.message}" }
+      end
     end
     
     # Twitter analytics
@@ -203,11 +216,20 @@ class Api::V1::AnalyticsController < ApplicationController
 
     # --- Facebook ---
     fb_connected = u.fb_user_access_key.present?
-    diagnostics[:facebook] = {
-      connected: fb_connected,
-      status: 'placeholder',
-      message: 'Facebook analytics are not implemented yet; coming soon.'
-    }
+    if fb_connected
+      begin
+        pages = SocialMedia::FacebookService.new(u).fetch_pages
+        if pages.present?
+          diagnostics[:facebook] = { connected: true, status: 'working', message: 'Facebook Page(s) linked; insights (reach, engagement) will show for Pages with 100+ likes.' }
+        else
+          diagnostics[:facebook] = { connected: true, status: 'no_pages', message: 'No Facebook Pages found. Add a Page you manage and reconnect Facebook.' }
+        end
+      rescue => e
+        diagnostics[:facebook] = { connected: true, status: 'error', message: "Facebook check failed: #{e.message}" }
+      end
+    else
+      diagnostics[:facebook] = { connected: false, status: 'not_connected', message: 'Connect Facebook in Profile to see Page analytics (reach, engagement, followers).' }
+    end
 
     # --- Posts count (always from DB) ---
     bucket_ids = u.buckets.pluck(:id)
@@ -695,5 +717,81 @@ class Api::V1::AnalyticsController < ApplicationController
       Rails.logger.error e.backtrace.join("\n")
       { message: 'LinkedIn analytics error' }
     end
+  end
+
+  def fetch_facebook_analytics(user, range)
+    unless user.fb_user_access_key.present?
+      return { message: 'Facebook not connected', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
+    end
+
+    facebook_service = SocialMedia::FacebookService.new(user)
+    pages = facebook_service.fetch_pages
+    if pages.blank?
+      return { message: 'No Facebook Pages found. Connect a Page to see analytics.', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
+    end
+
+    since_ts = case range.to_s
+               when '24h' then 24.hours.ago.to_i
+               when '30d' then 30.days.ago.to_i
+               when '28d' then 28.days.ago.to_i
+               else 7.days.ago.to_i
+               end
+    until_ts = Time.now.to_i
+
+    total_followers = 0
+    total_impressions = 0
+    total_engaged = 0
+
+    pages.each do |page|
+      page_id = page[:id]
+      page_token = page[:access_token]
+      next unless page_token.present?
+
+      # Page fan count (followers/likes)
+      page_url = "https://graph.facebook.com/v18.0/#{page_id}"
+      page_resp = HTTParty.get(page_url, query: { fields: 'fan_count', access_token: page_token })
+      if page_resp.success?
+        data = JSON.parse(page_resp.body)
+        total_followers += data['fan_count'].to_i
+      end
+
+      # Page insights (may require Page with 100+ likes; metrics can be empty for new pages)
+      insights_url = "https://graph.facebook.com/v18.0/#{page_id}/insights"
+      insights_params = {
+        metric: 'page_impressions,page_engaged_users',
+        period: 'day',
+        since: since_ts,
+        until: until_ts,
+        access_token: page_token
+      }
+      insights_resp = HTTParty.get(insights_url, query: insights_params)
+      next unless insights_resp.success?
+
+      insights_data = JSON.parse(insights_resp.body)
+      (insights_data['data'] || []).each do |metric_row|
+        name = metric_row['name']
+        values = metric_row['values'] || []
+        sum = values.sum { |v| v['value'].to_i }
+        total_impressions += sum if name == 'page_impressions'
+        total_engaged += sum if name == 'page_engaged_users'
+      end
+    end
+
+    total_engagement = total_engaged
+    engagement_rate = total_followers.positive? ? ((total_engagement.to_f / total_followers) * 100).round(2) : nil
+
+    {
+      followers: total_followers,
+      reach: total_impressions,
+      total_engagement: total_engagement,
+      engagement_rate: engagement_rate,
+      likes: 0,
+      comments: 0,
+      shares: 0
+    }
+  rescue => e
+    Rails.logger.error "Facebook analytics exception: #{e.class} - #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    { message: "Facebook analytics error: #{e.message}", followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
   end
 end
