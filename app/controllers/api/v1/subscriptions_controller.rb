@@ -2,9 +2,9 @@ class Api::V1::SubscriptionsController < ApplicationController
   include JsonSerializers
   
   skip_before_action :authenticate_user!, only: [:webhook, :test_stripe, :checkout_session_for_pending]
-  before_action :require_account_admin!, only: [:create, :cancel]
+  before_action :require_account_admin!, only: [:create, :cancel, :billing_portal_session]
   before_action :check_stripe_configured!, only: [:checkout_session, :checkout_session_for_pending, :cancel, :webhook]
-  skip_before_action :require_active_subscription!, only: [:index, :show, :create, :checkout_session, :checkout_session_for_pending, :cancel, :webhook, :test_stripe]
+  skip_before_action :require_active_subscription!, only: [:index, :show, :create, :checkout_session, :checkout_session_for_pending, :billing_portal_session, :cancel, :webhook, :test_stripe]
   
   # GET /api/v1/subscriptions/test_stripe
   # Test Stripe connection and configuration
@@ -373,6 +373,44 @@ class Api::V1::SubscriptionsController < ApplicationController
       Rails.logger.error "Subscription error: #{e.message}"
       render json: { error: "Failed to create checkout session" }, status: :internal_server_error
     end
+  end
+
+  # POST /api/v1/subscriptions/billing_portal_session
+  # Creates a Stripe Billing Portal session for updating payment method.
+  # Only account admins can update payment (sub-accounts cannot).
+  # Updating payment does NOT charge immediately - Stripe uses the new card on the next invoice.
+  def billing_portal_session
+    check_stripe_configured!
+    return if performed?
+
+    account = current_user.account
+    unless account
+      return render json: { error: 'No account found' }, status: :not_found
+    end
+
+    subscription = account.subscription
+    unless subscription&.stripe_customer_id.present?
+      return render json: {
+        error: 'No subscription with payment method',
+        message: 'You need an active subscription to update payment information.'
+      }, status: :bad_request
+    end
+
+    Stripe.api_key = ENV['STRIPE_SECRET_KEY']
+    return_url = "#{frontend_url}/profile?payment_updated=1"
+
+    session = Stripe::BillingPortal::Session.create(
+      customer: subscription.stripe_customer_id,
+      return_url: return_url
+    )
+
+    render json: { url: session.url }
+  rescue Stripe::StripeError => e
+    Rails.logger.error "Stripe billing portal error: #{e.message}"
+    render json: { error: "Payment portal error: #{e.message}" }, status: :bad_request
+  rescue => e
+    Rails.logger.error "Billing portal session error: #{e.message}"
+    render json: { error: "Failed to open payment settings" }, status: :internal_server_error
   end
   
   # GET /api/v1/subscriptions

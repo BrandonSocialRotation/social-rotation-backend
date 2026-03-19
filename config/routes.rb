@@ -162,6 +162,7 @@ Rails.application.routes.draw do
           get 'run_migrations', to: 'subscriptions#run_migrations' # Temporary endpoint to run pending migrations
           post 'checkout_session', to: 'subscriptions#checkout_session'
           post 'checkout_session_for_pending', to: 'subscriptions#checkout_session_for_pending'
+          post 'billing_portal_session', to: 'subscriptions#billing_portal_session'
           post 'cancel', to: 'subscriptions#cancel'
           post 'webhook', to: 'subscriptions#webhook'
         end
