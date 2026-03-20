@@ -114,6 +114,146 @@ namespace :accounts do
     end
   end
 
+  desc "Show account status for a user. Usage: rails accounts:status[email]"
+  task :status, [:email] => :environment do |_t, args|
+    email = args[:email].to_s.strip
+    if email.blank?
+      puts "Usage: rails accounts:status[email]"
+      puts "Example: rails accounts:status[jjharrison1@yahoo.com]"
+      exit 1
+    end
+
+    user = User.find_by(email: email)
+    unless user
+      puts "❌ No user found with email: #{email}"
+      exit 1
+    end
+
+    puts "\n=== ACCOUNT STATUS: #{email} ==="
+    puts "User ID: #{user.id}"
+    puts "Name: #{user.name}"
+    puts "Account ID: #{user.account_id.inspect}"
+    puts "Is Account Admin: #{user.is_account_admin}"
+
+    if user.account_id.nil? || user.account_id == 0
+      puts "\n⚠️  NO ACCOUNT - User has account_id #{user.account_id.inspect}"
+      puts "   This user may have paid but never got an account (webhook/checkout issue)."
+      puts "   Fix: Create account + subscription, or have them re-register."
+      exit 0
+    end
+
+    account = user.account
+    unless account
+      puts "\n❌ Account ID #{user.account_id} not found (orphaned user)"
+      exit 1
+    end
+
+    puts "\nAccount: #{account.name} (ID: #{account.id})"
+    puts "Plan: #{account.plan&.name || 'none'} (plan_id: #{account.plan_id})"
+
+    sub = account.subscription
+    unless sub
+      puts "\n⚠️  NO SUBSCRIPTION - Account has no subscription"
+      puts "   Fix: Create a subscription for this account."
+      exit 0
+    end
+
+    puts "\nSubscription:"
+    puts "  Status: #{sub.status}"
+    puts "  Plan: #{sub.plan&.name}"
+    puts "  Stripe Customer ID: #{sub.stripe_customer_id}"
+    puts "  Stripe Subscription ID: #{sub.stripe_subscription_id}"
+    puts "  Current Period End: #{sub.current_period_end}"
+    puts "  Has Active Subscription?: #{account.has_active_subscription?}"
+
+    if sub.plan&.name == "Free Access"
+      puts "\n⚠️  ON FREE ACCESS PLAN"
+      if sub.current_period_end && sub.current_period_end < Time.current
+        puts "   Subscription EXPIRED: #{sub.current_period_end}"
+        puts "   Fix: Extend current_period_end or upgrade to paid plan."
+      else
+        puts "   If they paid, they may be stuck - upgrade plan to paid."
+      end
+    end
+    puts "\n"
+  end
+
+  desc "List accounts that might be stuck (Free plan, or paid but wrong status)"
+  task stuck: :environment do
+    puts "\n=== POTENTIALLY STUCK ACCOUNTS ==="
+    puts ""
+
+    # Users with account_id 0 or nil (no account)
+    no_account = User.where(account_id: [nil, 0]).where.not(email: nil)
+    if no_account.any?
+      puts "Users with NO ACCOUNT (account_id 0 or nil):"
+      no_account.each { |u| puts "  #{u.email} (ID: #{u.id})" }
+      puts ""
+    end
+
+    # Accounts with Free Access plan
+    free_plan = Plan.find_by(name: "Free Access")
+    if free_plan
+      Subscription.where(plan: free_plan).includes(account: :users).each do |sub|
+        acc = sub.account
+        user = acc.users.first
+        expired = sub.current_period_end && sub.current_period_end < Time.current
+        puts "FREE: #{user&.email || 'no user'} | Account #{acc.id} | #{sub.status} | Expired: #{expired} | End: #{sub.current_period_end}"
+      end
+      puts ""
+    end
+
+    # Accounts with Stripe but subscription status not active/trialing
+    Subscription.where.not(stripe_customer_id: nil).where.not(status: [Subscription::STATUS_ACTIVE, Subscription::STATUS_TRIALING]).each do |sub|
+      user = sub.account.users.first
+      puts "NON-ACTIVE STRIPE: #{user&.email} | Account #{sub.account_id} | Status: #{sub.status} | Plan: #{sub.plan&.name}"
+    end
+
+    puts "\nDone."
+  end
+
+  desc "Upgrade plan for an account. Usage: rails accounts:upgrade_plan[email,plan_name]"
+  task :upgrade_plan, [:email, :plan_name] => :environment do |_t, args|
+    email = args[:email].to_s.strip
+    plan_name = args[:plan_name].to_s.strip
+    if email.blank? || plan_name.blank?
+      puts "Usage: rails accounts:upgrade_plan[email,plan_name]"
+      puts "Example: rails accounts:upgrade_plan[jjharrison1@yahoo.com,Personal]"
+      puts "Plans: #{Plan.pluck(:name).join(', ')}"
+      exit 1
+    end
+
+    user = User.find_by(email: email)
+    unless user
+      puts "❌ User not found: #{email}"
+      exit 1
+    end
+    unless user.account_id.present? && user.account_id > 0
+      puts "❌ User has no account (account_id: #{user.account_id})"
+      exit 1
+    end
+
+    plan = Plan.find_by(name: plan_name)
+    unless plan
+      puts "❌ Plan not found: #{plan_name}"
+      puts "Available: #{Plan.pluck(:name).join(', ')}"
+      exit 1
+    end
+
+    account = user.account
+    sub = account.subscription
+    unless sub
+      puts "❌ Account has no subscription"
+      exit 1
+    end
+
+    old_plan = sub.plan&.name
+    sub.update!(plan: plan)
+    account.update!(plan: plan)
+
+    puts "✅ Upgraded #{email} from #{old_plan} to #{plan.name}"
+  end
+
   desc "Delete a specific account by ID"
   task :delete, [:id] => :environment do |t, args|
     if args[:id].blank?
