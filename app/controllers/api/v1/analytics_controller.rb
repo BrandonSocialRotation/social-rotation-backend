@@ -126,6 +126,9 @@ class Api::V1::AnalyticsController < ApplicationController
       total_comments: valid_metrics.values.sum { |m| (m[:comments] || 0).to_i },
       total_shares: valid_metrics.values.sum { |m| (m[:shares] || 0).to_i },
       total_followers: all_platforms_with_followers.values.sum { |m| (m[:followers] || 0).to_i },
+      total_reach: valid_metrics.values.sum { |m| (m[:reach] || 0).to_i },
+      total_impressions: valid_metrics.values.sum { |m| (m[:impressions] || 0).to_i },
+      total_saves: valid_metrics.values.sum { |m| (m[:saves] || 0).to_i },
       engagement_rate: calculate_engagement_rate(valid_metrics)
     }
   end
@@ -746,7 +749,11 @@ class Api::V1::AnalyticsController < ApplicationController
 
     total_followers = 0
     total_impressions = 0
+    total_reach = 0
     total_engaged = 0
+    total_likes = 0
+    total_comments = 0
+    total_shares = 0
 
     pages.each do |page|
       page_id = page[:id]
@@ -762,25 +769,58 @@ class Api::V1::AnalyticsController < ApplicationController
       end
 
       # Page insights (may require Page with 100+ likes; metrics can be empty for new pages)
+      # page_impressions = total views; page_impressions_unique = unique viewers (reach)
       insights_url = "https://graph.facebook.com/v18.0/#{page_id}/insights"
       insights_params = {
-        metric: 'page_impressions,page_engaged_users',
+        metric: 'page_impressions,page_impressions_unique,page_engaged_users',
         period: 'day',
         since: since_ts,
         until: until_ts,
         access_token: page_token
       }
       insights_resp = HTTParty.get(insights_url, query: insights_params)
-      next unless insights_resp.success?
-
-      insights_data = JSON.parse(insights_resp.body)
-      (insights_data['data'] || []).each do |metric_row|
-        name = metric_row['name']
-        values = metric_row['values'] || []
-        sum = values.sum { |v| v['value'].to_i }
-        total_impressions += sum if name == 'page_impressions'
-        total_engaged += sum if name == 'page_engaged_users'
+      if insights_resp.success?
+        insights_data = JSON.parse(insights_resp.body)
+        (insights_data['data'] || []).each do |metric_row|
+          name = metric_row['name']
+          values = metric_row['values'] || []
+          sum = values.sum { |v| v['value'].to_i }
+          # page_impressions* = total views; page_impressions_unique* = unique viewers (reach)
+          total_impressions += sum if name&.start_with?('page_impressions') && !name.include?('unique')
+          total_reach += sum if name&.include?('page_impressions_unique')
+          total_engaged += sum if name == 'page_engaged_users'
+        end
       end
+
+      # Post-level likes, comments, shares (posts created in date range)
+      posts_url = "https://graph.facebook.com/v18.0/#{page_id}/published_posts"
+      posts_params = {
+        fields: 'reactions.summary(true),comments.summary(true),shares',
+        since: since_ts,
+        until: until_ts,
+        limit: 100,
+        access_token: page_token
+      }
+      page_likes = 0
+      page_comments = 0
+      page_shares = 0
+      posts_resp = HTTParty.get(posts_url, query: posts_params)
+      if posts_resp.success?
+        posts_data = JSON.parse(posts_resp.body)
+        (posts_data['data'] || []).each do |post|
+          # reactions.summary(true) returns { total_count: N }
+          react = post['reactions'] || {}
+          page_likes += (react.dig('summary', 'total_count') || 0).to_i
+          # comments.summary(true) returns { total_count: N }
+          cmt = post['comments'] || {}
+          page_comments += (cmt.dig('summary', 'total_count') || 0).to_i
+          # shares returns { count: N } when post has shares
+          page_shares += (post.dig('shares', 'count') || 0).to_i
+        end
+      end
+      total_likes += page_likes
+      total_comments += page_comments
+      total_shares += page_shares
     end
 
     total_engagement = total_engaged
@@ -788,12 +828,13 @@ class Api::V1::AnalyticsController < ApplicationController
 
     {
       followers: total_followers,
-      reach: total_impressions,
+      reach: total_reach,
+      impressions: total_impressions,
       total_engagement: total_engagement,
       engagement_rate: engagement_rate,
-      likes: 0,
-      comments: 0,
-      shares: 0
+      likes: total_likes,
+      comments: total_comments,
+      shares: total_shares
     }
   rescue => e
     Rails.logger.error "Facebook analytics exception: #{e.class} - #{e.message}"

@@ -48,9 +48,9 @@ class MetaInsightsService
       end
       
       period = 'day'
-      # Get Hootsuite-style metrics (removed impressions and reach as requested)
-      # Note: Instagram API uses 'saves' not 'saved'
-      metric_list = 'likes,comments,saves,profile_views,website_clicks'
+      # Get all available account-level metrics
+      # Note: impressions deprecated Apr 2025; reach available
+      metric_list = 'likes,comments,saves,profile_views,website_clicks,reach'
       
       # Get insights for the specified range
       insights_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}/insights"
@@ -128,13 +128,14 @@ class MetaInsightsService
       
       Rails.logger.info "MetaInsightsService: Fetched data for user #{@user.id} - Followers: #{followers}, Likes: #{metrics_hash['likes'] || 0}, Comments: #{metrics_hash['comments'] || 0}"
       
-      # Calculate Hootsuite-style metrics
+      # Calculate Hootsuite-style metrics (all real data from API)
       likes = metrics_hash['likes'] || 0
       comments = metrics_hash['comments'] || 0
-      shares = 0 # Instagram doesn't provide shares directly, calculate from engagement
+      shares = 0 # Instagram doesn't provide shares; reposts is different
       clicks = metrics_hash['website_clicks'] || 0
-      saves = metrics_hash['saves'] || 0  # Note: API returns 'saves' not 'saved'
+      saves = metrics_hash['saves'] || 0
       profile_visits = metrics_hash['profile_views'] || 0
+      reach = metrics_hash['reach'] || 0
       
       total_engagement = likes + comments + saves
       engagement_rate_percent = followers > 0 ? ((total_engagement.to_f / followers) * 100).round(2) : 0.0
@@ -147,6 +148,7 @@ class MetaInsightsService
         clicks: clicks,
         saves: saves,
         profile_visits: profile_visits,
+        reach: reach,
         total_engagement: total_engagement,
         followers: followers,
         posts_count: posts_count
@@ -286,6 +288,7 @@ class MetaInsightsService
       clicks: 0,
       saves: 0,
       profile_visits: 0,
+      reach: 0,
       total_engagement: 0,
       followers: 0,
       posts_count: 0
