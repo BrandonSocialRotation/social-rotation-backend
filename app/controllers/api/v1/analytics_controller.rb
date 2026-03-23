@@ -792,12 +792,12 @@ class Api::V1::AnalyticsController < ApplicationController
         end
       end
 
-      # Post-level likes, comments, shares (posts created in date range)
+      # Post-level likes, comments, shares (most recent posts - no date filter)
+      # Note: since/until would filter by post CREATION date, so we'd miss engagement on older posts.
+      # We fetch recent posts and sum their total engagement instead.
       posts_url = "https://graph.facebook.com/v18.0/#{page_id}/published_posts"
       posts_params = {
         fields: 'reactions.summary(true),comments.summary(true),shares',
-        since: since_ts,
-        until: until_ts,
         limit: 100,
         access_token: page_token
       }
