@@ -191,7 +191,7 @@ class Api::V1::AnalyticsController < ApplicationController
       diagnostics[:twitter] = {
         connected: true,
         status: 'ready',
-        message: u.twitter_user_id.present? ? 'Twitter connected; analytics will fetch followers and tweet metrics.' : 'Twitter connected; user ID will be fetched on first analytics load. Free tier: 100 tweets/month for tweet metrics.'
+        message: u.twitter_user_id.present? ? 'Twitter/X connected; analytics includes followers, likes, replies, reposts, quotes, impressions and bookmarks when your X API access allows.' : 'Twitter/X connected; user ID loads on first analytics request. Free tier: limited tweet reads per month for metrics.'
       }
     elsif tw_connected && !tw_env_ok
       diagnostics[:twitter] = { connected: true, status: 'env_missing', message: 'Twitter API keys (TWITTER_API_KEY, TWITTER_API_SECRET_KEY) are not set on the server.' }
@@ -314,6 +314,10 @@ class Api::V1::AnalyticsController < ApplicationController
         likes: 0,
         comments: 0,
         shares: 0,
+        reach: 0,
+        impressions: 0,
+        saves: 0,
+        tweet_count: 0,
         engagement_rate: nil,
         total_engagement: 0
       }
@@ -371,6 +375,10 @@ class Api::V1::AnalyticsController < ApplicationController
             likes: 0,
             comments: 0,
             shares: 0,
+            reach: 0,
+            impressions: 0,
+            saves: 0,
+            tweet_count: 0,
             engagement_rate: nil,
             total_engagement: 0
           }
@@ -399,12 +407,16 @@ class Api::V1::AnalyticsController < ApplicationController
         likes: 0,
         comments: 0,
         shares: 0,
+        reach: 0,
+        impressions: 0,
+        saves: 0,
+        tweet_count: 0,
         engagement_rate: nil,
         total_engagement: 0
       }
     end
     
-    # Fetch tweets in the time range
+    # Fetch tweets in the time range (likes, replies, RTs, quotes, impressions, bookmarks when API allows)
     tweets_data = fetch_twitter_tweets(access_token, user_id, start_time, end_time)
     
     # Check for rate limit errors on tweet fetching
@@ -418,6 +430,10 @@ class Api::V1::AnalyticsController < ApplicationController
         likes: 0,
         comments: 0,
         shares: 0,
+        reach: 0,
+        impressions: 0,
+        saves: 0,
+        tweet_count: 0,
         engagement_rate: nil,
         total_engagement: 0
       }
@@ -431,6 +447,10 @@ class Api::V1::AnalyticsController < ApplicationController
         likes: 0,
         comments: 0,
         shares: 0,
+        reach: 0,
+        impressions: 0,
+        saves: 0,
+        tweet_count: 0,
         engagement_rate: nil,
         total_engagement: 0
       }
@@ -444,6 +464,10 @@ class Api::V1::AnalyticsController < ApplicationController
         likes: 0,
         comments: 0,
         shares: 0,
+        reach: 0,
+        impressions: 0,
+        saves: 0,
+        tweet_count: 0,
         engagement_rate: nil,
         total_engagement: 0
       }
@@ -453,10 +477,15 @@ class Api::V1::AnalyticsController < ApplicationController
     total_likes = tweets_data[:likes] || 0
     total_comments = tweets_data[:comments] || 0
     total_shares = tweets_data[:shares] || 0
-    total_engagement = total_likes + total_comments + total_shares
+    total_impressions = tweets_data[:impressions] || 0
+    total_bookmarks = tweets_data[:bookmarks] || 0
+    tweet_count = tweets_data[:tweet_count] || 0
+    total_engagement = total_likes + total_comments + total_shares + total_bookmarks
     
-    # Calculate engagement rate
-    engagement_rate = if followers > 0
+    # Engagement rate: prefer impressions denominator when X returns them; else followers
+    engagement_rate = if total_impressions.positive?
+      ((total_engagement.to_f / total_impressions) * 100).round(2)
+    elsif followers > 0
       ((total_engagement.to_f / followers) * 100).round(2)
     else
       nil
@@ -467,6 +496,10 @@ class Api::V1::AnalyticsController < ApplicationController
       likes: total_likes,
       comments: total_comments,
       shares: total_shares,
+      reach: 0, # X standard API does not expose unique reach; use Impressions card for views
+      impressions: total_impressions,
+      saves: total_bookmarks,
+      tweet_count: tweet_count,
       engagement_rate: engagement_rate,
       total_engagement: total_engagement
     }
@@ -477,84 +510,103 @@ class Api::V1::AnalyticsController < ApplicationController
   end
 
   def fetch_twitter_tweets(access_token, user_id, start_time, end_time)
+    # Request non_public_metrics (impression_count, link clicks) when OAuth user context allows.
+    # Free / Basic tier may reject — fall back to public_metrics only.
+    tweet_fields_full = 'id,created_at,public_metrics,non_public_metrics'
+    tweet_fields_basic = 'id,created_at,public_metrics'
+
+    result = fetch_twitter_tweets_paginated(access_token, user_id, start_time, end_time, tweet_fields_full)
+    if result[:field_authorization_error]
+      Rails.logger.info 'Twitter analytics: Retrying without non_public_metrics (field not authorized)'
+      result = fetch_twitter_tweets_paginated(access_token, user_id, start_time, end_time, tweet_fields_basic)
+    end
+    result.except(:field_authorization_error)
+  end
+
+  # Paginates user tweets and aggregates X/Twitter stats for the selected time range.
+  def fetch_twitter_tweets_paginated(access_token, user_id, start_time, end_time, tweet_fields)
     total_likes = 0
     total_comments = 0
     total_shares = 0
+    total_impressions = 0
+    total_bookmarks = 0
+    tweet_count = 0
     next_token = nil
     request_count = 0
     max_requests = 5 # Limit requests to conserve monthly API quota (100 tweets/month on Free tier)
-    
+
     begin
-      # Fetch tweets with pagination - get metrics directly in the first call to save API quota
       loop do
         request_count += 1
         break if request_count > max_requests
-        
+
         url = "/2/users/#{user_id}/tweets"
         params = {
-          max_results: 100, # Max per request
+          max_results: 100,
           start_time: start_time.iso8601,
           end_time: end_time.iso8601,
-          'tweet.fields' => 'id,created_at,public_metrics' # Get metrics in the same call
+          'tweet.fields' => tweet_fields
         }
         params[:pagination_token] = next_token if next_token.present?
-        
-        # Build query string
+
         query_string = params.map { |k, v| "#{k}=#{CGI.escape(v.to_s)}" }.join('&')
         response = access_token.get("#{url}?#{query_string}")
-        
-        # Check for rate limit errors (429 = Too Many Requests)
-        # Twitter API v2 returns 429 for BOTH rate limits AND monthly caps, but with different titles
+
         if response.code == '429'
           Rails.logger.warn "Twitter API 429 error: #{response.body}"
           error_data = JSON.parse(response.body) rescue {}
-          
-          # Check the title to distinguish between rate limit and monthly cap
           error_title = error_data['title'] || ''
           error_detail = error_data['detail'] || ''
-          
-          # Monthly cap has "UsageCapExceeded" title
           if error_title.include?('UsageCapExceeded') || error_detail.include?('Monthly product cap') || error_detail.include?('monthly')
-            Rails.logger.warn "Twitter monthly cap detected from error response"
             return { error: 'monthly_cap' }
-          else
-            # Regular rate limit (429) - "Too Many Requests"
-            Rails.logger.warn "Twitter temporary rate limit (429) detected"
-            return { error: 'rate_limit_429', message: 'Twitter API rate limit exceeded. Please wait 15 minutes and try again.' }
           end
+          return { error: 'rate_limit_429', message: 'Twitter API rate limit exceeded. Please wait 15 minutes and try again.' }
         end
-        
+
         unless response.is_a?(Net::HTTPSuccess)
+          body = response.body.to_s
+          if twitter_field_authorization_error?(body)
+            return { field_authorization_error: true }
+          end
           error_data = parse_twitter_error(response)
           Rails.logger.error "Twitter API error (#{response.code}): #{error_data[:message]}"
           return { error: error_data[:message] || 'Failed to fetch tweets' }
         end
-        
+
         data = JSON.parse(response.body)
         tweets = data['data'] || []
-        
-        # Aggregate metrics directly from the response (no need for second API call!)
+
         tweets.each do |tweet|
-          metrics = tweet['public_metrics'] || {}
-          total_likes += metrics['like_count']&.to_i || 0
-          total_comments += metrics['reply_count']&.to_i || 0
-          # Shares = retweets + quote tweets
-          total_shares += (metrics['retweet_count']&.to_i || 0) + (metrics['quote_count']&.to_i || 0)
+          pm = tweet['public_metrics'] || {}
+          npm = tweet['non_public_metrics'] || {}
+
+          total_likes += pm['like_count']&.to_i || 0
+          total_comments += pm['reply_count']&.to_i || 0
+          total_shares += (pm['retweet_count']&.to_i || 0) + (pm['quote_count']&.to_i || 0)
+          total_bookmarks += pm['bookmark_count']&.to_i || 0
+          total_impressions += npm['impression_count']&.to_i || 0
         end
-        
-        Rails.logger.info "Twitter analytics: Fetched #{tweets.length} tweets, Total so far - Likes: #{total_likes}, Comments: #{total_comments}, Shares: #{total_shares}"
-        
-        # Check pagination
+
+        tweet_count += tweets.length
+
+        Rails.logger.info "Twitter analytics: Fetched #{tweets.length} tweets (batch), totals — likes: #{total_likes}, replies: #{total_comments}, shares: #{total_shares}, impressions: #{total_impressions}, bookmarks: #{total_bookmarks}"
+
         next_token = data.dig('meta', 'next_token')
         break unless next_token.present?
-        
-        # Safety limit to prevent excessive API usage
+
         break if (total_likes + total_comments + total_shares) > 0 && request_count >= max_requests
       end
-      
-      Rails.logger.info "Twitter analytics final totals - Likes: #{total_likes}, Comments: #{total_comments}, Shares: #{total_shares}"
-      
-      { likes: total_likes, comments: total_comments, shares: total_shares }
+
+      Rails.logger.info "Twitter analytics final — tweets: #{tweet_count}, likes: #{total_likes}, replies: #{total_comments}, shares: #{total_shares}, impressions: #{total_impressions}, bookmarks: #{total_bookmarks}"
+
+      {
+        likes: total_likes,
+        comments: total_comments,
+        shares: total_shares,
+        impressions: total_impressions,
+        bookmarks: total_bookmarks,
+        tweet_count: tweet_count
+      }
     rescue JSON::ParserError => e
       Rails.logger.error "Twitter API JSON parse error: #{e.message}"
       { error: 'Failed to parse Twitter API response' }
@@ -563,6 +615,15 @@ class Api::V1::AnalyticsController < ApplicationController
       Rails.logger.error e.backtrace.join("\n")
       { error: 'Failed to fetch tweet metrics' }
     end
+  end
+
+  def twitter_field_authorization_error?(body)
+    return false if body.blank?
+
+    b = body.downcase
+    b.include?('field authorization') || b.include?('not authorized for field') ||
+      b.include?('unauthorized') && b.include?('non_public') ||
+      b.include?('invalid') && b.include?('tweet.field')
   end
 
   def parse_twitter_error(response)
