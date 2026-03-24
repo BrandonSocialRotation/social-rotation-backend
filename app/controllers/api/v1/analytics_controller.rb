@@ -329,8 +329,7 @@ class Api::V1::AnalyticsController < ApplicationController
     response = access_token.get("/2/users/#{user_id}?user.fields=public_metrics")
     
     followers = 0
-    rate_limited = false
-    
+
     if response.is_a?(Net::HTTPSuccess)
       data = JSON.parse(response.body)
       Rails.logger.info "Twitter user metrics response: #{data.inspect}"
@@ -352,7 +351,6 @@ class Api::V1::AnalyticsController < ApplicationController
       
       # If it's a rate limit (429), use cached value if available
       if response.code == '429'
-        rate_limited = true
         if cached_followers.present?
           followers = cached_followers.to_i
           Rails.logger.info "Twitter rate limit (429) - using cached follower count: #{followers}"
@@ -389,21 +387,8 @@ class Api::V1::AnalyticsController < ApplicationController
                    end_time - 7.days
                  end
     
-    # If we got rate limited on user metrics, return early with helpful message
-    if rate_limited
-      return {
-        message: 'Twitter API rate limit reached',
-        error_code: 'TWITTER_RATE_LIMIT',
-        error_details: 'Twitter API rate limit exceeded. Please wait 15 minutes and try again, or upgrade to Twitter API Basic for higher limits.',
-        followers: followers, # Will be 0 if we couldn't fetch it
-        likes: 0,
-        comments: 0,
-        shares: 0,
-        engagement_rate: nil,
-        total_engagement: 0
-      }
-    end
-    
+    # Do not return early on user-metrics 429 — still fetch tweets; follower count may come from cache
+
     # Fetch tweets in the time range
     tweets_data = fetch_twitter_tweets(access_token, user_id, start_time, end_time)
     
