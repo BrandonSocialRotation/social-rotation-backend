@@ -86,6 +86,7 @@ Rails.application.routes.draw do
       post 'user_info/disconnect_google', to: 'user_info#disconnect_google'
       post 'user_info/disconnect_tiktok', to: 'user_info#disconnect_tiktok'
       post 'user_info/disconnect_youtube', to: 'user_info#disconnect_youtube'
+      post 'user_info/disconnect_pinterest', to: 'user_info#disconnect_pinterest'
       post 'user_info/toggle_instagram', to: 'user_info#toggle_instagram'
       post 'user_info/convert_to_agency', to: 'user_info#convert_to_agency'
       delete 'user_info/delete_test_account', to: 'user_info#delete_test_account'
