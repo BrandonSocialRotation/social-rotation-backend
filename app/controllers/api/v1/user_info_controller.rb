@@ -208,9 +208,9 @@ class Api::V1::UserInfoController < ApplicationController
       render json: { error: 'Failed to fetch Pinterest boards', message: e.message }, status: :internal_server_error
     end
   end
-  
+
   private
-  
+
   # Upload watermark logo to DigitalOcean Spaces
   def upload_watermark_to_spaces(uploaded_file, unique_filename)
     require 'aws-sdk-s3'
@@ -261,6 +261,9 @@ class Api::V1::UserInfoController < ApplicationController
     # Return relative path for database (just the filename, path is handled by User model methods)
     unique_filename
   end
+
+  # Must be public — a prior `private` above made disconnect_* and related routes return 404 in production.
+  public
 
   # GET /api/v1/user_info/connected_accounts
   def connected_accounts
@@ -317,6 +320,17 @@ class Api::V1::UserInfoController < ApplicationController
       has_google_account_name_column: user.respond_to?(:google_account_name),
       has_pinterest_username_column: user.respond_to?(:pinterest_username)
     }
+  end
+
+  # POST /api/v1/social/disconnect  JSON body: { "platform": "facebook" | "twitter" | ... }
+  def disconnect_by_platform
+    platform = params[:platform].to_s
+    allowed = %w[facebook twitter linkedin instagram google tiktok youtube pinterest]
+    unless allowed.include?(platform)
+      return render json: { error: 'Invalid or missing platform' }, status: :unprocessable_entity
+    end
+
+    public_send(:"disconnect_#{platform}")
   end
 
   # POST /api/v1/user_info/disconnect_facebook

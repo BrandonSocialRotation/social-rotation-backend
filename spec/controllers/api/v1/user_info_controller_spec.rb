@@ -225,6 +225,23 @@ RSpec.describe Api::V1::UserInfoController, type: :controller do
     end
   end
 
+  describe 'POST #disconnect_by_platform' do
+    it 'clears Twitter when platform is twitter' do
+      post :disconnect_by_platform, params: { platform: 'twitter' }
+
+      expect(response).to have_http_status(:ok)
+      user.reload
+      expect(user.twitter_oauth_token).to be_nil
+      expect(user.twitter_oauth_token_secret).to be_nil
+    end
+
+    it 'returns unprocessable entity when platform is invalid' do
+      post :disconnect_by_platform, params: { platform: 'unknown' }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
   describe 'POST #disconnect_twitter' do
     it 'clears Twitter connection data' do
       post :disconnect_twitter
