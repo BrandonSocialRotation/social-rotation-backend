@@ -7,7 +7,7 @@ class Api::V1::AnalyticsController < ApplicationController
   end
 
   def instagram_timeseries
-    metric = params[:metric].presence || 'reach'
+    metric = params[:metric].presence || 'likes'
     range = params[:range].presence || '28d'
     service = MetaInsightsService.new(current_user)
     data = service.timeseries(metric, range)
@@ -33,14 +33,22 @@ class Api::V1::AnalyticsController < ApplicationController
         Rails.logger.error "Facebook analytics error: #{e.message}"
         render json: { platform: platform, range: range, metrics: {}, message: e.message }, status: :internal_server_error
       end
-    when 'twitter', 'linkedin'
-      # Placeholder for other platforms - return empty data for now
-      render json: {
-        platform: platform,
-        range: range,
-        metrics: {},
-        message: "#{platform.capitalize} analytics coming soon"
-      }
+    when 'twitter'
+      begin
+        data = fetch_twitter_analytics(current_user, range)
+        render json: { platform: platform, range: range, metrics: data }
+      rescue => e
+        Rails.logger.error "Twitter analytics error: #{e.message}"
+        render json: { platform: platform, range: range, metrics: {}, message: e.message }, status: :internal_server_error
+      end
+    when 'linkedin'
+      begin
+        data = fetch_linkedin_analytics(current_user, range)
+        render json: { platform: platform, range: range, metrics: data }
+      rescue => e
+        Rails.logger.error "LinkedIn analytics error: #{e.message}"
+        render json: { platform: platform, range: range, metrics: {}, message: e.message }, status: :internal_server_error
+      end
     else
       render json: { error: "Unknown platform: #{platform}" }, status: :bad_request
     end
@@ -121,15 +129,11 @@ class Api::V1::AnalyticsController < ApplicationController
       platforms: metrics,
       selected_platforms: platforms_to_fetch.map(&:to_s),
       facebook_page_id: params[:facebook_page_id].presence,
-      total_engagement: valid_metrics.values.sum { |m| (m[:total_engagement] || m[:engagement_rate] || 0).to_f },
       total_likes: valid_metrics.values.sum { |m| (m[:likes] || 0).to_i },
       total_comments: valid_metrics.values.sum { |m| (m[:comments] || 0).to_i },
       total_shares: valid_metrics.values.sum { |m| (m[:shares] || 0).to_i },
       total_followers: all_platforms_with_followers.values.sum { |m| (m[:followers] || 0).to_i },
-      total_reach: valid_metrics.values.sum { |m| (m[:reach] || 0).to_i },
-      total_impressions: valid_metrics.values.sum { |m| (m[:impressions] || 0).to_i },
-      total_saves: valid_metrics.values.sum { |m| (m[:saves] || 0).to_i },
-      engagement_rate: calculate_engagement_rate(valid_metrics)
+      total_saves: valid_metrics.values.sum { |m| (m[:saves] || 0).to_i }
     }
   end
 
@@ -223,7 +227,7 @@ class Api::V1::AnalyticsController < ApplicationController
       begin
         pages = SocialMedia::FacebookService.new(u).fetch_pages
         if pages.present?
-          diagnostics[:facebook] = { connected: true, status: 'working', message: 'Facebook Page(s) linked; insights (reach, engagement) will show for Pages with 100+ likes.' }
+          diagnostics[:facebook] = { connected: true, status: 'working', message: 'Facebook Page(s) linked; post engagement (likes, comments, shares) uses recent published posts.' }
         else
           diagnostics[:facebook] = { connected: true, status: 'no_pages', message: 'No Facebook Pages found. Add a Page you manage and reconnect Facebook.' }
         end
@@ -231,7 +235,7 @@ class Api::V1::AnalyticsController < ApplicationController
         diagnostics[:facebook] = { connected: true, status: 'error', message: "Facebook check failed: #{e.message}" }
       end
     else
-      diagnostics[:facebook] = { connected: false, status: 'not_connected', message: 'Connect Facebook in Profile to see Page analytics (reach, engagement, followers).' }
+      diagnostics[:facebook] = { connected: false, status: 'not_connected', message: 'Connect Facebook in Profile to see Page analytics (followers, likes, comments, shares).' }
     end
 
     # --- Posts count (always from DB) ---
@@ -244,17 +248,6 @@ class Api::V1::AnalyticsController < ApplicationController
   
   private
   
-  def calculate_engagement_rate(metrics)
-    return nil if metrics.empty?
-    
-    total_engagement = metrics.values.sum { |m| (m[:total_engagement] || 0).to_f }
-    total_reach = metrics.values.sum { |m| (m[:reach] || 0).to_i }
-    
-    return nil if total_reach == 0
-    
-    ((total_engagement / total_reach) * 100).round(2)
-  end
-
   def fetch_twitter_analytics(user, range)
     require 'oauth'
     
@@ -300,6 +293,18 @@ class Api::V1::AnalyticsController < ApplicationController
           end
         else
           Rails.logger.warn "Twitter API error fetching user_id: #{response.code} - #{response.body}"
+          err = parse_twitter_error(response)
+          if err[:error_code] == 'TWITTER_V2_PROJECT_REQUIRED'
+            return {
+              message: err[:message],
+              error_code: err[:error_code],
+              help: err[:help],
+              followers: 0,
+              likes: 0,
+              comments: 0,
+              shares: 0
+            }.compact
+          end
         end
       rescue => e
         Rails.logger.error "Twitter API exception fetching user_id: #{e.message}"
@@ -313,9 +318,7 @@ class Api::V1::AnalyticsController < ApplicationController
         followers: 0,
         likes: 0,
         comments: 0,
-        shares: 0,
-        engagement_rate: nil,
-        total_engagement: 0
+        shares: 0
       }
     end
     
@@ -363,15 +366,16 @@ class Api::V1::AnalyticsController < ApplicationController
           followers = cached_followers.to_i
           Rails.logger.info "Twitter API error - using cached follower count: #{followers}"
         else
-          return { 
+          base = {
             message: error_data[:message] || 'Failed to fetch Twitter analytics',
             followers: 0,
             likes: 0,
             comments: 0,
-            shares: 0,
-            engagement_rate: nil,
-            total_engagement: 0
+            shares: 0
           }
+          base[:error_code] = error_data[:error_code] if error_data[:error_code].present?
+          base[:help] = error_data[:help] if error_data[:help].present?
+          return base
         end
       end
     end
@@ -402,9 +406,7 @@ class Api::V1::AnalyticsController < ApplicationController
         followers: followers, # Include followers if we got them
         likes: 0,
         comments: 0,
-        shares: 0,
-        engagement_rate: nil,
-        total_engagement: 0
+        shares: 0
       }
     elsif tweets_data[:error] == 'rate_limit_429'
       Rails.logger.warn "Twitter temporary rate limit (429) on tweet fetching (followers: #{followers})"
@@ -415,9 +417,7 @@ class Api::V1::AnalyticsController < ApplicationController
         followers: followers, # Include followers if we got them
         likes: 0,
         comments: 0,
-        shares: 0,
-        engagement_rate: nil,
-        total_engagement: 0
+        shares: 0
       }
     end
     
@@ -428,9 +428,7 @@ class Api::V1::AnalyticsController < ApplicationController
         followers: followers, # Always include followers even with errors
         likes: 0,
         comments: 0,
-        shares: 0,
-        engagement_rate: nil,
-        total_engagement: 0
+        shares: 0
       }
     end
     
@@ -438,22 +436,12 @@ class Api::V1::AnalyticsController < ApplicationController
     total_likes = tweets_data[:likes] || 0
     total_comments = tweets_data[:comments] || 0
     total_shares = tweets_data[:shares] || 0
-    total_engagement = total_likes + total_comments + total_shares
-    
-    # Calculate engagement rate
-    engagement_rate = if followers > 0
-      ((total_engagement.to_f / followers) * 100).round(2)
-    else
-      nil
-    end
-    
+
     {
       followers: followers,
       likes: total_likes,
       comments: total_comments,
-      shares: total_shares,
-      engagement_rate: engagement_rate,
-      total_engagement: total_engagement
+      shares: total_shares
     }
   rescue => e
     Rails.logger.error "Twitter analytics exception: #{e.class} - #{e.message}"
@@ -553,7 +541,19 @@ class Api::V1::AnalyticsController < ApplicationController
   def parse_twitter_error(response)
     begin
       error_data = JSON.parse(response.body)
-      
+      detail = error_data['detail'].to_s
+      title = error_data['title'].to_s
+
+      # X API v2 rejects Consumer Keys from apps not tied to a Developer Project (or wrong keys in ENV).
+      if detail.include?('attached to a Project') || detail.include?('developer portal') ||
+         title.include?('attached to a Project')
+        return {
+          message: detail.presence || 'Twitter API v2 requires a Developer App created under a Project. Use Consumer Key/Secret from that app in TWITTER_API_KEY and TWITTER_API_SECRET_KEY.',
+          error_code: 'TWITTER_V2_PROJECT_REQUIRED',
+          help: 'In https://developer.twitter.com open your Project → App → Keys. Put API Key + API Key Secret in DigitalOcean, redeploy, disconnect X in the app, connect again.'
+        }
+      end
+
       # Check for monthly cap (UsageCapExceeded)
       if error_data['title'] == 'UsageCapExceeded' || error_data['detail']&.include?('Monthly product cap')
         return {
@@ -606,9 +606,7 @@ class Api::V1::AnalyticsController < ApplicationController
           followers: 0,
           likes: 0,
           comments: 0,
-          shares: 0,
-          engagement_rate: nil,
-          total_engagement: 0
+          shares: 0
         }
       end
       
@@ -665,9 +663,7 @@ class Api::V1::AnalyticsController < ApplicationController
               followers: 0,
               likes: 0,
               comments: 0,
-              shares: 0,
-              engagement_rate: nil,
-              total_engagement: 0
+              shares: 0
             }
           end
         end
@@ -696,9 +692,7 @@ class Api::V1::AnalyticsController < ApplicationController
         followers: followers,
         likes: 0,  # LinkedIn API doesn't provide easy aggregated likes
         comments: 0,  # LinkedIn API doesn't provide easy aggregated comments
-        shares: 0,  # LinkedIn API doesn't provide easy aggregated shares
-        engagement_rate: nil,
-        total_engagement: 0
+        shares: 0  # LinkedIn API doesn't provide easy aggregated shares
       }
     rescue => e
       Rails.logger.error "LinkedIn analytics exception: #{e.class} - #{e.message}"
@@ -707,35 +701,24 @@ class Api::V1::AnalyticsController < ApplicationController
     end
   end
 
-  def fetch_facebook_analytics(user, range, facebook_page_id: nil)
+  def fetch_facebook_analytics(user, _range, facebook_page_id: nil)
     unless user.fb_user_access_key.present?
-      return { message: 'Facebook not connected', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
+      return { message: 'Facebook not connected', followers: 0 }
     end
 
     facebook_service = SocialMedia::FacebookService.new(user)
     pages = facebook_service.fetch_pages
     if pages.blank?
-      return { message: 'No Facebook Pages found. Connect a Page to see analytics.', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
+      return { message: 'No Facebook Pages found. Connect a Page to see analytics.', followers: 0 }
     end
 
     # When facebook_page_id provided, only fetch that page (like scheduler)
     pages = pages.select { |p| p[:id].to_s == facebook_page_id.to_s } if facebook_page_id.present?
     if facebook_page_id.present? && pages.blank?
-      return { message: 'Selected Facebook Page not found. Choose a different page.', followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
+      return { message: 'Selected Facebook Page not found. Choose a different page.', followers: 0 }
     end
 
-    since_ts = case range.to_s
-               when '24h' then 24.hours.ago.to_i
-               when '30d' then 30.days.ago.to_i
-               when '28d' then 28.days.ago.to_i
-               else 7.days.ago.to_i
-               end
-    until_ts = Time.now.to_i
-
     total_followers = 0
-    total_impressions = 0
-    total_reach = 0
-    total_engaged = 0
     total_likes = 0
     total_comments = 0
     total_shares = 0
@@ -751,30 +734,6 @@ class Api::V1::AnalyticsController < ApplicationController
       if page_resp.success?
         data = JSON.parse(page_resp.body)
         total_followers += data['fan_count'].to_i
-      end
-
-      # Page insights (may require Page with 100+ likes; metrics can be empty for new pages)
-      # page_impressions = total views; page_impressions_unique = unique viewers (reach)
-      insights_url = "https://graph.facebook.com/v18.0/#{page_id}/insights"
-      insights_params = {
-        metric: 'page_impressions,page_impressions_unique,page_engaged_users',
-        period: 'day',
-        since: since_ts,
-        until: until_ts,
-        access_token: page_token
-      }
-      insights_resp = HTTParty.get(insights_url, query: insights_params)
-      if insights_resp.success?
-        insights_data = JSON.parse(insights_resp.body)
-        (insights_data['data'] || []).each do |metric_row|
-          name = metric_row['name']
-          values = metric_row['values'] || []
-          sum = values.sum { |v| v['value'].to_i }
-          # page_impressions* = total views; page_impressions_unique* = unique viewers (reach)
-          total_impressions += sum if name&.start_with?('page_impressions') && !name.include?('unique')
-          total_reach += sum if name&.include?('page_impressions_unique')
-          total_engaged += sum if name == 'page_engaged_users'
-        end
       end
 
       # Post-level likes, comments, shares (most recent posts - no date filter)
@@ -808,15 +767,8 @@ class Api::V1::AnalyticsController < ApplicationController
       total_shares += page_shares
     end
 
-    total_engagement = total_engaged
-    engagement_rate = total_followers.positive? ? ((total_engagement.to_f / total_followers) * 100).round(2) : nil
-
     {
       followers: total_followers,
-      reach: total_reach,
-      impressions: total_impressions,
-      total_engagement: total_engagement,
-      engagement_rate: engagement_rate,
       likes: total_likes,
       comments: total_comments,
       shares: total_shares
@@ -824,6 +776,6 @@ class Api::V1::AnalyticsController < ApplicationController
   rescue => e
     Rails.logger.error "Facebook analytics exception: #{e.class} - #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
-    { message: "Facebook analytics error: #{e.message}", followers: 0, reach: 0, total_engagement: 0, engagement_rate: nil }
+    { message: "Facebook analytics error: #{e.message}", followers: 0 }
   end
 end
