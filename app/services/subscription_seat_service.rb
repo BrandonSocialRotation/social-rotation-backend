@@ -19,7 +19,8 @@ class SubscriptionSeatService
 
   def initialize(account)
     @account = account
-    @subscription = account.subscription
+    # account can be nil for some legacy users; avoid NoMethodError in sub-account flows
+    @subscription = account&.subscription
   end
 
   def charge_for_new_seat
