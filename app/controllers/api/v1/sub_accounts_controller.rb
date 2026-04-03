@@ -57,7 +57,9 @@ class Api::V1::SubAccountsController < ApplicationController
     sub_account.role = 'sub_account'
     sub_account.status = 1
     # Default new sub-accounts to read-only client portal unless explicitly disabled
-    sub_account.client_portal_only = true if params.dig(:sub_account, :client_portal_only).nil?
+    if users_table_has_client_portal?
+      sub_account.client_portal_only = true if params.dig(:sub_account, :client_portal_only).nil?
+    end
 
     if sub_account.save
       new_total_message = new_total_notification(current_user.account)
@@ -163,11 +165,15 @@ class Api::V1::SubAccountsController < ApplicationController
   end
 
   def sub_account_params
-    params.require(:sub_account).permit(:name, :email, :password, :password_confirmation, :client_portal_only)
+    permitted = %i[name email password password_confirmation]
+    permitted << :client_portal_only if users_table_has_client_portal?
+    params.require(:sub_account).permit(*permitted)
   end
 
   def sub_account_update_params
-    params.require(:sub_account).permit(:name, :email, :status, :client_portal_only)
+    permitted = %i[name email status]
+    permitted << :client_portal_only if users_table_has_client_portal?
+    params.require(:sub_account).permit(*permitted)
   end
 
   def sub_account_json(user)
@@ -177,7 +183,7 @@ class Api::V1::SubAccountsController < ApplicationController
       email: user.email,
       status: user.status,
       role: user.role,
-      client_portal_only: user.client_portal_only?,
+      client_portal_only: users_table_has_client_portal? ? user.client_portal_only? : false,
       created_at: user.created_at,
       buckets_count: user.buckets.count,
       schedules_count: user.bucket_schedules.count
@@ -193,8 +199,15 @@ class Api::V1::SubAccountsController < ApplicationController
       is_account_admin: user.is_account_admin,
       role: user.role,
       reseller: user.reseller?,
-      client_portal_only: user.client_portal_only?
+      client_portal_only: users_table_has_client_portal? ? user.client_portal_only? : false
     }
+  end
+
+  # Until db:migrate runs in production, client_portal_only column may be missing.
+  def users_table_has_client_portal?
+    return @users_table_has_client_portal if instance_variable_defined?(:@users_table_has_client_portal)
+
+    @users_table_has_client_portal = User.column_names.include?('client_portal_only')
   end
 
   def new_total_notification(account)
