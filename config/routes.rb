@@ -151,6 +151,13 @@ Rails.application.routes.draw do
           post 'switch/:id', to: 'sub_accounts#switch'
         end
       end
+
+      # White-label: public branding by hostname (no auth)
+      namespace :client_portal do
+        get 'branding', to: 'branding#show'
+      end
+      # Agency: map pool domains to client sub-accounts + branding JSON
+      resources :client_portal_domains, only: [:index, :create, :update, :destroy]
       
       # Account management routes
       get 'account/features', to: 'accounts#features'

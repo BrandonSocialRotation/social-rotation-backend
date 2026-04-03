@@ -50,7 +50,7 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
   describe 'GET #instagram_timeseries' do
     context 'with default parameters' do
       it 'returns timeseries data' do
-        allow(mock_service).to receive(:timeseries).with('reach', '28d').and_return([
+        allow(mock_service).to receive(:timeseries).with('likes', '28d').and_return([
           { date: '2024-01-01', value: 100 },
           { date: '2024-01-02', value: 150 }
         ])
@@ -59,7 +59,7 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
         
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
-        expect(json_response['metric']).to eq('reach')
+        expect(json_response['metric']).to eq('likes')
         expect(json_response['range']).to eq('28d')
         expect(json_response['points']).to be_an(Array)
       end
@@ -103,36 +103,58 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
     end
 
     context 'for facebook platform' do
-      it 'returns placeholder message' do
+      it 'returns facebook analytics data' do
+        allow(controller).to receive(:fetch_facebook_analytics).and_return({
+          followers: 200,
+          likes: 12,
+          comments: 3,
+          shares: 1
+        })
+
         get :platform_analytics, params: { platform: 'facebook', range: '7d' }
 
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
         expect(json_response['platform']).to eq('facebook')
         expect(json_response['range']).to eq('7d')
-        expect(json_response['message']).to include('coming soon')
+        expect(json_response['metrics']).to be_present
       end
     end
 
     context 'for twitter platform' do
-      it 'returns placeholder message' do
+      it 'returns twitter analytics data' do
+        allow(controller).to receive(:fetch_twitter_analytics).and_return({
+          followers: 500,
+          likes: 10,
+          comments: 2,
+          shares: 1
+        })
+
         get :platform_analytics, params: { platform: 'twitter', range: '7d' }
 
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
         expect(json_response['platform']).to eq('twitter')
-        expect(json_response['message']).to include('coming soon')
+        expect(json_response['metrics']).to be_present
+        expect(json_response['metrics']['followers']).to eq(500)
       end
     end
 
     context 'for linkedin platform' do
-      it 'returns placeholder message' do
+      it 'returns linkedin analytics data' do
+        allow(controller).to receive(:fetch_linkedin_analytics).and_return({
+          followers: 50,
+          likes: 0,
+          comments: 0,
+          shares: 0
+        })
+
         get :platform_analytics, params: { platform: 'linkedin', range: '7d' }
 
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
         expect(json_response['platform']).to eq('linkedin')
-        expect(json_response['message']).to include('coming soon')
+        expect(json_response['metrics']).to be_present
       end
     end
 
@@ -148,12 +170,37 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
   end
 
   describe 'GET #overall' do
+    before do
+      allow(controller).to receive(:fetch_facebook_analytics).and_return({
+        followers: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        saves: 0
+      })
+      allow(controller).to receive(:fetch_twitter_analytics).and_return({
+        followers: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        saves: 0
+      })
+      allow(controller).to receive(:fetch_linkedin_analytics).and_return({
+        followers: 0,
+        likes: 0,
+        comments: 0,
+        shares: 0
+      })
+    end
+
     context 'with instagram connected' do
       it 'returns aggregated analytics' do
         allow(mock_service).to receive(:summary).with('7d').and_return({
-          impressions: 1000,
-          reach: 800,
-          engagement: 50
+          likes: 10,
+          comments: 5,
+          saves: 2,
+          shares: 0,
+          followers: 100
         })
 
         get :overall, params: { range: '7d' }
@@ -162,14 +209,22 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
         json_response = JSON.parse(response.body)
         expect(json_response['range']).to eq('7d')
         expect(json_response['platforms']).to have_key('instagram')
-        expect(json_response['total_reach']).to eq(800)
-        expect(json_response['total_impressions']).to eq(1000)
-        expect(json_response['total_engagement']).to eq(50)
+        expect(json_response['total_likes']).to eq(10)
+        expect(json_response['total_comments']).to eq(5)
+        expect(json_response['total_saves']).to eq(2)
+        expect(json_response['total_followers']).to eq(100)
       end
     end
 
     context 'without instagram connected' do
-      let(:user_no_instagram) { create(:user, instagram_business_id: nil) }
+      let(:user_no_instagram) do
+        create(:user,
+          instagram_business_id: nil,
+          fb_user_access_key: nil,
+          twitter_oauth_token: nil,
+          twitter_oauth_token_secret: nil,
+          linkedin_access_token: nil)
+      end
       let(:token_no_instagram) { JsonWebToken.encode(user_id: user_no_instagram.id) }
 
       before do
@@ -183,16 +238,18 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
         expect(json_response['platforms']).to eq({})
-        expect(json_response['total_reach']).to eq(0)
+        expect(json_response['total_likes']).to eq(0)
       end
     end
 
     context 'with default range' do
       it 'uses 7d as default range' do
         allow(mock_service).to receive(:summary).with('7d').and_return({
-          impressions: 1000,
-          reach: 800,
-          engagement: 50
+          likes: 1,
+          comments: 0,
+          saves: 0,
+          shares: 0,
+          followers: 1
         })
 
         get :overall
@@ -211,8 +268,8 @@ RSpec.describe Api::V1::AnalyticsController, type: :controller do
 
         expect(response).to have_http_status(:success)
         json_response = JSON.parse(response.body)
-        expect(json_response['platforms']).to eq({})
-        expect(json_response['total_reach']).to eq(0)
+        expect(json_response['platforms']).not_to have_key('instagram')
+        expect(json_response['total_likes']).to eq(0)
       end
     end
   end

@@ -53,13 +53,13 @@ module SocialMedia
     # @param image_path [String] Local path to image
     # @return [String] Media ID
     def upload_media(image_path)
-      consumer_key = ENV['TWITTER_API_KEY'] || ENV['TWITTER_CONSUMER_KEY']
-      consumer_secret = ENV['TWITTER_API_SECRET_KEY'] || ENV['TWITTER_CONSUMER_SECRET']
-      
+      consumer_key = ENV['TWITTER_API_KEY']
+      consumer_secret = ENV['TWITTER_API_SECRET_KEY']
+
       unless consumer_key && consumer_secret
         raise "Twitter API credentials not configured"
       end
-      
+
       consumer = ::OAuth::Consumer.new(
         consumer_key,
         consumer_secret,
@@ -138,9 +138,9 @@ module SocialMedia
     # @param media_id [String] Media ID from upload
     # @return [Hash] Response from Twitter API
     def create_tweet(message, media_id)
-      consumer_key = ENV['TWITTER_API_KEY'] || ENV['TWITTER_CONSUMER_KEY']
-      consumer_secret = ENV['TWITTER_API_SECRET_KEY'] || ENV['TWITTER_CONSUMER_SECRET']
-      
+      consumer_key = ENV['TWITTER_API_KEY']
+      consumer_secret = ENV['TWITTER_API_SECRET_KEY']
+
       # Create OAuth consumer
       consumer = ::OAuth::Consumer.new(
         consumer_key,

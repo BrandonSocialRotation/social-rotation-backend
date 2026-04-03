@@ -22,6 +22,8 @@ class User < ApplicationRecord
   has_many :market_items, through: :user_market_items
   # User can create RSS feeds (only account admins)
   has_many :rss_feeds, dependent: :destroy
+  # White-label hostname + branding for client portal (optional)
+  has_one :client_portal_domain, dependent: :destroy
   
   # VALIDATIONS
   # Email must exist, be unique, and match valid email format with proper domain
@@ -168,6 +170,7 @@ class User < ApplicationRecord
   def can_create_sub_account?
     reseller?
   end
+
   
   # Check if user can manage RSS feeds
   def can_manage_rss_feeds?

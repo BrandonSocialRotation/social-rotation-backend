@@ -14,7 +14,7 @@ RSpec.describe MetaInsightsService do
       it 'returns summary data' do
         result = service.summary('7d')
         expect(result).to be_a(Hash)
-        expect(result).to have_key(:engagement)
+        expect(result).to have_key(:likes)
         expect(result).to have_key(:followers)
       end
     end
@@ -27,7 +27,7 @@ RSpec.describe MetaInsightsService do
       it 'returns mock summary data' do
         result = service.summary('7d')
         expect(result).to be_a(Hash)
-        expect(result).to have_key(:engagement)
+        expect(result).to have_key(:likes)
       end
     end
     
@@ -106,7 +106,7 @@ RSpec.describe MetaInsightsService do
       allow(ENV).to receive(:[]).with('META_APP_SECRET').and_return(nil)
       result = service.summary('7d')
       expect(result).to be_a(Hash)
-      expect(result).to have_key(:reach)
+      expect(result).to have_key(:likes)
     end
 
     it 'generates consistent mock data for same range' do

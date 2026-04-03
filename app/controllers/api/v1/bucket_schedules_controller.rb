@@ -1,5 +1,4 @@
 class Api::V1::BucketSchedulesController < ApplicationController
-  before_action :authenticate_user!
   before_action :set_bucket_schedule, only: [:show, :update, :destroy, :post_now, :skip_image, :skip_image_single, :history, :diagnose]
 
   # GET /api/v1/bucket_schedules
@@ -373,16 +372,10 @@ class Api::V1::BucketSchedulesController < ApplicationController
     }
   end
 
-  private
-
-  def set_bucket_schedule
-    @bucket_schedule = current_user.bucket_schedules.find(params[:id])
-  end
-
   # GET /api/v1/bucket_schedules/:id/diagnose
   # Diagnostic endpoint to show what time a cron string represents
   def diagnose
-    schedule = current_user.bucket_schedules.find(params[:id])
+    schedule = @bucket_schedule
     
     cron_string = schedule.schedule
     timezone = schedule.timezone || schedule.bucket.user.timezone || 'UTC'
@@ -446,6 +439,12 @@ class Api::V1::BucketSchedulesController < ApplicationController
     }
   end
 
+  private
+
+  def set_bucket_schedule
+    @bucket_schedule = current_user.bucket_schedules.find(params[:id])
+  end
+
   def bucket_schedule_params
     params.require(:bucket_schedule).permit(
       :schedule, :schedule_type, :post_to, :description, :twitter_description,
@@ -475,6 +474,8 @@ class Api::V1::BucketSchedulesController < ApplicationController
   end
 
   def bucket_schedule_json(bucket_schedule)
+    return client_portal_bucket_schedule_json(bucket_schedule) if current_user&.client_portal_only?
+
     json = {
       id: bucket_schedule.id,
       schedule: bucket_schedule.schedule,
@@ -537,6 +538,47 @@ class Api::V1::BucketSchedulesController < ApplicationController
     json
   end
 
+  # No bucket names/ids — clients only see schedule + post copy + platforms.
+  def client_portal_bucket_schedule_json(bucket_schedule)
+    json = {
+      id: bucket_schedule.id,
+      schedule: bucket_schedule.schedule,
+      schedule_type: bucket_schedule.schedule_type,
+      post_to: bucket_schedule.post_to,
+      description: bucket_schedule.description,
+      twitter_description: bucket_schedule.twitter_description,
+      times_sent: bucket_schedule.times_sent,
+      name: bucket_schedule.respond_to?(:name) ? bucket_schedule.name : nil,
+      timezone: bucket_schedule.respond_to?(:timezone) ? bucket_schedule.timezone : nil,
+      created_at: bucket_schedule.created_at,
+      updated_at: bucket_schedule.updated_at
+    }
+
+    if bucket_schedule.schedule_type == BucketSchedule::SCHEDULE_TYPE_BUCKET_ROTATION
+      cron_parts = bucket_schedule.schedule.split(' ')
+      if cron_parts.length == 5 && cron_parts[4] != '*'
+        json[:selected_days] = cron_parts[4].split(',').map(&:to_i)
+      else
+        json[:selected_days] = [0, 1, 2, 3, 4, 5, 6]
+      end
+    end
+
+    if bucket_schedule.schedule_items.any?
+      json[:schedule_items] = bucket_schedule.schedule_items.ordered.map do |item|
+        {
+          id: item.id,
+          schedule: item.schedule,
+          description: item.description,
+          twitter_description: item.twitter_description,
+          timezone: item.respond_to?(:timezone) ? item.timezone : nil,
+          position: item.position
+        }
+      end
+    end
+
+    json
+  end
+
   # Parse cron string to datetime
   # Cron format: "minute hour day month weekday"
   # For our use case: "30 14 15 1 *" means Jan 15 at 14:30
@@ -575,6 +617,16 @@ class Api::V1::BucketSchedulesController < ApplicationController
   end
 
   def send_history_json(send_history)
+    if current_user&.client_portal_only?
+      return {
+        id: send_history.id,
+        sent_at: send_history.sent_at,
+        sent_to: send_history.sent_to,
+        sent_to_name: send_history.get_sent_to_name,
+        created_at: send_history.created_at
+      }
+    end
+
     {
       id: send_history.id,
       sent_at: send_history.sent_at,

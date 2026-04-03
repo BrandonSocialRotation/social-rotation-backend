@@ -1,13 +1,14 @@
 class ApplicationController < ActionController::API
   include ActionController::Cookies
+  include ClientPortalAccess
 
   # Skip CSRF for API (use token authentication instead)
   # ActionController::API doesn't have CSRF protection by default
 
-  # Handle authentication
+  # Handle authentication — prepend so it always runs before subscription + client-portal enforcement.
   # Note: Individual controllers can skip this with skip_before_action
-  before_action :authenticate_user!
-  
+  prepend_before_action :authenticate_user!
+
   # Require active subscription for all authenticated routes (except subscription management)
   before_action :require_active_subscription!, unless: :skip_subscription_check?
 
@@ -39,6 +40,9 @@ class ApplicationController < ActionController::API
         render json: { error: 'Unauthorized' }, status: :unauthorized
         return
       end
+
+      enforce_client_portal_restrictions!
+      return if performed?
     else
       # Token is expired or invalid - just return 401, frontend will handle logout
       render json: { error: 'Unauthorized' }, status: :unauthorized

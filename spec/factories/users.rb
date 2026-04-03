@@ -14,6 +14,7 @@ FactoryBot.define do
     is_account_admin { false }
     status { 1 }
     role { 'user' }
+    client_portal_only { false }
     fb_user_access_key { "fb_token_123" }
     instagram_business_id { "ig_business_123" }
     twitter_oauth_token { "twitter_token_123" }

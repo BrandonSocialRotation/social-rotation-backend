@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_01_17_191643) do
+ActiveRecord::Schema[7.1].define(version: 2026_03_30_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -79,6 +79,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_01_17_191643) do
     t.string "linkedin_organization_urn"
     t.string "name"
     t.string "timezone"
+    t.string "pinterest_board_id"
     t.index ["bucket_id"], name: "index_bucket_schedules_on_bucket_id"
     t.index ["bucket_image_id"], name: "index_bucket_schedules_on_bucket_image_id"
   end
@@ -126,6 +127,8 @@ ActiveRecord::Schema[7.1].define(version: 2026_01_17_191643) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.boolean "is_global", default: false, null: false
+    t.bigint "cover_image_id"
+    t.index ["cover_image_id"], name: "index_buckets_on_cover_image_id"
     t.index ["user_id"], name: "index_buckets_on_user_id"
   end
 
@@ -326,8 +329,21 @@ ActiveRecord::Schema[7.1].define(version: 2026_01_17_191643) do
     t.string "youtube_channel_name"
     t.string "password_reset_token"
     t.datetime "password_reset_sent_at"
+    t.boolean "client_portal_only", default: false, null: false
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["password_reset_token"], name: "index_users_on_password_reset_token", unique: true
+  end
+
+  create_table "client_portal_domains", force: :cascade do |t|
+    t.string "hostname", null: false
+    t.bigint "user_id", null: false
+    t.bigint "account_id", null: false
+    t.jsonb "branding", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["hostname"], name: "index_client_portal_domains_on_hostname", unique: true
+    t.index ["account_id"], name: "index_client_portal_domains_on_account_id"
+    t.index ["user_id"], name: "index_client_portal_domains_on_user_id"
   end
 
   create_table "videos", force: :cascade do |t|
@@ -352,6 +368,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_01_17_191643) do
   add_foreign_key "bucket_send_histories", "schedule_items"
   add_foreign_key "bucket_videos", "buckets"
   add_foreign_key "bucket_videos", "videos"
+  add_foreign_key "client_portal_domains", "accounts"
+  add_foreign_key "client_portal_domains", "users"
+  add_foreign_key "buckets", "images", column: "cover_image_id"
   add_foreign_key "buckets", "users"
   add_foreign_key "market_items", "buckets"
   add_foreign_key "market_items", "images", column: "front_image_id"

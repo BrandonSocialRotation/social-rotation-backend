@@ -56,6 +56,8 @@ class Api::V1::SubAccountsController < ApplicationController
     sub_account.is_account_admin = false
     sub_account.role = 'sub_account'
     sub_account.status = 1
+    # Default new sub-accounts to read-only client portal unless explicitly disabled
+    sub_account.client_portal_only = true if params.dig(:sub_account, :client_portal_only).nil?
 
     if sub_account.save
       new_total_message = new_total_notification(current_user.account)
@@ -161,11 +163,11 @@ class Api::V1::SubAccountsController < ApplicationController
   end
 
   def sub_account_params
-    params.require(:sub_account).permit(:name, :email, :password, :password_confirmation)
+    params.require(:sub_account).permit(:name, :email, :password, :password_confirmation, :client_portal_only)
   end
 
   def sub_account_update_params
-    params.require(:sub_account).permit(:name, :email, :status)
+    params.require(:sub_account).permit(:name, :email, :status, :client_portal_only)
   end
 
   def sub_account_json(user)
@@ -175,6 +177,7 @@ class Api::V1::SubAccountsController < ApplicationController
       email: user.email,
       status: user.status,
       role: user.role,
+      client_portal_only: user.client_portal_only?,
       created_at: user.created_at,
       buckets_count: user.buckets.count,
       schedules_count: user.bucket_schedules.count
@@ -188,7 +191,9 @@ class Api::V1::SubAccountsController < ApplicationController
       email: user.email,
       account_id: user.account_id,
       is_account_admin: user.is_account_admin,
-      role: user.role
+      role: user.role,
+      reseller: user.reseller?,
+      client_portal_only: user.client_portal_only?
     }
   end
 

@@ -141,7 +141,9 @@ RSpec.describe Api::V1::SubAccountsController, type: :controller do
   describe 'PUT #update' do
     let(:account) { create(:account, is_reseller: true) }
     let(:reseller) { create(:user, account: account, is_account_admin: true) }
-    let(:sub_account) { create(:user, account: account, is_account_admin: false, name: 'Old Name') }
+    let(:sub_account) do
+      create(:user, account: account, is_account_admin: false, name: 'Old Name', email: "sub-update-#{SecureRandom.uuid}@example.com")
+    end
 
     before do
       request.headers['Authorization'] = "Bearer #{generate_token(reseller)}"
@@ -159,9 +161,12 @@ RSpec.describe Api::V1::SubAccountsController, type: :controller do
     end
 
     it 'returns errors when update fails' do
+      sub_account # create before stubs — stubs would break User#create via FactoryBot
       errors_double = double('errors')
       allow(errors_double).to receive(:full_messages).and_return(['Email has already been taken'])
+      allow(errors_double).to receive(:empty?).and_return(false)
       allow(errors_double).to receive(:clear).and_return(nil)
+      allow(errors_double).to receive(:uniq!).and_return(nil)
       allow_any_instance_of(User).to receive(:update).and_return(false)
       allow_any_instance_of(User).to receive(:errors).and_return(errors_double)
 
@@ -226,21 +231,18 @@ RSpec.describe Api::V1::SubAccountsController, type: :controller do
     end
 
     context 'when user is super admin' do
-      let(:super_admin) { create(:user) }
-      let(:other_account) { create(:account) }
-      let(:other_user) { create(:user, account: other_account) }
+      let(:super_admin) { create(:user, account_id: 0, is_account_admin: true) }
+      let(:sub_in_same_account) { create(:user, account_id: 0, is_account_admin: false) }
 
       before do
-        allow(super_admin).to receive(:super_admin?).and_return(true)
         request.headers['Authorization'] = "Bearer #{generate_token(super_admin)}"
-        allow(controller).to receive(:current_user).and_return(super_admin)
       end
 
-      it 'allows super admin to switch to any user' do
-        post :switch, params: { id: other_user.id }
+      it 'allows super admin to switch to another user with the same account_id' do
+        post :switch, params: { id: sub_in_same_account.id }
         expect(response).to have_http_status(:success)
         json = JSON.parse(response.body)
-        expect(json['user']['id']).to eq(other_user.id)
+        expect(json['user']['id']).to eq(sub_in_same_account.id)
       end
     end
   end

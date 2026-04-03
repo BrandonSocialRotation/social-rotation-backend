@@ -8,8 +8,6 @@ RSpec.describe SocialMedia::TwitterService do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with('TWITTER_API_KEY').and_return('test_key')
     allow(ENV).to receive(:[]).with('TWITTER_API_SECRET_KEY').and_return('test_secret')
-    allow(ENV).to receive(:[]).with('TWITTER_CONSUMER_KEY').and_return('test_key')
-    allow(ENV).to receive(:[]).with('TWITTER_CONSUMER_SECRET').and_return('test_secret')
   end
   
   describe '#initialize' do
@@ -28,7 +26,9 @@ RSpec.describe SocialMedia::TwitterService do
       let(:tweet_response) { double('Net::HTTPSuccess', is_a?: true, code: '200', body: '{"data": {"id": "tweet123"}}') }
       
       before do
-        allow(File).to receive(:exist?).with(image_path).and_return(true)
+        allow(File).to receive(:exist?).and_wrap_original do |method, path|
+          path == image_path ? true : method.call(path)
+        end
         allow(File).to receive(:size).with(image_path).and_return(1000)
         allow(File).to receive(:open).with(image_path, 'rb').and_return(StringIO.new('image data'))
         allow(OAuth::Consumer).to receive(:new).and_return(mock_consumer)
@@ -79,7 +79,9 @@ RSpec.describe SocialMedia::TwitterService do
       
       before do
         allow(service).to receive(:download_image_to_temp).and_return(temp_file)
-        allow(File).to receive(:exist?).with(temp_file.path).and_return(true)
+        allow(File).to receive(:exist?).and_wrap_original do |method, path|
+          path == temp_file.path ? true : method.call(path)
+        end
         allow(File).to receive(:size).with(temp_file.path).and_return(1000)
         allow(File).to receive(:open).with(temp_file.path, 'rb').and_return(StringIO.new('image data'))
         allow(OAuth::Consumer).to receive(:new).and_return(mock_consumer)
@@ -185,7 +187,9 @@ RSpec.describe SocialMedia::TwitterService do
       let(:image_path) { '/tmp/test_image.jpg' }
       
       before do
-        allow(File).to receive(:exist?).with(image_path).and_return(true)
+        allow(File).to receive(:exist?).and_wrap_original do |method, path|
+          path == image_path ? true : method.call(path)
+        end
         allow(File).to receive(:binread).with(image_path).and_return('image data')
         allow(service).to receive(:upload_media).and_return(nil)
       end
@@ -202,9 +206,7 @@ RSpec.describe SocialMedia::TwitterService do
     context 'when Twitter API credentials are not configured' do
       before do
         allow(ENV).to receive(:[]).with('TWITTER_API_KEY').and_return(nil)
-        allow(ENV).to receive(:[]).with('TWITTER_CONSUMER_KEY').and_return(nil)
         allow(ENV).to receive(:[]).with('TWITTER_API_SECRET_KEY').and_return(nil)
-        allow(ENV).to receive(:[]).with('TWITTER_CONSUMER_SECRET').and_return(nil)
       end
 
       it 'raises error when credentials missing' do

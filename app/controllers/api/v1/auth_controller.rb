@@ -449,6 +449,7 @@ class Api::V1::AuthController < ApplicationController
       role: user.role,
       super_admin: user.super_admin?,
       reseller: user.reseller?,
+      client_portal_only: user.client_portal_only?,
       can_access_marketplace: user.can_access_marketplace?,
       can_create_marketplace_item: user.can_create_marketplace_item?,
       can_create_sub_account: user.can_create_sub_account?,

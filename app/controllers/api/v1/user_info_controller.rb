@@ -12,7 +12,7 @@ class Api::V1::UserInfoController < ApplicationController
       
       render json: {
         user: user_data,
-        connected_accounts: get_connected_accounts
+        connected_accounts: current_user.client_portal_only? ? [] : get_connected_accounts
       }
     rescue => e
       Rails.logger.error "User info error: #{e.message}"
@@ -630,6 +630,11 @@ class Api::V1::UserInfoController < ApplicationController
   end
 
   def user_params
+    # Portal users should not hit #update (blocked by ClientPortalAccess); keep empty if that ever changes.
+    if current_user.client_portal_only?
+      return params.fetch(:user, ActionController::Parameters.new).permit
+    end
+
     params.require(:user).permit(
       :name, :email, :timezone, :watermark_opacity, :watermark_scale,
       :watermark_offset_x, :watermark_offset_y, :post_to_instagram
@@ -656,6 +661,32 @@ class Api::V1::UserInfoController < ApplicationController
       'personal'
     else
       'personal' # Default fallback
+    end
+
+    if user.client_portal_only?
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        timezone: user.timezone,
+        role: user.role,
+        account_id: user.account_id,
+        # Neutral label for white-label UI (avoid exposing "agency" / internal account model)
+        account_type: 'client_portal',
+        client_portal_only: true,
+        client_portal_branding: user.client_portal_domain&.branding_payload,
+        reseller: false,
+        is_account_admin: false,
+        # Booleans only (no account names) — dashboard analytics filters & MetaInsightsService
+        facebook_connected: user.fb_user_access_key.present?,
+        twitter_connected: user.twitter_oauth_token.present?,
+        linkedin_connected: user.linkedin_access_token.present?,
+        google_connected: user.google_refresh_token.present?,
+        instagram_connected: user.instagram_business_id.present?,
+        tiktok_connected: user.tiktok_access_token.present?,
+        youtube_connected: user.youtube_access_token.present?,
+        pinterest_connected: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present?) || false
+      }
     end
     
     {

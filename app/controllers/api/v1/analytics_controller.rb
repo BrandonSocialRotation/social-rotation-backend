@@ -294,11 +294,12 @@ class Api::V1::AnalyticsController < ApplicationController
         else
           Rails.logger.warn "Twitter API error fetching user_id: #{response.code} - #{response.body}"
           err = parse_twitter_error(response)
-          if err[:error_code] == 'TWITTER_V2_PROJECT_REQUIRED'
+          if %w[TWITTER_V2_PROJECT_REQUIRED TWITTER_CLIENT_NOT_ENROLLED].include?(err[:error_code])
             return {
               message: err[:message],
               error_code: err[:error_code],
               help: err[:help],
+              registration_url: err[:registration_url],
               followers: 0,
               likes: 0,
               comments: 0,
@@ -375,6 +376,7 @@ class Api::V1::AnalyticsController < ApplicationController
           }
           base[:error_code] = error_data[:error_code] if error_data[:error_code].present?
           base[:help] = error_data[:help] if error_data[:help].present?
+          base[:registration_url] = error_data[:registration_url] if error_data[:registration_url].present?
           return base
         end
       end
@@ -543,10 +545,22 @@ class Api::V1::AnalyticsController < ApplicationController
       error_data = JSON.parse(response.body)
       detail = error_data['detail'].to_s
       title = error_data['title'].to_s
+      reason = error_data['reason'].to_s
+
+      # X returns 403 with reason=client-not-enrolled when the app lacks the required API product
+      # (e.g. Free tier). The detail text often still mentions "Project" — use `reason`, not `detail` alone.
+      if reason == 'client-not-enrolled' || error_data['required_enrollment'].present?
+        enrollment = error_data['required_enrollment'].to_s.presence || 'Appropriate Level of API Access'
+        return {
+          message: "X/Twitter API: this developer app is not enrolled for #{enrollment}. Free access may not include v2 user endpoints; you may need Twitter API Basic or another paid product in the Developer Portal.",
+          error_code: 'TWITTER_CLIENT_NOT_ENROLLED',
+          help: 'Open https://developer.twitter.com/en/portal/dashboard → your Project → Products / pricing. Enroll the app in the access level required for API v2 (user context).',
+          registration_url: error_data['registration_url']
+        }.compact
+      end
 
       # X API v2 rejects Consumer Keys from apps not tied to a Developer Project (or wrong keys in ENV).
-      if detail.include?('attached to a Project') || detail.include?('developer portal') ||
-         title.include?('attached to a Project')
+      if detail.include?('attached to a Project') || title.include?('attached to a Project')
         return {
           message: detail.presence || 'Twitter API v2 requires a Developer App created under a Project. Use Consumer Key/Secret from that app in TWITTER_API_KEY and TWITTER_API_SECRET_KEY.',
           error_code: 'TWITTER_V2_PROJECT_REQUIRED',

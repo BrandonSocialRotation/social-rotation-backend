@@ -47,21 +47,32 @@ class MetaInsightsService
         return mock_summary(range)
       end
       
+      # 1) Account profile first — so we always return follower count even if insights fail
+      account_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}"
+      account_params = {
+        fields: 'followers_count,media_count',
+        access_token: page_token
+      }
+      account_response = HTTParty.get(account_url, query: account_params)
+      unless account_response.success?
+        Rails.logger.error "Instagram Account API error: #{account_response.body}"
+      end
+      account_data = account_response.success? ? JSON.parse(account_response.body) : {}
+      followers = account_data['followers_count']&.to_i || 0
+      posts_count = account_data['media_count']&.to_i || 0
+
       period = 'day'
-      # Get all available account-level metrics
-      # Note: impressions deprecated Apr 2025; reach available
-      metric_list = 'likes,comments,saves,profile_views,website_clicks,reach'
-      
-      # Get insights for the specified range
+      # Avoid `reach` in the same batch — it can invalidate the whole request on some accounts/API versions
+      metric_list = 'likes,comments,saves,profile_views,website_clicks'
+
       insights_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}/insights"
       insights_params = {
         metric: metric_list,
         period: period,
-        metric_type: 'total_value',  # Required for these metrics
+        metric_type: 'total_value',
         access_token: page_token
       }
-      
-      # Add date range
+
       case range.to_s
       when '24h'
         insights_params[:since] = 24.hours.ago.to_i
@@ -73,83 +84,48 @@ class MetaInsightsService
         insights_params[:since] = 28.days.ago.to_i
         insights_params[:until] = Time.now.to_i
       else
-        # Default to 7 days
         insights_params[:since] = 7.days.ago.to_i
         insights_params[:until] = Time.now.to_i
       end
-      
+
       response = HTTParty.get(insights_url, query: insights_params)
-      
-      unless response.success?
-        error_body = response.body
-        Rails.logger.error "Instagram Insights API error: #{error_body}"
-        Rails.logger.error "Instagram Insights API URL: #{insights_url}"
-        Rails.logger.error "Instagram Insights API Params: #{insights_params.except(:access_token).inspect}"
-        # Try to parse error for more details
-        begin
-          error_data = JSON.parse(error_body)
-          Rails.logger.error "Instagram Insights API Error Details: #{error_data.inspect}"
-        rescue
-          # Not JSON, that's fine
-        end
-        return mock_summary(range)
-      end
-      
-      data = JSON.parse(response.body)
-      
-      # Parse insights data
       metrics_hash = {}
-      if data['data']
-        data['data'].each do |metric_data|
-          metric_name = metric_data['name']
-          values = metric_data['values'] || []
-          # Sum all values for the period
-          total = values.sum { |v| v['value'].to_i }
-          metrics_hash[metric_name] = total
+
+      unless response.success?
+        Rails.logger.warn "Instagram Insights batch failed (#{response.code}), retrying with likes,comments,saves only: #{response.body}"
+        insights_params[:metric] = 'likes,comments,saves'
+        response = HTTParty.get(insights_url, query: insights_params)
+      end
+
+      if response.success?
+        data = JSON.parse(response.body)
+        if data['data']
+          data['data'].each do |metric_data|
+            metric_name = metric_data['name']
+            metrics_hash[metric_name] = instagram_insight_metric_sum(metric_data)
+          end
         end
+      else
+        Rails.logger.error "Instagram Insights API error: #{response.body}"
+        Rails.logger.error "Instagram Insights params: #{insights_params.except(:access_token).inspect}"
       end
-      
-      # Get follower count
-      account_url = "https://graph.facebook.com/v18.0/#{@user.instagram_business_id}"
-      account_params = {
-        fields: 'followers_count,media_count',
-        access_token: page_token
-      }
-      account_response = HTTParty.get(account_url, query: account_params)
-      
-      unless account_response.success?
-        Rails.logger.error "Instagram Account API error: #{account_response.body}"
-      end
-      
-      account_data = account_response.success? ? JSON.parse(account_response.body) : {}
-      
-      followers = account_data['followers_count']&.to_i || 0
-      posts_count = account_data['media_count']&.to_i || 0
-      
-      Rails.logger.info "MetaInsightsService: Fetched data for user #{@user.id} - Followers: #{followers}, Likes: #{metrics_hash['likes'] || 0}, Comments: #{metrics_hash['comments'] || 0}"
-      
-      # Calculate Hootsuite-style metrics (all real data from API)
+
       likes = metrics_hash['likes'] || 0
       comments = metrics_hash['comments'] || 0
-      shares = 0 # Instagram doesn't provide shares; reposts is different
+      shares = 0
       clicks = metrics_hash['website_clicks'] || 0
       saves = metrics_hash['saves'] || 0
       profile_visits = metrics_hash['profile_views'] || 0
-      reach = metrics_hash['reach'] || 0
-      
-      total_engagement = likes + comments + saves
-      engagement_rate_percent = followers > 0 ? ((total_engagement.to_f / followers) * 100).round(2) : 0.0
-      
+
+      Rails.logger.info "MetaInsightsService: user #{@user.id} — followers: #{followers}, likes: #{likes}, comments: #{comments}, saves: #{saves}"
+
       {
-        engagement_rate: engagement_rate_percent,
         likes: likes,
         comments: comments,
         shares: shares,
         clicks: clicks,
         saves: saves,
         profile_visits: profile_visits,
-        reach: reach,
-        total_engagement: total_engagement,
         followers: followers,
         posts_count: posts_count
       }
@@ -277,19 +253,32 @@ class MetaInsightsService
     Rails.cache.fetch(key, expires_in: ttl) { yield }
   end
 
+  # Sums daily `values` or reads `total_value` (metric_type=total_value responses)
+  def instagram_insight_metric_sum(metric_data)
+    return 0 unless metric_data.is_a?(Hash)
+    vals = metric_data['values']
+    if vals.is_a?(Array) && vals.any?
+      return vals.sum { |v| (v['value'] || 0).to_i }
+    end
+    tv = metric_data['total_value']
+    if tv.is_a?(Hash)
+      (tv['value'] || 0).to_i
+    elsif tv.is_a?(Numeric)
+      tv.to_i
+    else
+      0
+    end
+  end
+
   def mock_summary(range)
     # Only used as fallback when Instagram API is not available
-    # Returns zeros instead of fake data to indicate no data available
     {
-      engagement_rate: 0.0,
       likes: 0,
       comments: 0,
       shares: 0,
       clicks: 0,
       saves: 0,
       profile_visits: 0,
-      reach: 0,
-      total_engagement: 0,
       followers: 0,
       posts_count: 0
     }
