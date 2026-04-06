@@ -211,6 +211,8 @@ class Api::V1::SubAccountsController < ApplicationController
   end
 
   def new_total_notification(account)
+    return nil unless account
+
     sub = account.subscription
     return nil unless sub&.plan
     return nil unless sub.plan.respond_to?(:supports_per_user_pricing) && sub.plan.supports_per_user_pricing
