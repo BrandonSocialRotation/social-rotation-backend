@@ -134,7 +134,27 @@ class User < ApplicationRecord
   def get_absolute_watermark_logo_path
     watermark_logo ? Rails.root.join("public/storage/#{rails_env}/#{id}/watermarks/#{watermark_logo}").to_s : ''
   end
-  
+
+  # White-label favicon (uploaded on White label settings; same URL pattern as watermark, different folder)
+  def get_favicon_logo
+    return '' unless respond_to?(:favicon_logo) && favicon_logo
+
+    favicon_path = "#{rails_env}/#{id}/favicons/#{favicon_logo}"
+
+    if Rails.env.production?
+      backend_url = ENV['BACKEND_URL'] || ENV['API_BASE_URL'] || 'https://new-social-rotation-backend-qzyk8.ondigitalocean.app'
+      backend_url = backend_url.chomp('/')
+      require 'cgi'
+      "#{backend_url}/api/v1/images/proxy?path=#{CGI.escape(favicon_path)}"
+    else
+      "/storage/#{favicon_path}"
+    end
+  end
+
+  def get_absolute_favicon_logo_path
+    favicon_logo ? Rails.root.join("public/storage/#{rails_env}/#{id}/favicons/#{favicon_logo}").to_s : ''
+  end
+
   # ACCOUNT/RESELLER METHODS
   
   # Check if user is a super admin (account_id = 0)

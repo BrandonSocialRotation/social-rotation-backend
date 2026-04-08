@@ -1,6 +1,19 @@
 class Api::V1::UserInfoController < ApplicationController
   before_action :authenticate_user!
 
+  # Registrar zones allowed for agency white-label (matches product domain pool)
+  ALLOWED_WHITE_LABEL_DOMAINS = %w[
+    contentrotation.com
+    contentrotator.com
+    postrotation.com
+    postrotator.com
+    secureorderforms.com
+    secureorderformsdev.com
+    socialrotation.app
+    socialrotation.com
+    socialrotation.dev
+  ].freeze
+
   # GET /api/v1/user_info
   def show
     begin
@@ -25,16 +38,32 @@ class Api::V1::UserInfoController < ApplicationController
   end
 
   # PATCH /api/v1/user_info
+  # Body may include :user (profile) and/or :white_label (agency account branding fields)
   def update
-    if current_user.update(user_params)
+    if params.key?(:white_label)
+      wl_response = apply_white_label_update
+      return wl_response if wl_response
+    end
+
+    if params.key?(:user)
+      if current_user.update(user_params)
+        msg = params.key?(:white_label) ? 'Profile and white label settings updated successfully' : 'User information updated successfully'
+        render json: {
+          user: user_json(current_user),
+          message: msg
+        }
+      else
+        render json: {
+          errors: current_user.errors.full_messages
+        }, status: :unprocessable_entity
+      end
+    elsif params.key?(:white_label)
       render json: {
         user: user_json(current_user),
-        message: 'User information updated successfully'
+        message: 'White label settings updated successfully'
       }
     else
-      render json: {
-        errors: current_user.errors.full_messages
-      }, status: :unprocessable_entity
+      render json: { error: 'Nothing to update' }, status: :unprocessable_entity
     end
   end
 
@@ -161,6 +190,67 @@ class Api::V1::UserInfoController < ApplicationController
     end
   end
 
+  # POST /api/v1/user_info/favicon — white-label favicon (agency admins)
+  def update_favicon
+    unless (current_user.reseller? || current_user.super_admin?) && current_user.is_account_admin?
+      return render json: { error: 'Only agency administrators can upload a favicon' }, status: :forbidden
+    end
+
+    begin
+      if params[:favicon_logo].present? && (params[:favicon_logo] == '' || params[:favicon_logo] == 'null')
+        current_user.update!(favicon_logo: nil) if current_user.respond_to?(:favicon_logo=)
+        return render json: {
+          user: user_json(current_user),
+          message: 'Favicon removed successfully'
+        }
+      end
+
+      if params[:favicon_logo].present? && params[:favicon_logo].respond_to?(:read)
+        uploaded_file = params[:favicon_logo]
+        max_size = 5 * 1024 * 1024
+        if uploaded_file.size > max_size
+          return render json: {
+            error: "File size must be less than 5MB. Your file is #{(uploaded_file.size.to_f / 1024 / 1024).round(2)}MB."
+          }, status: :bad_request
+        end
+
+        file_extension = File.extname(uploaded_file.original_filename).downcase
+        valid_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico']
+        ok_type = uploaded_file.content_type&.start_with?('image/') ||
+                  uploaded_file.content_type == 'image/x-icon' ||
+                  uploaded_file.content_type == 'image/vnd.microsoft.icon'
+        unless ok_type && valid_extensions.include?(file_extension)
+          return render json: {
+            error: 'Please upload a valid image or .ico file (PNG, JPG, GIF, WEBP, ICO)'
+          }, status: :bad_request
+        end
+
+        unique_filename = "#{SecureRandom.uuid}#{file_extension}"
+
+        if Rails.env.production?
+          spaces_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+          if spaces_key.present?
+            upload_favicon_to_spaces(uploaded_file, unique_filename)
+          else
+            return render json: { error: 'Storage not configured' }, status: :internal_server_error
+          end
+        else
+          upload_favicon_locally(uploaded_file, unique_filename)
+        end
+
+        current_user.update!(favicon_logo: unique_filename) if current_user.respond_to?(:favicon_logo=)
+      end
+
+      render json: {
+        user: user_json(current_user),
+        message: 'Favicon updated successfully'
+      }
+    rescue => e
+      Rails.logger.error "Favicon update error: #{e.message}"
+      render json: { error: 'Failed to update favicon', message: e.message }, status: :internal_server_error
+    end
+  end
+
   # GET /api/v1/user_info/facebook_pages
   def facebook_pages
     unless current_user.fb_user_access_key.present?
@@ -259,6 +349,47 @@ class Api::V1::UserInfoController < ApplicationController
     end
     
     # Return relative path for database (just the filename, path is handled by User model methods)
+    unique_filename
+  end
+
+  def upload_favicon_to_spaces(uploaded_file, unique_filename)
+    require 'aws-sdk-s3'
+
+    access_key = ENV['DO_SPACES_KEY'] || ENV['DIGITAL_OCEAN_SPACES_KEY']
+    secret_key = ENV['DO_SPACES_SECRET'] || ENV['DIGITAL_OCEAN_SPACES_SECRET']
+    endpoint = ENV['DO_SPACES_ENDPOINT'] || ENV['DIGITAL_OCEAN_SPACES_ENDPOINT'] || 'https://sfo2.digitaloceanspaces.com'
+    region = ENV['DO_SPACES_REGION'] || ENV['DIGITAL_OCEAN_SPACES_REGION'] || 'sfo2'
+    bucket_name = ENV['DO_SPACES_BUCKET'] || ENV['DIGITAL_OCEAN_SPACES_NAME']
+
+    s3_client = Aws::S3::Client.new(
+      access_key_id: access_key,
+      secret_access_key: secret_key,
+      endpoint: endpoint,
+      region: region,
+      force_path_style: false
+    )
+
+    key = "#{Rails.env}/#{current_user.id}/favicons/#{unique_filename}"
+    uploaded_file.rewind if uploaded_file.respond_to?(:rewind)
+    body = uploaded_file.read
+    s3_client.put_object(
+      bucket: bucket_name,
+      key: key,
+      body: body,
+      acl: 'public-read',
+      content_type: uploaded_file.content_type.presence || 'image/png'
+    )
+    key
+  end
+
+  def upload_favicon_locally(uploaded_file, unique_filename)
+    upload_dir = Rails.root.join('public', 'storage', Rails.env.to_s, current_user.id.to_s, 'favicons')
+    FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
+    file_path = upload_dir.join(unique_filename)
+    uploaded_file.rewind if uploaded_file.respond_to?(:rewind)
+    File.open(file_path, 'wb') do |file|
+      file.write(uploaded_file.read)
+    end
     unique_filename
   end
 
@@ -629,6 +760,34 @@ class Api::V1::UserInfoController < ApplicationController
     end
   end
 
+  def apply_white_label_update
+    unless (current_user.reseller? || current_user.super_admin?) && current_user.is_account_admin?
+      return render json: { error: 'Only agency administrators can update white label settings' }, status: :forbidden
+    end
+
+    acc = current_user.account
+    return render json: { error: 'No account found' }, status: :unprocessable_entity unless acc
+
+    wl = white_label_params
+    if wl[:top_level_domain].present? && !ALLOWED_WHITE_LABEL_DOMAINS.include?(wl[:top_level_domain])
+      return render json: { errors: ['Top level domain must be one of the approved domains'] }, status: :unprocessable_entity
+    end
+
+    unless acc.update(wl)
+      return render json: { errors: acc.errors.full_messages }, status: :unprocessable_entity
+    end
+
+    nil
+  end
+
+  def white_label_params
+    params.fetch(:white_label, {}).permit(
+      :top_level_domain, :business_name, :software_title,
+      :business_address, :business_city, :business_state,
+      :business_country, :business_postal_code
+    )
+  end
+
   def user_params
     # Portal users should not hit #update (blocked by ClientPortalAccess); keep empty if that ever changes.
     if current_user.client_portal_only?
@@ -733,7 +892,27 @@ class Api::V1::UserInfoController < ApplicationController
         channel_id: user.youtube_channel_id,
         channel_name: (user.respond_to?(:youtube_channel_name) && user.youtube_channel_name.present?) ? user.youtube_channel_name : nil
       } : nil,
-      pinterest_account: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present? && user.respond_to?(:pinterest_username) && user.pinterest_username.present?) ? { username: user.pinterest_username } : nil
+      pinterest_account: (user.respond_to?(:pinterest_access_token) && user.pinterest_access_token.present? && user.respond_to?(:pinterest_username) && user.pinterest_username.present?) ? { username: user.pinterest_username } : nil,
+      white_label: white_label_payload(user)
+    }
+  end
+
+  def white_label_payload(user)
+    return nil unless user.account
+    return nil unless (user.reseller? || user.super_admin?) && user.is_account_admin?
+
+    a = user.account
+    {
+      top_level_domain: a.top_level_domain,
+      business_name: a.business_name,
+      software_title: a.software_title,
+      business_address: a.business_address,
+      business_city: a.business_city,
+      business_state: a.business_state,
+      business_country: a.business_country,
+      business_postal_code: a.business_postal_code,
+      logo_url: user.get_watermark_logo,
+      favicon_url: user.get_favicon_logo
     }
   end
   

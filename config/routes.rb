@@ -81,6 +81,7 @@ Rails.application.routes.draw do
       patch 'user_info', to: 'user_info#update'
       get 'user_info/support', to: 'user_info#support'
       post 'user_info/watermark', to: 'user_info#update_watermark'
+      post 'user_info/favicon', to: 'user_info#update_favicon'
       get 'user_info/connected_accounts', to: 'user_info#connected_accounts'
       post 'user_info/disconnect_facebook', to: 'user_info#disconnect_facebook'
       post 'user_info/disconnect_twitter', to: 'user_info#disconnect_twitter'

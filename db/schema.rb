@@ -37,6 +37,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_30_120000) do
     t.string "support_email"
     t.text "terms_conditions"
     t.text "privacy_policy"
+    t.string "business_name"
+    t.string "software_title"
+    t.string "business_address"
+    t.string "business_city"
+    t.string "business_state"
+    t.string "business_country"
+    t.string "business_postal_code"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "plan_id"
@@ -330,6 +337,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_03_30_120000) do
     t.string "password_reset_token"
     t.datetime "password_reset_sent_at"
     t.boolean "client_portal_only", default: false, null: false
+    t.string "favicon_logo"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["password_reset_token"], name: "index_users_on_password_reset_token", unique: true
   end
