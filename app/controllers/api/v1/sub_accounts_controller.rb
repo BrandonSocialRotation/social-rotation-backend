@@ -19,7 +19,8 @@ class Api::V1::SubAccountsController < ApplicationController
     end
     
     render json: {
-      sub_accounts: sub_accounts.map { |user| sub_account_json(user) }
+      sub_accounts: sub_accounts.map { |user| sub_account_json(user) },
+      account_top_level_domain: current_user.account&.top_level_domain
     }
   end
 

@@ -1,19 +1,6 @@
 class Api::V1::UserInfoController < ApplicationController
   before_action :authenticate_user!
 
-  # Registrar zones allowed for agency white-label (matches product domain pool)
-  ALLOWED_WHITE_LABEL_DOMAINS = %w[
-    contentrotation.com
-    contentrotator.com
-    postrotation.com
-    postrotator.com
-    secureorderforms.com
-    secureorderformsdev.com
-    socialrotation.app
-    socialrotation.com
-    socialrotation.dev
-  ].freeze
-
   # GET /api/v1/user_info
   def show
     begin
@@ -40,14 +27,14 @@ class Api::V1::UserInfoController < ApplicationController
   # PATCH /api/v1/user_info
   # Body may include :user (profile) and/or :white_label (agency account branding fields)
   def update
-    if params.key?(:white_label)
+    if white_label_request?
       wl_response = apply_white_label_update
       return wl_response if wl_response
     end
 
     if params.key?(:user)
       if current_user.update(user_params)
-        msg = params.key?(:white_label) ? 'Profile and white label settings updated successfully' : 'User information updated successfully'
+        msg = white_label_request? ? 'Profile and white label settings updated successfully' : 'User information updated successfully'
         render json: {
           user: user_json(current_user),
           message: msg
@@ -57,7 +44,7 @@ class Api::V1::UserInfoController < ApplicationController
           errors: current_user.errors.full_messages
         }, status: :unprocessable_entity
       end
-    elsif params.key?(:white_label)
+    elsif white_label_request?
       render json: {
         user: user_json(current_user),
         message: 'White label settings updated successfully'
@@ -761,31 +748,53 @@ class Api::V1::UserInfoController < ApplicationController
   end
 
   def apply_white_label_update
-    unless (current_user.reseller? || current_user.super_admin?) && current_user.is_account_admin?
+    unless white_label_editor?
       return render json: { error: 'Only agency administrators can update white label settings' }, status: :forbidden
     end
 
     acc = current_user.account
+    if acc.nil? && current_user.super_admin? && current_user.account_id.to_i == Account::SUPER_ADMIN_ACCOUNT_ID
+      acc = Account.ensure_platform_account_for_super_admins!
+    end
     return render json: { error: 'No account found' }, status: :unprocessable_entity unless acc
 
     wl = white_label_params
-    if wl[:top_level_domain].present? && !ALLOWED_WHITE_LABEL_DOMAINS.include?(wl[:top_level_domain])
+    if wl[:top_level_domain].present? && !WhiteLabelRegistrar::DOMAINS.include?(wl[:top_level_domain])
       return render json: { errors: ['Top level domain must be one of the approved domains'] }, status: :unprocessable_entity
     end
 
     unless acc.update(wl)
+      Rails.logger.warn "[WhiteLabel] account_id=#{acc.id} update failed: #{acc.errors.full_messages.join('; ')}"
       return render json: { errors: acc.errors.full_messages }, status: :unprocessable_entity
     end
 
     nil
   end
 
+  # Reseller account admins, or any super admin (uses platform account id 0 for settings).
+  def white_label_editor?
+    return true if current_user.super_admin?
+    (current_user.reseller? || current_user.super_admin?) && current_user.is_account_admin?
+  end
+
+  def white_label_request?
+    params.key?(:white_label) || params.dig(:user_info, :white_label).present?
+  end
+
   def white_label_params
-    params.fetch(:white_label, {}).permit(
+    raw = params[:white_label]
+    raw = params.dig(:user_info, :white_label) if raw.blank?
+    raw = {} if raw.blank?
+    permitted = raw.is_a?(ActionController::Parameters) ? raw : ActionController::Parameters.new(raw)
+    h = permitted.permit(
       :top_level_domain, :business_name, :software_title,
       :business_address, :business_city, :business_state,
       :business_country, :business_postal_code
-    )
+    ).to_unsafe_h
+    if h['top_level_domain'].present?
+      h['top_level_domain'] = h['top_level_domain'].to_s.strip.downcase.sub(/\Awww\./, '')
+    end
+    h.symbolize_keys
   end
 
   def user_params
@@ -833,7 +842,7 @@ class Api::V1::UserInfoController < ApplicationController
         # Neutral label for white-label UI (avoid exposing "agency" / internal account model)
         account_type: 'client_portal',
         client_portal_only: true,
-        client_portal_branding: user.client_portal_domain&.branding_payload,
+        client_portal_branding: user.client_portal_domain&.resolved_branding_payload,
         reseller: false,
         is_account_admin: false,
         # Booleans only (no account names) — dashboard analytics filters & MetaInsightsService
@@ -898,8 +907,12 @@ class Api::V1::UserInfoController < ApplicationController
   end
 
   def white_label_payload(user)
+    if user.super_admin? && user.account_id.to_i == Account::SUPER_ADMIN_ACCOUNT_ID && user.account.nil?
+      Account.ensure_platform_account_for_super_admins!
+      user.association(:account).reset
+    end
     return nil unless user.account
-    return nil unless (user.reseller? || user.super_admin?) && user.is_account_admin?
+    return nil unless white_label_viewer?(user)
 
     a = user.account
     {
@@ -914,6 +927,11 @@ class Api::V1::UserInfoController < ApplicationController
       logo_url: user.get_watermark_logo,
       favicon_url: user.get_favicon_logo
     }
+  end
+
+  def white_label_viewer?(user)
+    return true if user.super_admin?
+    (user.reseller? || user.super_admin?) && user.is_account_admin?
   end
   
   # Fetch YouTube channel name if missing (non-blocking)

@@ -239,6 +239,32 @@ RSpec.describe Api::V1::AuthController, type: :controller do
           'reseller'
         )
       end
+
+      it 'includes merged client_portal_branding for client portal users' do
+        agency_account = create(:account, is_reseller: true, software_title: 'Agency Branded App', top_level_domain: 'contentrotator.com')
+        create(:subscription, account: agency_account)
+        create(:user, account: agency_account, is_account_admin: true, role: 'reseller')
+        portal_client = create(:user,
+                               account: agency_account,
+                               email: 'portal_client@example.com',
+                               password: 'password123',
+                               password_confirmation: 'password123',
+                               client_portal_only: true,
+                               role: 'sub_account',
+                               is_account_admin: false)
+        create(:client_portal_domain,
+               user: portal_client,
+               account: agency_account,
+               hostname: 'portal.contentrotator.com',
+               branding: {})
+
+        post :login, params: { email: 'portal_client@example.com', password: 'password123' }
+
+        expect(response).to have_http_status(:ok)
+        json_response = JSON.parse(response.body)
+        expect(json_response['user']['client_portal_only']).to be true
+        expect(json_response['user']['client_portal_branding']['app_name']).to eq('Agency Branded App')
+      end
     end
 
     context 'with invalid credentials' do

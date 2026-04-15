@@ -1,4 +1,8 @@
 class Account < ApplicationRecord
+  # Super admins use users.account_id = 0 with no row here historically — that breaks white label / FKs.
+  # This id is the shared "platform" account for super-admin agency settings (white label, client portal domains).
+  SUPER_ADMIN_ACCOUNT_ID = 0
+
   # Associations
   has_many :users, dependent: :nullify
   has_one :account_feature, dependent: :destroy
@@ -74,9 +78,35 @@ class Account < ApplicationRecord
   
   # Check if account is super admin (account_id = 0)
   def super_admin_account?
-    id == 0
+    id == SUPER_ADMIN_ACCOUNT_ID
   end
-  
+
+  # Ensures the platform account exists for users with account_id 0 (super admins).
+  def self.ensure_platform_account_for_super_admins!
+    acc = find_by(id: SUPER_ADMIN_ACCOUNT_ID)
+    return acc if acc
+
+    create!(
+      id: SUPER_ADMIN_ACCOUNT_ID,
+      name: 'Platform administrator',
+      is_reseller: true
+    )
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+    find(SUPER_ADMIN_ACCOUNT_ID)
+  end
+
+  # Default branding for client portal / public branding API — from agency White label settings + admin user assets.
+  # Domain-specific ClientPortalDomain#branding JSON overrides these per hostname.
+  def agency_default_branding_hash
+    admin = users.where(is_account_admin: true).order(:id).first
+    {
+      app_name: software_title.presence || business_name.presence || name,
+      logo_url: admin&.get_watermark_logo.presence,
+      favicon_url: (admin&.respond_to?(:favicon_logo) && admin&.favicon_logo.present?) ? admin.get_favicon_logo : nil,
+      primary_color: nil
+    }.compact.symbolize_keys
+  end
+
   private
   
   def create_default_features

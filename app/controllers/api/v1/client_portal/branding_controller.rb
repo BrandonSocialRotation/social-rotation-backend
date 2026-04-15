@@ -15,7 +15,7 @@ class Api::V1::ClientPortal::BrandingController < ApplicationController
 
     render json: {
       hostname: domain.hostname,
-      branding: domain.branding_payload,
+      branding: domain.resolved_branding_payload,
       app_name: domain.display_name
     }
   end

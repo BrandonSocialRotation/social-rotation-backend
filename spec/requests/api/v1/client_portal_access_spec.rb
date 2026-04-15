@@ -3,7 +3,7 @@
 require 'rails_helper'
 
 RSpec.describe 'Client portal access', type: :request do
-  let(:account) { create(:account, is_reseller: true) }
+  let(:account) { create(:account, is_reseller: true, top_level_domain: 'contentrotator.com') }
   let!(:subscription) { create(:subscription, account: account) }
   let(:agency) { create(:user, account: account, account_id: account.id, is_account_admin: true, role: 'reseller') }
   let(:client) do
@@ -127,13 +127,28 @@ RSpec.describe 'Client portal access', type: :request do
       create(:client_portal_domain,
              user: client,
              account: account,
-             hostname: 'portal.example.test',
+             hostname: 'portal.contentrotator.com',
              branding: { 'app_name' => 'Agency Co', 'primary_color' => '#112233' })
 
-      get '/api/v1/client_portal/branding', params: { hostname: 'portal.example.test' }
+      get '/api/v1/client_portal/branding', params: { hostname: 'portal.contentrotator.com' }
       expect(response).to have_http_status(:ok)
       json = JSON.parse(response.body)
       expect(json['branding']['app_name']).to eq('Agency Co')
+    end
+
+    it 'merges account white-label defaults when domain JSON has no app_name' do
+      account.update!(software_title: 'From Account Settings', name: 'Fallback Name')
+      create(:client_portal_domain,
+             user: client,
+             account: account,
+             hostname: 'bare.contentrotator.com',
+             branding: {})
+
+      get '/api/v1/client_portal/branding', params: { hostname: 'bare.contentrotator.com' }
+      expect(response).to have_http_status(:ok)
+      json = JSON.parse(response.body)
+      expect(json['branding']['app_name']).to eq('From Account Settings')
+      expect(json['app_name']).to eq('From Account Settings')
     end
   end
 end

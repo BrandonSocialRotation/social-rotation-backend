@@ -1,41 +1,65 @@
-# Be sure to restart your server when you modify this file.
+# frozen_string_literal: true
 
-# Avoid CORS issues when API is called from the frontend app.
-# Handle Cross-Origin Resource Sharing (CORS) in order to accept cross-origin Ajax requests.
+# Be sure to restart your server when you modify this file.
+#
+# Avoid CORS issues when API is called from the React frontend (dev + production).
+# White-label: agencies use custom hostnames (e.g. https://subaccount.contentrotator.com).
+# Add every public frontend origin that should call this API:
+#   ALLOWED_FRONTEND_ORIGINS — comma-separated, e.g.
+#     https://app.agency1.com,https://portal.agency2.com,https://sub.client.com
+#   FRONTEND_URL — optional; can be one URL or comma-separated (same format).
+# Production still allows any https://*.ondigitalocean.app for default DO app URLs.
 
 # Read more: https://github.com/cyu/rack-cors
 
+module CorsOrigins
+  module_function
+
+  def from_env(*keys)
+    keys.flat_map { |key| split_origins(ENV[key]) }.uniq
+  end
+
+  def split_origins(raw)
+    return [] if raw.blank?
+
+    raw.to_s.split(',').filter_map do |piece|
+      o = piece.to_s.strip.sub(%r{/+\z}, '')
+      o.presence
+    end
+  end
+end
+
 Rails.application.config.middleware.insert_before 0, Rack::Cors do
   allow do
-    # Allow requests from React frontend (development and production)
-        origins_list = [
-          "http://localhost:3001",
-          "http://127.0.0.1:3001",
-          "http://localhost:3002",  # Additional port if 3001 is in use
-          "http://127.0.0.1:3002",
-          "https://social-rotation-frontend.onrender.com",  # Old Render frontend
-          "https://social-rotation-frontend.ondigitalocean.app",  # DigitalOcean frontend (generic)
-          "https://social-rotation-frontend-f4mwb.ondigitalocean.app",  # Actual deployed frontend URL
-          "https://my.socialrotation.app"  # Custom domain
-        ]
-    origins_list << ENV['FRONTEND_URL'] if ENV['FRONTEND_URL'].present?
-    
+    origins_list = [
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+      'http://localhost:3002', # Additional port if 3001 is in use
+      'http://127.0.0.1:3002',
+      'https://social-rotation-frontend.onrender.com', # Old Render frontend
+      'https://social-rotation-frontend.ondigitalocean.app', # DigitalOcean frontend (generic)
+      'https://social-rotation-frontend-f4mwb.ondigitalocean.app', # Actual deployed frontend URL
+      'https://my.socialrotation.app' # Custom domain
+    ]
+
+    origins_list.concat(CorsOrigins.from_env('FRONTEND_URL', 'ALLOWED_FRONTEND_ORIGINS'))
+
     # In development, allow any localhost port
     if Rails.env.development?
-      origins_list << /http:\/\/localhost:\d+/
-      origins_list << /http:\/\/127\.0\.0\.1:\d+/
+      origins_list << %r{\Ahttp://localhost:\d+\z}
+      origins_list << %r{\Ahttp://127\.0\.0\.1:\d+\z}
     end
-    
+
     # In production, allow any DigitalOcean App Platform subdomain
     if Rails.env.production?
-      origins_list << /https:\/\/.*\.ondigitalocean\.app/
+      origins_list << %r{\Ahttps://.*\.ondigitalocean\.app\z}
     end
-    
+
     origins origins_list
 
-    resource "*",
-      headers: :any,
-      methods: [:get, :post, :put, :patch, :delete, :options, :head],
-      credentials: true
+    resource '*',
+             headers: :any,
+             methods: %i[get post put patch delete options head],
+             credentials: true
   end
 end

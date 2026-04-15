@@ -440,7 +440,7 @@ class Api::V1::AuthController < ApplicationController
 
   # Format user data for JSON response (exclude sensitive fields)
   def user_json(user)
-    {
+    data = {
       id: user.id,
       name: user.name,
       email: user.email,
@@ -457,5 +457,9 @@ class Api::V1::AuthController < ApplicationController
       can_access_rss_feeds: user.can_access_rss_feeds?,
       created_at: user.created_at
     }
+    if user.client_portal_only? && user.client_portal_domain
+      data[:client_portal_branding] = user.client_portal_domain.resolved_branding_payload
+    end
+    data
   end
 end
