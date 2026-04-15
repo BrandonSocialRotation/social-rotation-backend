@@ -18,9 +18,13 @@ class Api::V1::SubAccountsController < ApplicationController
       sub_accounts = current_user.account_users.where.not(is_account_admin: true)
     end
     
+    acc = current_user.account
+    tld = if acc&.has_attribute?(:top_level_domain)
+            acc.read_attribute(:top_level_domain)
+          end
     render json: {
       sub_accounts: sub_accounts.map { |user| sub_account_json(user) },
-      account_top_level_domain: current_user.account&.top_level_domain
+      account_top_level_domain: tld
     }
   end
 

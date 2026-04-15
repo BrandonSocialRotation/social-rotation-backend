@@ -770,6 +770,13 @@ class Api::V1::UserInfoController < ApplicationController
       return render json: { errors: ['Top level domain must be one of the approved domains'] }, status: :unprocessable_entity
     end
 
+    wl = white_label_attributes_for_account(acc, wl)
+    if wl.empty? && white_label_params.present?
+      return render json: {
+        errors: ['Server database is missing white-label columns. Deploy the latest migrations (rails db:migrate).']
+      }, status: :unprocessable_entity
+    end
+
     unless acc.update(wl)
       Rails.logger.warn "[WhiteLabel] account_id=#{acc.id} update failed: #{acc.errors.full_messages.join('; ')}"
       return render json: { errors: acc.errors.full_messages }, status: :unprocessable_entity
@@ -926,18 +933,22 @@ class Api::V1::UserInfoController < ApplicationController
     return nil unless white_label_viewer?(user)
 
     a = user.account
-    {
-      top_level_domain: a.top_level_domain,
-      business_name: a.business_name,
-      software_title: a.software_title,
-      business_address: a.business_address,
-      business_city: a.business_city,
-      business_state: a.business_state,
-      business_country: a.business_country,
-      business_postal_code: a.business_postal_code,
+    keys = %i[
+      top_level_domain business_name software_title business_address
+      business_city business_state business_country business_postal_code
+    ]
+    data = keys.index_with do |attr|
+      a.has_attribute?(attr) ? a.read_attribute(attr) : nil
+    end
+    data.merge(
       logo_url: user.get_watermark_logo,
       favicon_url: user.get_favicon_logo
-    }
+    )
+  end
+
+  # Production DB may lag migrations; only assign columns that exist on accounts.
+  def white_label_attributes_for_account(account, wl)
+    wl.stringify_keys.select { |k, _v| account.has_attribute?(k) }.symbolize_keys
   end
 
   def white_label_viewer?(user)

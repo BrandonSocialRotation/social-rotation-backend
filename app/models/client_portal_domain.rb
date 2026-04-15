@@ -52,7 +52,9 @@ class ClientPortalDomain < ApplicationRecord
     return if hostname.blank?
 
     host = hostname.to_s.downcase.strip.sub(/\Awww\./, '')
-    zone = account&.top_level_domain.to_s.strip.downcase.presence
+    zone = if account&.has_attribute?(:top_level_domain)
+             account.read_attribute(:top_level_domain).to_s.strip.downcase.presence
+           end
     allowed = WhiteLabelRegistrar::DOMAINS
 
     if zone.present?

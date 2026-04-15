@@ -104,8 +104,10 @@ class Account < ApplicationRecord
   # Domain-specific ClientPortalDomain#branding JSON overrides these per hostname.
   def agency_default_branding_hash
     admin = users.where(is_account_admin: true).order(:id).first
+    title = has_attribute?(:software_title) ? software_title : nil
+    biz = has_attribute?(:business_name) ? business_name : nil
     {
-      app_name: software_title.presence || business_name.presence || name,
+      app_name: title.presence || biz.presence || name,
       logo_url: admin&.get_watermark_logo.presence,
       favicon_url: (admin&.respond_to?(:favicon_logo) && admin&.favicon_logo.present?) ? admin.get_favicon_logo : nil,
       primary_color: nil
