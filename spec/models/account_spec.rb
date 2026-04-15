@@ -34,6 +34,20 @@ RSpec.describe Account, type: :model do
     end
   end
 
+  describe '.ensure_platform_account_for_super_admins!' do
+    it 'creates id 0 once and returns it on repeat calls' do
+      Account.where(id: Account::SUPER_ADMIN_ACCOUNT_ID).delete_all
+
+      first = described_class.ensure_platform_account_for_super_admins!
+      expect(first).to be_present
+      expect(first.id).to eq(Account::SUPER_ADMIN_ACCOUNT_ID)
+
+      second = described_class.ensure_platform_account_for_super_admins!
+      expect(second.id).to eq(first.id)
+      expect(Account.where(id: Account::SUPER_ADMIN_ACCOUNT_ID).count).to eq(1)
+    end
+  end
+
   # TEST: Callbacks create default account features
   describe 'callbacks' do
     it 'creates default account features after creation' do

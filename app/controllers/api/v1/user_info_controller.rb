@@ -755,6 +755,13 @@ class Api::V1::UserInfoController < ApplicationController
     acc = current_user.account
     if acc.nil? && current_user.super_admin? && current_user.account_id.to_i == Account::SUPER_ADMIN_ACCOUNT_ID
       acc = Account.ensure_platform_account_for_super_admins!
+      unless acc
+        Rails.logger.error '[WhiteLabel] Platform account id 0 could not be created or loaded'
+        return render json: {
+          error: 'Could not initialize platform account',
+          message: 'Contact support or run database migrations. Check logs for [PlatformAccount].'
+        }, status: :unprocessable_entity
+      end
     end
     return render json: { error: 'No account found' }, status: :unprocessable_entity unless acc
 
@@ -908,8 +915,12 @@ class Api::V1::UserInfoController < ApplicationController
 
   def white_label_payload(user)
     if user.super_admin? && user.account_id.to_i == Account::SUPER_ADMIN_ACCOUNT_ID && user.account.nil?
-      Account.ensure_platform_account_for_super_admins!
-      user.association(:account).reset
+      acc = Account.ensure_platform_account_for_super_admins!
+      if acc
+        user.association(:account).reset
+      else
+        Rails.logger.error '[WhiteLabel] GET: platform account missing for super admin'
+      end
     end
     return nil unless user.account
     return nil unless white_label_viewer?(user)

@@ -82,6 +82,7 @@ class Account < ApplicationRecord
   end
 
   # Ensures the platform account exists for users with account_id 0 (super admins).
+  # Never call find(0) in a rescue path — if create fails, find raises RecordNotFound → 500.
   def self.ensure_platform_account_for_super_admins!
     acc = find_by(id: SUPER_ADMIN_ACCOUNT_ID)
     return acc if acc
@@ -91,8 +92,12 @@ class Account < ApplicationRecord
       name: 'Platform administrator',
       is_reseller: true
     )
-  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
-    find(SUPER_ADMIN_ACCOUNT_ID)
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
+    Rails.logger.warn "[PlatformAccount] create race/invalid: #{e.class}: #{e.message}"
+    find_by(id: SUPER_ADMIN_ACCOUNT_ID)
+  rescue ActiveRecord::StatementInvalid => e
+    Rails.logger.error "[PlatformAccount] DB error: #{e.message}"
+    find_by(id: SUPER_ADMIN_ACCOUNT_ID)
   end
 
   # Default branding for client portal / public branding API — from agency White label settings + admin user assets.
