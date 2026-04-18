@@ -35,20 +35,24 @@ class Api::V1::UserInfoController < ApplicationController
     if params.key?(:user)
       if current_user.update(user_params)
         msg = white_label_request? ? 'Profile and white label settings updated successfully' : 'User information updated successfully'
-        render json: {
+        body = {
           user: user_json(current_user),
           message: msg
         }
+        body[:white_label_update_meta] = @white_label_save_meta if @white_label_save_meta
+        render json: body
       else
         render json: {
           errors: current_user.errors.full_messages
         }, status: :unprocessable_entity
       end
     elsif white_label_request?
-      render json: {
+      body = {
         user: user_json(current_user),
         message: 'White label settings updated successfully'
       }
+      body[:white_label_update_meta] = @white_label_save_meta if @white_label_save_meta
+      render json: body
     else
       render json: { error: 'Nothing to update' }, status: :unprocessable_entity
     end
@@ -766,21 +770,32 @@ class Api::V1::UserInfoController < ApplicationController
     return render json: { error: 'No account found' }, status: :unprocessable_entity unless acc
 
     wl = white_label_params
+    requested_keys = wl.keys.map(&:to_s)
     if wl[:top_level_domain].present? && !WhiteLabelRegistrar::DOMAINS.include?(wl[:top_level_domain])
       return render json: { errors: ['Top level domain must be one of the approved domains'] }, status: :unprocessable_entity
     end
 
-    wl = white_label_attributes_for_account(acc, wl)
-    if wl.empty? && white_label_params.present?
+    filtered_wl = white_label_attributes_for_account(acc, wl)
+    dropped_keys = requested_keys - filtered_wl.keys.map(&:to_s)
+    if dropped_keys.any?
+      Rails.logger.warn "[WhiteLabel] account_id=#{acc.id} fields not persisted (missing accounts table columns?): #{dropped_keys.join(', ')}"
+    end
+
+    if filtered_wl.empty? && white_label_params.present?
       return render json: {
         errors: ['Server database is missing white-label columns. Deploy the latest migrations (rails db:migrate).']
       }, status: :unprocessable_entity
     end
 
-    unless acc.update(wl)
+    unless acc.update(filtered_wl)
       Rails.logger.warn "[WhiteLabel] account_id=#{acc.id} update failed: #{acc.errors.full_messages.join('; ')}"
       return render json: { errors: acc.errors.full_messages }, status: :unprocessable_entity
     end
+
+    @white_label_save_meta = {
+      persisted_keys: filtered_wl.keys.map(&:to_s),
+      dropped_keys: dropped_keys
+    }
 
     nil
   end
