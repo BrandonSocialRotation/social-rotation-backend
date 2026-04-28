@@ -53,6 +53,10 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     # In production, allow any DigitalOcean App Platform subdomain
     if Rails.env.production?
       origins_list << %r{\Ahttps://.*\.ondigitalocean\.app\z}
+      # Any subdomain under registrar pool zones (wildcard DNS + App domains) — no per-client env entry.
+      WhiteLabelRegistrar::DOMAINS.each do |zone|
+        origins_list << /\Ahttps:\/\/[^\/]+\.#{Regexp.escape(zone)}\z/
+      end
     end
 
     origins origins_list
