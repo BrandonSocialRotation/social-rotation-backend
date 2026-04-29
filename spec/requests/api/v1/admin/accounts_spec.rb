@@ -33,6 +33,7 @@ RSpec.describe 'Api::V1::Admin::Accounts', type: :request do
         'account_id',
         'account_title',
         'account_kind',
+        'billing_summary',
         'main_users',
         'sub_accounts'
       )
@@ -71,6 +72,34 @@ RSpec.describe 'Api::V1::Admin::Accounts', type: :request do
       expect(group['main_users'].map { |u| u['username'] }).to include('owner@grouped.test')
       expect(group['sub_accounts'].map { |u| u['username'] }).to include('client@grouped.test')
       expect(group['sub_accounts'].first['role']).to match(/Sub-account/)
+    end
+
+    it 'includes plan name, amount, and billing interval when subscription exists' do
+      Account.find_or_create_by!(id: Account::SUPER_ADMIN_ACCOUNT_ID) do |a|
+        a.name = 'Platform administrator'
+        a.is_reseller = true
+      end
+      super_user = create(:user, account_id: Account::SUPER_ADMIN_ACCOUNT_ID, email: 'super3@test.com', status: 1)
+
+      plan = create(:plan, name: 'Pro Stack', price_cents: 4900, supports_per_user_pricing: false)
+      paid_agency = create(:account, is_reseller: true, name: 'Paid Agency')
+      create(:subscription, account: paid_agency, plan: plan, billing_period: 'monthly', status: Subscription::STATUS_ACTIVE)
+
+      create(:user,
+             account_id: paid_agency.id,
+             is_account_admin: true,
+             email: 'paid-owner@test.com',
+             status: 1)
+
+      token = JsonWebToken.encode(user_id: super_user.id)
+      get '/api/v1/admin/accounts', headers: { 'Authorization' => "Bearer #{token}" }
+
+      json = JSON.parse(response.body)
+      group = json['groups'].find { |g| g['account_title'] == 'Paid Agency' }
+      expect(group['billing_summary']).to include('Pro Stack').and include('$49.00/month')
+
+      main = group['main_users'].find { |u| u['username'] == 'paid-owner@test.com' }
+      expect(main['account_type']).to include('Agency').and include('Pro Stack').and include('$49.00/month')
     end
   end
 end
