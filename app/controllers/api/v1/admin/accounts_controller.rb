@@ -125,6 +125,11 @@ class Api::V1::Admin::AccountsController < ApplicationController
       else ''
       end
 
+    # Free Access rows keep plan.name until the customer upgrades; past-due period still reads as that plan.
+    if plan.name == 'Free Access' && sub.current_period_end.present? && sub.current_period_end < Time.current
+      status_note += ' · expired'
+    end
+
     "#{plan.name} · #{amount}#{status_note}"
   end
 
