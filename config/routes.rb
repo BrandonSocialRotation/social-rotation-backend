@@ -153,6 +153,11 @@ Rails.application.routes.draw do
         end
       end
 
+      # Super admin: platform-wide user/account overview
+      namespace :admin do
+        resources :accounts, only: [:index]
+      end
+
       # White-label: public branding by hostname (no auth)
       namespace :client_portal do
         get 'branding', to: 'branding#show'
